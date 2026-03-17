@@ -1,3 +1,5 @@
+export type PlotSizingMode = "native" | "fit_to_draw_area";
+
 export interface PlotAsset {
   id: string;
   kind: "uploaded_svg" | "built_in_pattern";
@@ -21,6 +23,7 @@ export interface PlotRun {
   status: "pending" | "plotting" | "capturing" | "completed" | "failed";
   purpose: "normal" | "diagnostic";
   capture_mode: "auto" | "skip";
+  sizing_mode: PlotSizingMode;
   created_at: string;
   updated_at: string;
   asset: PlotAsset;

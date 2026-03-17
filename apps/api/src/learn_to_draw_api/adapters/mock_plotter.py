@@ -22,7 +22,7 @@ class MockPlotter:
         driver: str = "mock-plotter",
         available: bool = True,
         origin_delay_s: float = 0.35,
-        fail_on_return_to_origin: bool = False,
+        fail_on_walk_home: bool = False,
         plot_delay_s: float = 0.9,
         fail_on_plot: bool = False,
         test_action_delay_s: float = 0.25,
@@ -34,7 +34,7 @@ class MockPlotter:
         self._busy = False
         self._error: Optional[str] = None
         self._origin_delay_s = origin_delay_s
-        self._fail_on_return_to_origin = fail_on_return_to_origin
+        self._fail_on_walk_home = fail_on_walk_home
         self._plot_delay_s = plot_delay_s
         self._fail_on_plot = fail_on_plot
         self._test_action_delay_s = test_action_delay_s
@@ -85,20 +85,20 @@ class MockPlotter:
             details=dict(self._details),
         )
 
-    def return_to_origin(self) -> None:
+    def walk_home(self) -> None:
         self._ensure_ready()
         self._busy = True
         self._error = None
-        self._details["last_action"] = "return_to_origin"
+        self._details["last_action"] = "walk_home"
         self._details["last_action_status"] = "in_progress"
         self._touch()
         try:
             time.sleep(self._origin_delay_s)
-            if self._fail_on_return_to_origin:
-                self._error = "Mock plotter failed to return to origin."
+            if self._fail_on_walk_home:
+                self._error = "Mock plotter failed to walk home."
                 self._details["last_action_status"] = "failed"
                 raise HardwareOperationError(self._error)
-            self._details["position"] = "origin"
+            self._details["position"] = "walk_home"
             self._details["last_action_status"] = "succeeded"
         finally:
             self._busy = False

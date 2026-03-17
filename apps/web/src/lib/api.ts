@@ -2,13 +2,19 @@ import type {
   CameraCaptureResponse,
   HardwareStatus,
   LatestCaptureResponse,
+  PlotterCalibration,
+  PlotterCalibrationResponse,
   PlotterCommandResponse,
+  PlotterDeviceSettings,
+  PlotterWorkspace,
+  PlotterWorkspaceResponse,
 } from "../types/hardware";
 import type {
   LatestPlotRunResponse,
   PlotAsset,
   PlotRun,
   PlotRunListResponse,
+  PlotSizingMode,
 } from "../types/plotting";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -38,8 +44,8 @@ export function fetchLatestCapture() {
   return requestJson<LatestCaptureResponse>("/api/captures/latest");
 }
 
-export function returnPlotterToOrigin() {
-  return requestJson<PlotterCommandResponse>("/api/plotter/return-to-origin", {
+export function walkPlotterHome() {
+  return requestJson<PlotterCommandResponse>("/api/plotter/walk-home", {
     method: "POST",
   });
 }
@@ -64,6 +70,47 @@ export function setPlotterPenHeights(penPosUp: number, penPosDown: number) {
       pen_pos_up: penPosUp,
       pen_pos_down: penPosDown,
     }),
+  });
+}
+
+export function fetchPlotterCalibration() {
+  return requestJson<PlotterCalibration>("/api/plotter/calibration");
+}
+
+export function fetchPlotterDevice() {
+  return requestJson<PlotterDeviceSettings>("/api/plotter/device");
+}
+
+export function setPlotterCalibration(nativeResFactor: number) {
+  return requestJson<PlotterCalibrationResponse>("/api/plotter/calibration", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      native_res_factor: nativeResFactor,
+    }),
+  });
+}
+
+export function fetchPlotterWorkspace() {
+  return requestJson<PlotterWorkspace>("/api/plotter/workspace");
+}
+
+export function setPlotterWorkspace(workspace: {
+  page_width_mm: number;
+  page_height_mm: number;
+  margin_left_mm: number;
+  margin_top_mm: number;
+  margin_right_mm: number;
+  margin_bottom_mm: number;
+}) {
+  return requestJson<PlotterWorkspaceResponse>("/api/plotter/workspace", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(workspace),
   });
 }
 
@@ -94,7 +141,11 @@ export function createPatternAsset(patternId: string) {
 
 export function createPlotRun(
   assetId: string,
-  options?: { purpose?: "normal" | "diagnostic"; capture_mode?: "auto" | "skip" },
+  options?: {
+    purpose?: "normal" | "diagnostic";
+    capture_mode?: "auto" | "skip";
+    sizing_mode?: PlotSizingMode;
+  },
 ) {
   return requestJson<PlotRun>("/api/plot-runs", {
     method: "POST",
@@ -105,6 +156,7 @@ export function createPlotRun(
       asset_id: assetId,
       purpose: options?.purpose ?? "normal",
       capture_mode: options?.capture_mode ?? "auto",
+      sizing_mode: options?.sizing_mode ?? "native",
     }),
   });
 }

@@ -17,7 +17,7 @@ class PlotterAdapter(Protocol):
     def get_status(self) -> DeviceStatus:
         ...
 
-    def return_to_origin(self) -> None:
+    def walk_home(self) -> None:
         ...
 
     def set_pen_heights(self, *, pen_pos_up: int, pen_pos_down: int) -> None:

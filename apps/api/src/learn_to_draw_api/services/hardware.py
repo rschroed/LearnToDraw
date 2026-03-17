@@ -9,11 +9,21 @@ from learn_to_draw_api.models import (
     HardwareBusyError,
     HardwareStatus,
     LatestCaptureResponse,
+    PlotterCalibration,
+    PlotterCalibrationRequest,
+    PlotterCalibrationResponse,
     PlotterCommandResponse,
+    PlotterDeviceSettings,
     PlotterPenHeightsRequest,
     PlotterTestAction,
+    PlotterWorkspace,
+    PlotterWorkspaceRequest,
+    PlotterWorkspaceResponse,
 )
 from learn_to_draw_api.services.captures import CaptureStore
+from learn_to_draw_api.services.plotter_calibration import PlotterCalibrationService
+from learn_to_draw_api.services.plotter_device_settings import PlotterDeviceSettingsService
+from learn_to_draw_api.services.plotter_workspace import PlotterWorkspaceService
 
 
 class HardwareService:
@@ -23,10 +33,16 @@ class HardwareService:
         plotter: PlotterAdapter,
         camera: CameraAdapter,
         capture_store: CaptureStore,
+        calibration_service: PlotterCalibrationService,
+        device_settings_service: PlotterDeviceSettingsService,
+        workspace_service: PlotterWorkspaceService,
     ) -> None:
         self._plotter = plotter
         self._camera = camera
         self._capture_store = capture_store
+        self._calibration_service = calibration_service
+        self._device_settings_service = device_settings_service
+        self._workspace_service = workspace_service
         self._plotter_lock = Lock()
         self._camera_lock = Lock()
 
@@ -51,13 +67,13 @@ class HardwareService:
             camera=self._camera.get_status(),
         )
 
-    def return_plotter_to_origin(self) -> PlotterCommandResponse:
+    def walk_plotter_home(self) -> PlotterCommandResponse:
         if not self._plotter_lock.acquire(blocking=False):
             raise HardwareBusyError("Plotter is busy.")
         try:
-            self._plotter.return_to_origin()
+            self._plotter.walk_home()
             return PlotterCommandResponse(
-                message="Plotter returned to origin.",
+                message="Plotter walked home.",
                 status=self._plotter.get_status(),
             )
         finally:
@@ -89,6 +105,51 @@ class HardwareService:
             return PlotterCommandResponse(
                 message="Plotter pen heights updated.",
                 status=self._plotter.get_status(),
+            )
+        finally:
+            self._plotter_lock.release()
+
+    def get_plotter_calibration(self) -> PlotterCalibration:
+        return self._calibration_service.current()
+
+    def get_plotter_device_settings(self) -> PlotterDeviceSettings:
+        return self._device_settings_service.current()
+
+    def set_plotter_calibration(
+        self,
+        request: PlotterCalibrationRequest,
+    ) -> PlotterCalibrationResponse:
+        if not self._plotter_lock.acquire(blocking=False):
+            raise HardwareBusyError("Plotter is busy.")
+        try:
+            persisted = self._calibration_service.save_axidraw_native_res_factor(request)
+            apply_calibration = getattr(self._plotter, "apply_persisted_calibration", None)
+            if callable(apply_calibration):
+                apply_calibration(
+                    native_res_factor=persisted.driver_calibration["native_res_factor"],
+                    motion_scale=persisted.motion_scale,
+                )
+            return PlotterCalibrationResponse(
+                message="Plotter calibration updated.",
+                calibration=self._calibration_service.current(),
+            )
+        finally:
+            self._plotter_lock.release()
+
+    def get_plotter_workspace(self) -> PlotterWorkspace:
+        return self._workspace_service.current()
+
+    def set_plotter_workspace(
+        self,
+        request: PlotterWorkspaceRequest,
+    ) -> PlotterWorkspaceResponse:
+        if not self._plotter_lock.acquire(blocking=False):
+            raise HardwareBusyError("Plotter is busy.")
+        try:
+            workspace = self._workspace_service.save(request)
+            return PlotterWorkspaceResponse(
+                message="Plotter workspace updated.",
+                workspace=workspace,
             )
         finally:
             self._plotter_lock.release()

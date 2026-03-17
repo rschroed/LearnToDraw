@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../src/app/App";
 
@@ -38,6 +38,12 @@ const axidrawHardwareStatus = {
     details: {
       ...hardwareStatus.plotter.details,
       api_surface: "installed_axidrawinternal_compat",
+      plot_api_supported: false,
+      manual_api_supported: true,
+      config_source: "vendor_default",
+      calibration_source: "vendor_default",
+      native_res_factor: 1016,
+      motion_scale: 1,
       pen_tuning: {
         pen_pos_up: 60,
         pen_pos_down: 30,
@@ -47,6 +53,99 @@ const axidrawHardwareStatus = {
       last_test_action_status: null,
     },
   },
+};
+
+const defaultCalibration = {
+  driver: "axidraw",
+  motion_scale: 1,
+  driver_calibration: {
+    native_res_factor: 1016,
+  },
+  updated_at: "2026-03-15T20:00:00Z",
+  source: "vendor_default" as const,
+};
+
+const defaultWorkspace = {
+  plotter_bounds_mm: {
+    width_mm: 210,
+    height_mm: 297,
+  },
+  page_size_mm: {
+    width_mm: 210,
+    height_mm: 297,
+  },
+  margins_mm: {
+    left_mm: 20,
+    top_mm: 20,
+    right_mm: 20,
+    bottom_mm: 20,
+  },
+  drawable_area_mm: {
+    width_mm: 170,
+    height_mm: 257,
+  },
+  updated_at: "2026-03-15T20:00:00Z",
+  source: "config_default" as const,
+};
+
+const defaultDevice = {
+  driver: "mock",
+  plotter_model: null,
+  plotter_bounds_mm: {
+    width_mm: 210,
+    height_mm: 297,
+  },
+  plotter_bounds_source: "config_default" as const,
+  updated_at: "2026-03-15T20:00:00Z",
+  source: "config_default" as const,
+};
+
+type CalibrationFixture = {
+  driver: string;
+  motion_scale: number;
+  driver_calibration: {
+    native_res_factor: number;
+  };
+  updated_at: string;
+  source: "vendor_default" | "persisted" | "env_override" | "explicit_path";
+};
+
+type WorkspaceFixture = {
+  plotter_bounds_mm: {
+    width_mm: number;
+    height_mm: number;
+  };
+  page_size_mm: {
+    width_mm: number;
+    height_mm: number;
+  };
+  margins_mm: {
+    left_mm: number;
+    top_mm: number;
+    right_mm: number;
+    bottom_mm: number;
+  };
+  drawable_area_mm: {
+    width_mm: number;
+    height_mm: number;
+  };
+  updated_at: string;
+  source: "config_default" | "persisted";
+};
+
+type DeviceFixture = {
+  driver: string;
+  plotter_model: {
+    code: number;
+    label: string;
+  } | null;
+  plotter_bounds_mm: {
+    width_mm: number;
+    height_mm: number;
+  };
+  plotter_bounds_source: "model_default" | "config_override" | "config_default";
+  updated_at: string;
+  source: "config_default" | "persisted";
 };
 
 describe("Hardware dashboard", () => {
@@ -66,6 +165,7 @@ describe("Hardware dashboard", () => {
         status: "pending" | "plotting" | "capturing" | "completed";
         purpose: "normal" | "diagnostic";
         capture_mode: "auto" | "skip";
+        sizing_mode: "native" | "fit_to_draw_area";
         created_at: string;
         updated_at: string;
         asset: {
@@ -104,12 +204,18 @@ describe("Hardware dashboard", () => {
     error: string | null;
   }>;
   let latestRunFetchCount: number;
+  let currentCalibration: CalibrationFixture;
+  let currentDevice: DeviceFixture;
+  let currentWorkspace: WorkspaceFixture;
 
   beforeEach(() => {
     latestCapture = null;
     latestRun = null;
     recentRuns = [];
     latestRunFetchCount = 0;
+    currentCalibration = structuredClone(defaultCalibration);
+    currentDevice = structuredClone(defaultDevice);
+    currentWorkspace = structuredClone(defaultWorkspace);
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -135,6 +241,85 @@ describe("Hardware dashboard", () => {
 
         if (url === "/api/captures/latest") {
           return new Response(JSON.stringify({ capture: latestCapture }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body ?? "{}"));
+            currentCalibration = {
+              ...currentCalibration,
+              motion_scale: Number((body.native_res_factor / 1016).toFixed(6)),
+              driver_calibration: {
+                native_res_factor: body.native_res_factor,
+              },
+              updated_at: "2026-03-15T20:00:10Z",
+              source: "persisted",
+            };
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                message: "Plotter calibration updated.",
+                calibration: currentCalibration,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body ?? "{}"));
+            currentWorkspace = {
+              ...currentWorkspace,
+              page_size_mm: {
+                width_mm: body.page_width_mm,
+                height_mm: body.page_height_mm,
+              },
+              margins_mm: {
+                left_mm: body.margin_left_mm,
+                top_mm: body.margin_top_mm,
+                right_mm: body.margin_right_mm,
+                bottom_mm: body.margin_bottom_mm,
+              },
+              drawable_area_mm: {
+                width_mm: body.page_width_mm - body.margin_left_mm - body.margin_right_mm,
+                height_mm: body.page_height_mm - body.margin_top_mm - body.margin_bottom_mm,
+              },
+              updated_at: "2026-03-15T20:00:12Z",
+              source: "persisted",
+            };
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                message: "Plotter workspace updated.",
+                workspace: currentWorkspace,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(JSON.stringify(currentWorkspace), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -246,6 +431,7 @@ describe("Hardware dashboard", () => {
             status: "pending",
             purpose: "normal",
             capture_mode: "auto",
+            sizing_mode: "native",
             created_at: "2026-03-15T20:04:00Z",
             updated_at: "2026-03-15T20:04:00Z",
             asset: patternAsset,
@@ -271,7 +457,17 @@ describe("Hardware dashboard", () => {
                 message: null,
               },
             },
-            plotter_run_details: {},
+            plotter_run_details: {
+              preparation: {
+                source_width: 160,
+                source_height: 120,
+                source_units: "mm",
+                prepared_width_mm: 160,
+                prepared_height_mm: 120,
+                sizing_mode: "native",
+                units_inferred: false,
+              },
+            },
             camera_run_details: {},
           };
           return new Response(JSON.stringify(latestRun), {
@@ -287,11 +483,26 @@ describe("Hardware dashboard", () => {
           });
         }
 
-        if (url === "/api/plotter/return-to-origin" && method === "POST") {
+        if (url === "/api/plotter/walk-home" && method === "POST") {
           return new Response(
             JSON.stringify({
               ok: true,
-              message: "Plotter returned to origin.",
+              message: "Plotter walked home.",
+              status: hardwareStatus.plotter,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        if (url === "/api/plotter/test-actions" && method === "POST") {
+          const body = JSON.parse(String(init?.body ?? "{}"));
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: `Plotter test action '${body.action}' completed.`,
               status: hardwareStatus.plotter,
             }),
             {
@@ -331,6 +542,7 @@ describe("Hardware dashboard", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -349,6 +561,110 @@ describe("Hardware dashboard", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/plot workflow/i)).toBeInTheDocument();
     expect(screen.getByText(/load test-grid/i)).toBeInTheDocument();
+    expect(screen.getByText(/use authored size/i)).toBeInTheDocument();
+    expect(screen.getByText(/fit within drawable area/i)).toBeInTheDocument();
+    expect(screen.getByText(/^paper setup$/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^preview$/i })).toBeInTheDocument();
+    expect(screen.getByText(/safe plotter bounds/i)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /paper setup preview/i })).toBeInTheDocument();
+    expect(screen.getByText(/paper 210 x 297 mm/i)).toBeInTheDocument();
+  });
+
+  it("shows a disengage motors button for axidraw and runs align mode", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/test-actions" && method === "POST") {
+          const body = JSON.parse(String(init?.body ?? "{}"));
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: `Plotter test action '${body.action}' completed.`,
+              status: axidrawHardwareStatus.plotter,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /disengage motors/i }),
+    );
+
+    expect(await screen.findByText(/^align completed\.$/i)).toBeInTheDocument();
+  });
+
+  it("updates the drawable area summary while paper setup is being edited", async () => {
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText(/^width$/i), {
+      target: { value: "200" },
+    });
+    fireEvent.change(screen.getByLabelText(/^top$/i), {
+      target: { value: "25" },
+    });
+
+    expect(screen.getByText("160 mm x 252 mm")).toBeInTheDocument();
   });
 
   it("captures an image and refreshes the preview", async () => {
@@ -400,6 +716,203 @@ describe("Hardware dashboard", () => {
     expect(screen.getAllByText(/completed/i).length).toBeGreaterThan(0);
   });
 
+  it("defaults uploaded SVGs to fit within drawable area and warns about native sizing", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const uploadedAsset = {
+          id: "asset-upload-001",
+          kind: "uploaded_svg" as const,
+          pattern_id: null,
+          name: "Unitless upload",
+          timestamp: "2026-03-15T20:06:00Z",
+          file_path: "/tmp/unitless-upload.svg",
+          public_url: "/plot-assets/unitless-upload.svg",
+          mime_type: "image/svg+xml",
+        };
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(hardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-assets/upload" && method === "POST") {
+          return new Response(JSON.stringify(uploadedAsset), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    const fileInput = (await screen.findByLabelText(/upload svg/i)) as HTMLInputElement;
+    const file = new File(
+      ["<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' viewBox='0 0 200 100' />"],
+      "unitless.svg",
+      { type: "image/svg+xml" },
+    );
+
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    expect(
+      await screen.findByText(/uploaded svgs default to fit within drawable area unless they declare physical units\./i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/plot sizing/i)).toHaveValue("fit_to_draw_area");
+
+    fireEvent.change(screen.getByLabelText(/plot sizing/i), {
+      target: { value: "native" },
+    });
+
+    expect(
+      screen.getByText(/use authored size only works for uploaded svgs that declare physical dimensions/i),
+    ).toBeInTheDocument();
+  });
+
+  it("blocks fit within drawable area for real axidraw uploads", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const uploadedAsset = {
+          id: "asset-upload-axidraw-001",
+          kind: "uploaded_svg" as const,
+          pattern_id: null,
+          name: "Unitless upload",
+          timestamp: "2026-03-15T20:06:00Z",
+          file_path: "/tmp/unitless-upload.svg",
+          public_url: "/plot-assets/unitless-upload.svg",
+          mime_type: "image/svg+xml",
+        };
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-assets/upload" && method === "POST") {
+          return new Response(JSON.stringify(uploadedAsset), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    const fileInput = (await screen.findByLabelText(/upload svg/i)) as HTMLInputElement;
+    const file = new File(
+      ["<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' viewBox='0 0 200 100' />"],
+      "unitless.svg",
+      { type: "image/svg+xml" },
+    );
+
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    expect(
+      await screen.findByText(/fit within drawable area is temporarily disabled for real axidraw plotting/i),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/plot sizing/i)).toHaveValue("fit_to_draw_area");
+    expect(screen.getByRole("button", { name: /start plot run/i })).toBeDisabled();
+  });
+
   it("updates axidraw pen heights from the hardware panel", async () => {
     vi.restoreAllMocks();
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -416,6 +929,27 @@ describe("Hardware dashboard", () => {
 
         if (url === "/api/captures/latest") {
           return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -463,10 +997,772 @@ describe("Hardware dashboard", () => {
 
     fireEvent.change(upInput, { target: { value: "66" } });
     fireEvent.change(downInput, { target: { value: "22" } });
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 2600));
+    });
+
+    expect(screen.getByLabelText(/pen up/i)).toHaveValue(66);
+    expect(screen.getByLabelText(/pen down/i)).toHaveValue(22);
+
     fireEvent.click(screen.getByRole("button", { name: /apply heights/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/pen heights updated\./i)).toBeInTheDocument();
+    }, { timeout: 8000 });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/pen up/i)).toHaveValue(66);
+      expect(screen.getByLabelText(/pen down/i)).toHaveValue(22);
     });
+
+  }, 10000);
+
+  it("blocks invalid pen heights before the request is sent", async () => {
+    vi.restoreAllMocks();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body ?? "{}"));
+            currentWorkspace = {
+              ...currentWorkspace,
+              page_size_mm: {
+                width_mm: body.page_width_mm,
+                height_mm: body.page_height_mm,
+              },
+              margins_mm: {
+                left_mm: body.margin_left_mm,
+                top_mm: body.margin_top_mm,
+                right_mm: body.margin_right_mm,
+                bottom_mm: body.margin_bottom_mm,
+              },
+              drawable_area_mm: {
+                width_mm: body.page_width_mm - body.margin_left_mm - body.margin_right_mm,
+                height_mm: body.page_height_mm - body.margin_top_mm - body.margin_bottom_mm,
+              },
+              updated_at: "2026-03-15T20:00:15Z",
+              source: "persisted",
+            };
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                message: "Plotter workspace updated.",
+                workspace: currentWorkspace,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/pen-heights" && method === "POST") {
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    const upInput = await screen.findByLabelText(/pen up/i);
+    const downInput = screen.getByLabelText(/pen down/i);
+    const applyButton = screen.getByRole("button", { name: /apply heights/i });
+
+    fireEvent.change(upInput, { target: { value: "20" } });
+    fireEvent.change(downInput, { target: { value: "20" } });
+
+    expect(
+      screen.getByText(/pen down must be lower than pen up\./i),
+    ).toBeInTheDocument();
+    expect(applyButton).toBeDisabled();
+
+    fireEvent.change(upInput, { target: { value: "101" } });
+    fireEvent.change(downInput, { target: { value: "10" } });
+
+    expect(
+      screen.getByText(/pen heights must stay between 0 and 100\./i),
+    ).toBeInTheDocument();
+    expect(applyButton).toBeDisabled();
+
+    expect(
+      fetchSpy.mock.calls.some(([url]) => String(url) === "/api/plotter/pen-heights"),
+    ).toBe(false);
   });
+
+  it("saves persisted calibration from the hardware panel", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body ?? "{}"));
+            currentCalibration = {
+              ...currentCalibration,
+              motion_scale: Number((body.native_res_factor / 1016).toFixed(6)),
+              driver_calibration: {
+                native_res_factor: body.native_res_factor,
+              },
+              updated_at: "2026-03-15T20:00:15Z",
+              source: "persisted",
+            };
+            axidrawHardwareStatus.plotter.details.native_res_factor = body.native_res_factor;
+            axidrawHardwareStatus.plotter.details.motion_scale = currentCalibration.motion_scale;
+            axidrawHardwareStatus.plotter.details.calibration_source = "persisted";
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                message: "Plotter calibration updated.",
+                calibration: currentCalibration,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    const input = await screen.findByLabelText(/native res factor/i);
+    fireEvent.change(input, { target: { value: "1905" } });
+    fireEvent.click(screen.getByRole("button", { name: /save calibration/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/plotter calibration saved\./i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/^Motion scale$/i)).toBeInTheDocument();
+    expect(screen.getByText("1.875000")).toBeInTheDocument();
+    expect(screen.getByText(/^Calibration source$/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^persisted$/i).length).toBeGreaterThan(0);
+  });
+
+  it("saves session paper setup from the hardware panel", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body ?? "{}"));
+            currentWorkspace = {
+              ...currentWorkspace,
+              page_size_mm: {
+                width_mm: body.page_width_mm,
+                height_mm: body.page_height_mm,
+              },
+              margins_mm: {
+                left_mm: body.margin_left_mm,
+                top_mm: body.margin_top_mm,
+                right_mm: body.margin_right_mm,
+                bottom_mm: body.margin_bottom_mm,
+              },
+              drawable_area_mm: {
+                width_mm: body.page_width_mm - body.margin_left_mm - body.margin_right_mm,
+                height_mm: body.page_height_mm - body.margin_top_mm - body.margin_bottom_mm,
+              },
+              updated_at: "2026-03-15T20:00:18Z",
+              source: "persisted",
+            };
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                message: "Plotter workspace updated.",
+                workspace: currentWorkspace,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText(/^width$/i), {
+      target: { value: "148" },
+    });
+    fireEvent.change(screen.getByLabelText(/^height$/i), {
+      target: { value: "210" },
+    });
+    fireEvent.change(screen.getByLabelText(/^left$/i), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText(/^top$/i), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText(/^right$/i), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText(/^bottom$/i), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save paper setup/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/plotter workspace saved\./i)).toBeInTheDocument();
+    });
+    expect(screen.getByText("128 mm x 190 mm")).toBeInTheDocument();
+  });
+
+  it("shows a readiness notice when official plot support is unavailable", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/trusted svg plotting is disabled until the official pyaxidraw plot api is installed/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^Plot API support$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Manual API support$/i)).toBeInTheDocument();
+  });
+
+  it("shows skip-capture messaging for diagnostic runs", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const diagnosticAsset = {
+          id: "asset-dash-row",
+          kind: "built_in_pattern" as const,
+          pattern_id: "dash-row",
+          name: "Dash row",
+          timestamp: "2026-03-15T20:10:00Z",
+          file_path: "/tmp/asset-dash-row.svg",
+          public_url: "/plot-assets/asset-dash-row.svg",
+          mime_type: "image/svg+xml",
+        };
+        const diagnosticRun = {
+          id: "run-diagnostic-001",
+          status: "completed" as const,
+          purpose: "diagnostic" as const,
+          capture_mode: "skip" as const,
+          sizing_mode: "native" as const,
+          created_at: "2026-03-15T20:10:00Z",
+          updated_at: "2026-03-15T20:10:10Z",
+          asset: diagnosticAsset,
+          capture: null,
+          error: null,
+          stage_states: {
+            prepare: {
+              status: "completed" as const,
+              started_at: "2026-03-15T20:10:00Z",
+              completed_at: "2026-03-15T20:10:01Z",
+              message: "Prepared diagnostic pattern.",
+            },
+            plot: {
+              status: "completed" as const,
+              started_at: "2026-03-15T20:10:02Z",
+              completed_at: "2026-03-15T20:10:05Z",
+              message: "Diagnostic plot completed.",
+            },
+            capture: {
+              status: "completed" as const,
+              started_at: null,
+              completed_at: null,
+              message: "Capture skipped.",
+            },
+          },
+          plotter_run_details: {
+            preparation: {
+              source_width: 40,
+              source_height: 12,
+              source_units: "mm",
+              prepared_width_mm: 40,
+              prepared_height_mm: 12,
+              sizing_mode: "native",
+              units_inferred: false,
+            },
+          },
+          camera_run_details: {},
+        };
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: diagnosticRun }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              runs: [
+                {
+                  id: diagnosticRun.id,
+                  status: diagnosticRun.status,
+                  purpose: diagnosticRun.purpose,
+                  created_at: diagnosticRun.created_at,
+                  updated_at: diagnosticRun.updated_at,
+                  asset_id: diagnosticAsset.id,
+                  asset_name: diagnosticAsset.name,
+                  asset_kind: diagnosticAsset.kind,
+                  error: null,
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(/capture was skipped for this diagnostic run\./i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/run run-diag.*capture skipped/i)).toBeInTheDocument();
+  });
+
+  it("preserves a manual staged asset across refreshes and flags when latest run differs", async () => {
+    vi.restoreAllMocks();
+    const manualAsset = {
+      id: "asset-test-grid",
+      kind: "built_in_pattern" as const,
+      pattern_id: "test-grid",
+      name: "Test grid",
+      timestamp: "2026-03-15T20:04:00Z",
+      file_path: "/tmp/asset-test-grid.svg",
+      public_url: "/plot-assets/asset-test-grid.svg",
+      mime_type: "image/svg+xml",
+    };
+    const externalAsset = {
+      id: "asset-double-box",
+      kind: "built_in_pattern" as const,
+      pattern_id: "double-box",
+      name: "Double box",
+      timestamp: "2026-03-15T20:12:00Z",
+      file_path: "/tmp/asset-double-box.svg",
+      public_url: "/plot-assets/asset-double-box.svg",
+      mime_type: "image/svg+xml",
+    };
+    let latestRunResponse: null | {
+      id: string;
+      status: "completed";
+      purpose: "diagnostic";
+      capture_mode: "skip";
+      sizing_mode: "native";
+      created_at: string;
+      updated_at: string;
+      asset: typeof externalAsset;
+      capture: null;
+      error: null;
+      stage_states: {
+        prepare: {
+          status: "completed";
+          started_at: string;
+          completed_at: string;
+          message: string;
+        };
+        plot: {
+          status: "completed";
+          started_at: string;
+          completed_at: string;
+          message: string;
+        };
+        capture: {
+          status: "completed";
+          started_at: null;
+          completed_at: null;
+          message: string;
+        };
+      };
+      plotter_run_details: Record<string, unknown>;
+      camera_run_details: Record<string, unknown>;
+    } = null;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(hardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-assets/patterns" && method === "POST") {
+          return new Response(JSON.stringify(manualAsset), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: latestRunResponse }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /load test-grid/i }),
+    );
+
+    expect(
+      await screen.findByText(/staged source: test grid/i),
+    ).toBeInTheDocument();
+
+    latestRunResponse = {
+      id: "run-diagnostic-002",
+      status: "completed",
+      purpose: "diagnostic",
+      capture_mode: "skip",
+      created_at: "2026-03-15T20:12:00Z",
+      updated_at: "2026-03-15T20:12:05Z",
+      asset: externalAsset,
+      capture: null,
+      error: null,
+      sizing_mode: "native",
+      stage_states: {
+        prepare: {
+          status: "completed",
+          started_at: "2026-03-15T20:12:00Z",
+          completed_at: "2026-03-15T20:12:01Z",
+          message: "Prepared external run.",
+        },
+        plot: {
+          status: "completed",
+          started_at: "2026-03-15T20:12:02Z",
+          completed_at: "2026-03-15T20:12:05Z",
+          message: "External run completed.",
+        },
+        capture: {
+          status: "completed",
+          started_at: null,
+          completed_at: null,
+          message: "Capture skipped.",
+        },
+      },
+      plotter_run_details: {
+        preparation: {
+          source_width: 40,
+          source_height: 20,
+          source_units: "mm",
+          prepared_width_mm: 40,
+          prepared_height_mm: 20,
+          sizing_mode: "native",
+          units_inferred: false,
+        },
+      },
+      camera_run_details: {},
+    };
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 3600));
+    });
+
+    expect(screen.getByText(/staged source: test grid/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/latest run used a different source: double box\./i),
+    ).toBeInTheDocument();
+
+  }, 10000);
 });

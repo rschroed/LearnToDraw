@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160mm" height="120mm" viewBox="0 0 960 720">
+  <rect width="100%" height="100%" fill="#f8f3ea" />
+  <g stroke="#d0c0aa" stroke-width="1">
+    <path d="M 80 100 H 880" />
+    <path d="M 80 180 H 880" />
+    <path d="M 80 260 H 880" />
+    <path d="M 80 340 H 880" />
+    <path d="M 80 420 H 880" />
+    <path d="M 80 500 H 880" />
+    <path d="M 80 580 H 880" />
+    <path d="M 160 80 V 640" />
+    <path d="M 280 80 V 640" />
+    <path d="M 400 80 V 640" />
+    <path d="M 520 80 V 640" />
+    <path d="M 640 80 V 640" />
+    <path d="M 760 80 V 640" />
+  </g>
+  <g stroke="#1f2933" stroke-width="5" fill="none">
+    <rect x="80" y="80" width="800" height="560" rx="18" />
+    <circle cx="240" cy="220" r="78" />
+    <circle cx="720" cy="220" r="78" />
+    <path d="M 220 500 C 330 380, 630 380, 740 500" />
+    <path d="M 160 620 L 800 100" />
+  </g>
+  <g fill="#8b5e34" font-family="Menlo, monospace" font-size="28">
+    <text x="96" y="54">Built-in Test Pattern: test-grid</text>
+  </g>
+</svg>

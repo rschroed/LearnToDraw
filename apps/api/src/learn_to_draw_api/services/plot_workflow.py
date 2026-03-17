@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -21,16 +22,26 @@ from learn_to_draw_api.models import (
     PlotRunCaptureMode,
     PlotRunPurpose,
     PlotDocument,
+    PlotPreparationMetadata,
     PlotRun,
     PlotRunListResponse,
+    PlotSizingMode,
     PlotRunSummary,
     PlotStageState,
+    PlotterDeviceSettings,
+    PlotterWorkspace,
 )
 from learn_to_draw_api.services.captures import CaptureStore
+from learn_to_draw_api.services.plotter_calibration import PlotterCalibrationService
+from learn_to_draw_api.services.plotter_device_settings import PlotterDeviceSettingsService
+from learn_to_draw_api.services.plotter_workspace import PlotterWorkspaceService
 
 
 ACTIVE_RUN_STATUSES = {"pending", "plotting", "capturing"}
 SVG_MIME_TYPE = "image/svg+xml"
+PATTERNS_DIR = Path(__file__).resolve().parent.parent / "assets" / "patterns"
+
+ET.register_namespace("", "http://www.w3.org/2000/svg")
 
 
 class PlotAssetStore:
@@ -98,6 +109,12 @@ class PlotRunStore:
             self._cache[run.id] = run
         return run
 
+    def save_prepared_svg(self, run_id: str, svg_text: str) -> Path:
+        with self._lock:
+            prepared_path = self._runs_dir / f"{run_id}-prepared.svg"
+            prepared_path.write_text(svg_text, encoding="utf-8")
+        return prepared_path
+
     def get(self, run_id: str) -> PlotRun:
         cached = self._cache.get(run_id)
         if cached is not None:
@@ -137,12 +154,18 @@ class PlotWorkflowService:
         capture_store: CaptureStore,
         asset_store: PlotAssetStore,
         run_store: PlotRunStore,
+        calibration_service: PlotterCalibrationService,
+        device_settings_service: PlotterDeviceSettingsService,
+        workspace_service: PlotterWorkspaceService,
     ) -> None:
         self._plotter = plotter
         self._camera = camera
         self._capture_store = capture_store
         self._asset_store = asset_store
         self._run_store = run_store
+        self._calibration_service = calibration_service
+        self._device_settings_service = device_settings_service
+        self._workspace_service = workspace_service
         self._lock = Lock()
         self._active_run_id: Optional[str] = None
 
@@ -191,6 +214,7 @@ class PlotWorkflowService:
         *,
         purpose: PlotRunPurpose = "normal",
         capture_mode: PlotRunCaptureMode = "auto",
+        sizing_mode: PlotSizingMode = "native",
     ) -> PlotRun:
         asset = self._asset_store.get(asset_id)
         now = datetime.now(timezone.utc)
@@ -199,6 +223,7 @@ class PlotWorkflowService:
             status="pending",
             purpose=purpose,
             capture_mode=capture_mode,
+            sizing_mode=sizing_mode,
             created_at=now,
             updated_at=now,
             asset=asset,
@@ -238,7 +263,15 @@ class PlotWorkflowService:
                 status="in_progress",
                 message="Preparing SVG document.",
             )
-            document = self._load_document(run.asset)
+            workspace = self._workspace_service.current()
+            device_settings = self._device_settings_service.current()
+            document, preparation = self._load_document(
+                run.asset,
+                sizing_mode=run.sizing_mode,
+                workspace=workspace,
+                device_settings=device_settings,
+            )
+            prepared_svg_path = self._run_store.save_prepared_svg(run.id, document.svg_text)
             run = self._set_stage_state(
                 run,
                 stage="prepare",
@@ -256,9 +289,15 @@ class PlotWorkflowService:
                 message="Sending SVG to plotter.",
             )
             plot_result = self._plotter.plot(document)
+            effective_calibration = self._calibration_service.current()
             run.plotter_run_details = {
                 "driver": self._plotter.driver,
                 "document_id": plot_result.document_id,
+                "prepared_svg_path": str(prepared_svg_path),
+                "preparation": preparation.model_dump(mode="json"),
+                "calibration": effective_calibration.model_dump(mode="json"),
+                "device": device_settings.model_dump(mode="json"),
+                "workspace": workspace.model_dump(mode="json"),
                 "duration_ms": _duration_ms(
                     plot_result.started_at,
                     plot_result.completed_at,
@@ -332,17 +371,40 @@ class PlotWorkflowService:
                 if self._active_run_id == run_id:
                     self._active_run_id = None
 
-    def _load_document(self, asset: PlotAsset) -> PlotDocument:
+    def _load_document(
+        self,
+        asset: PlotAsset,
+        *,
+        sizing_mode: PlotSizingMode,
+        workspace: PlotterWorkspace,
+        device_settings: PlotterDeviceSettings,
+    ) -> tuple[PlotDocument, PlotPreparationMetadata]:
+        if self._plotter.driver == "axidraw-pyapi" and sizing_mode == "fit_to_draw_area":
+            raise InvalidArtifactError(
+                "Fit within drawable area is temporarily disabled for real AxiDraw plotting "
+                "because the prepared SVG can exceed safe machine bounds. Use authored size "
+                "only for SVGs with explicit physical units."
+            )
         svg_text = Path(asset.file_path).read_text(encoding="utf-8")
         root = _parse_svg_root(svg_text)
+        prepared_svg_text, preparation = _prepare_svg_for_plotting(
+            svg_text,
+            root,
+            sizing_mode=sizing_mode,
+            plot_area=workspace.to_plot_area(),
+            device_settings=device_settings,
+        )
         width, height = _extract_svg_dimensions(root)
-        return PlotDocument(
+        document = PlotDocument(
             asset_id=asset.id,
             name=asset.name,
-            svg_text=svg_text,
+            svg_text=prepared_svg_text,
             width=width,
             height=height,
+            prepared_width_mm=preparation.prepared_width_mm,
+            prepared_height_mm=preparation.prepared_height_mm,
         )
+        return document, preparation
 
     def _set_stage_state(
         self,
@@ -401,12 +463,10 @@ def _extract_svg_dimensions(root: ET.Element) -> tuple[int, int]:
     height = _coerce_svg_dimension(root.attrib.get("height"))
     if width and height:
         return width, height
-    view_box = root.attrib.get("viewBox")
+    view_box = _parse_view_box(root.attrib.get("viewBox"))
     if view_box:
-        parts = re.split(r"[,\s]+", view_box.strip())
-        if len(parts) == 4:
-            width = width or _coerce_svg_dimension(parts[2])
-            height = height or _coerce_svg_dimension(parts[3])
+        width = width or max(1, int(round(view_box[2])))
+        height = height or max(1, int(round(view_box[3])))
     return width or 1000, height or 1000
 
 
@@ -423,84 +483,249 @@ def _duration_ms(started_at: datetime, completed_at: datetime) -> int:
     return int((completed_at - started_at).total_seconds() * 1000)
 
 
+def _prepare_svg_for_plotting(
+    svg_text: str,
+    root: ET.Element,
+    *,
+    sizing_mode: PlotSizingMode,
+    plot_area: PlotArea,
+    device_settings: PlotterDeviceSettings,
+) -> tuple[str, PlotPreparationMetadata]:
+    source_box = _extract_source_box(root)
+    source_units = _classify_source_units(root)
+    units_inferred = source_units in {"unitless", "px", "unknown"}
+
+    if sizing_mode == "native":
+        if source_box.physical_width_mm is None or source_box.physical_height_mm is None:
+            raise InvalidArtifactError(
+                "Native sizing requires explicit physical SVG dimensions such as mm, cm, or in."
+            )
+        prepared_width_mm = source_box.physical_width_mm
+        prepared_height_mm = source_box.physical_height_mm
+        if (
+            prepared_width_mm > plot_area.draw_width_mm
+            or prepared_height_mm > plot_area.draw_height_mm
+        ):
+            raise InvalidArtifactError(
+                "Authored SVG size "
+                f"{_format_mm(prepared_width_mm)} x {_format_mm(prepared_height_mm)} mm "
+                "exceeds the current drawable area of "
+                f"{_format_mm(plot_area.draw_width_mm)} x {_format_mm(plot_area.draw_height_mm)} mm."
+            )
+        prepared_svg_text = svg_text
+    else:
+        if source_box.view_box_width <= 0 or source_box.view_box_height <= 0:
+            raise InvalidArtifactError("SVG content is missing usable size information.")
+        scale = min(
+            plot_area.draw_width_mm / source_box.view_box_width,
+            plot_area.draw_height_mm / source_box.view_box_height,
+        )
+        prepared_width_mm = source_box.view_box_width * scale
+        prepared_height_mm = source_box.view_box_height * scale
+        prepared_svg_text = _build_prepared_svg(
+            root,
+            plot_area=plot_area,
+            source_box=source_box,
+            scale=scale,
+        )
+    return (
+        prepared_svg_text,
+        PlotPreparationMetadata(
+            source_width=source_box.reported_width,
+            source_height=source_box.reported_height,
+            source_units=source_units,
+            prepared_width_mm=round(prepared_width_mm, 3),
+            prepared_height_mm=round(prepared_height_mm, 3),
+            page_width_mm=round(plot_area.page_width_mm, 3),
+            page_height_mm=round(plot_area.page_height_mm, 3),
+            drawable_width_mm=round(plot_area.draw_width_mm, 3),
+            drawable_height_mm=round(plot_area.draw_height_mm, 3),
+            plotter_bounds_width_mm=round(device_settings.plotter_bounds_mm.width_mm, 3),
+            plotter_bounds_height_mm=round(device_settings.plotter_bounds_mm.height_mm, 3),
+            plotter_bounds_source=device_settings.plotter_bounds_source,
+            plotter_model_code=(
+                device_settings.plotter_model.code
+                if device_settings.plotter_model is not None
+                else None
+            ),
+            plotter_model_label=(
+                device_settings.plotter_model.label
+                if device_settings.plotter_model is not None
+                else None
+            ),
+            sizing_mode=sizing_mode,
+            units_inferred=units_inferred,
+        ),
+    )
+
+
+class _SourceBox:
+    def __init__(
+        self,
+        *,
+        reported_width: float,
+        reported_height: float,
+        physical_width_mm: Optional[float],
+        physical_height_mm: Optional[float],
+        view_box_min_x: float,
+        view_box_min_y: float,
+        view_box_width: float,
+        view_box_height: float,
+    ) -> None:
+        self.reported_width = reported_width
+        self.reported_height = reported_height
+        self.physical_width_mm = physical_width_mm
+        self.physical_height_mm = physical_height_mm
+        self.view_box_min_x = view_box_min_x
+        self.view_box_min_y = view_box_min_y
+        self.view_box_width = view_box_width
+        self.view_box_height = view_box_height
+
+
+def _extract_source_box(root: ET.Element) -> _SourceBox:
+    width_length = _parse_svg_length(root.attrib.get("width"))
+    height_length = _parse_svg_length(root.attrib.get("height"))
+    view_box = _parse_view_box(root.attrib.get("viewBox"))
+
+    if view_box is not None:
+        min_x, min_y, view_box_width, view_box_height = view_box
+    else:
+        if width_length is None or height_length is None:
+            raise InvalidArtifactError("SVG content is missing width/height or viewBox values.")
+        min_x = 0.0
+        min_y = 0.0
+        view_box_width = width_length[0]
+        view_box_height = height_length[0]
+
+    reported_width = width_length[0] if width_length is not None else view_box_width
+    reported_height = height_length[0] if height_length is not None else view_box_height
+    physical_width_mm = _length_to_mm(width_length)
+    physical_height_mm = _length_to_mm(height_length)
+
+    return _SourceBox(
+        reported_width=reported_width,
+        reported_height=reported_height,
+        physical_width_mm=physical_width_mm,
+        physical_height_mm=physical_height_mm,
+        view_box_min_x=min_x,
+        view_box_min_y=min_y,
+        view_box_width=view_box_width,
+        view_box_height=view_box_height,
+    )
+
+
+def _build_prepared_svg(
+    root: ET.Element,
+    *,
+    plot_area: PlotArea,
+    source_box: _SourceBox,
+    scale: float,
+) -> str:
+    page_width_mm = _format_mm(plot_area.page_width_mm)
+    page_height_mm = _format_mm(plot_area.page_height_mm)
+    expanded_view_box_width = plot_area.page_width_mm / scale
+    expanded_view_box_height = plot_area.page_height_mm / scale
+    expanded_view_box_min_x = source_box.view_box_min_x - (plot_area.margin_left_mm / scale)
+    expanded_view_box_min_y = source_box.view_box_min_y - (plot_area.margin_top_mm / scale)
+
+    root_copy = copy.deepcopy(root)
+    root_copy.attrib["width"] = f"{page_width_mm}mm"
+    root_copy.attrib["height"] = f"{page_height_mm}mm"
+    root_copy.attrib["viewBox"] = (
+        f"{_format_numeric(expanded_view_box_min_x)} "
+        f"{_format_numeric(expanded_view_box_min_y)} "
+        f"{_format_numeric(expanded_view_box_width)} "
+        f"{_format_numeric(expanded_view_box_height)}"
+    )
+    return ET.tostring(root_copy, encoding="unicode")
+
+
+def _classify_source_units(root: ET.Element) -> str:
+    width_length = _parse_svg_length(root.attrib.get("width"))
+    height_length = _parse_svg_length(root.attrib.get("height"))
+    units = {
+        length[1]
+        for length in (width_length, height_length)
+        if length is not None and length[1] is not None
+    }
+    if not units:
+        if width_length is None and height_length is None:
+            return "unknown"
+        return "unitless"
+    if len(units) > 1:
+        return "mixed"
+    return next(iter(units))
+
+
+def _parse_svg_length(value: Optional[str]) -> Optional[tuple[float, Optional[str]]]:
+    if value is None:
+        return None
+    match = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z%]+)?\s*$", value)
+    if not match:
+        return None
+    unit = (match.group(2) or "").lower() or None
+    if unit == "%":
+        return None
+    return float(match.group(1)), unit
+
+
+def _length_to_mm(length: Optional[tuple[float, Optional[str]]]) -> Optional[float]:
+    if length is None:
+        return None
+    value, unit = length
+    if unit == "mm":
+        return value
+    if unit == "cm":
+        return value * 10.0
+    if unit == "in":
+        return value * 25.4
+    return None
+
+
+def _parse_view_box(value: Optional[str]) -> Optional[tuple[float, float, float, float]]:
+    if not value:
+        return None
+    parts = re.split(r"[,\s]+", value.strip())
+    if len(parts) != 4:
+        return None
+    try:
+        min_x, min_y, width, height = (float(part) for part in parts)
+    except ValueError:
+        return None
+    return min_x, min_y, width, height
+
+
+def _format_numeric(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _format_mm(value: float) -> str:
+    return _format_numeric(value)
+
+
 def _pattern_definition(pattern_id: str) -> Optional[dict[str, str]]:
     patterns = {
         "test-grid": {
             "name": "Test grid",
-            "svg_text": _build_test_grid_svg(),
+            "filename": "test-grid.svg",
         },
         "tiny-square": {
             "name": "Tiny square",
-            "svg_text": _build_tiny_square_svg(),
+            "filename": "tiny-square.svg",
         },
         "dash-row": {
             "name": "Dash row",
-            "svg_text": _build_dash_row_svg(),
+            "filename": "dash-row.svg",
         },
         "double-box": {
             "name": "Double box",
-            "svg_text": _build_double_box_svg(),
+            "filename": "double-box.svg",
         },
     }
-    return patterns.get(pattern_id)
-
-
-def _build_test_grid_svg() -> str:
-    return """<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720">
-  <rect width="100%" height="100%" fill="#f8f3ea" />
-  <g stroke="#d0c0aa" stroke-width="1">
-    <path d="M 80 100 H 880" />
-    <path d="M 80 180 H 880" />
-    <path d="M 80 260 H 880" />
-    <path d="M 80 340 H 880" />
-    <path d="M 80 420 H 880" />
-    <path d="M 80 500 H 880" />
-    <path d="M 80 580 H 880" />
-    <path d="M 160 80 V 640" />
-    <path d="M 280 80 V 640" />
-    <path d="M 400 80 V 640" />
-    <path d="M 520 80 V 640" />
-    <path d="M 640 80 V 640" />
-    <path d="M 760 80 V 640" />
-  </g>
-  <g stroke="#1f2933" stroke-width="5" fill="none">
-    <rect x="80" y="80" width="800" height="560" rx="18" />
-    <circle cx="240" cy="220" r="78" />
-    <circle cx="720" cy="220" r="78" />
-    <path d="M 220 500 C 330 380, 630 380, 740 500" />
-    <path d="M 160 620 L 800 100" />
-  </g>
-  <g fill="#8b5e34" font-family="Menlo, monospace" font-size="28">
-    <text x="96" y="54">Built-in Test Pattern: test-grid</text>
-  </g>
-</svg>"""
-
-
-def _build_tiny_square_svg() -> str:
-    return """<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
-  <rect width="100%" height="100%" fill="#fbf7f0" />
-  <path d="M 30 30 H 90 V 90 H 30 Z" stroke="#1f2933" stroke-width="4" fill="none" />
-</svg>"""
-
-
-def _build_dash_row_svg() -> str:
-    return """<svg xmlns="http://www.w3.org/2000/svg" width="180" height="80" viewBox="0 0 180 80">
-  <rect width="100%" height="100%" fill="#fbf7f0" />
-  <g stroke="#1f2933" stroke-width="4" fill="none">
-    <path d="M 18 40 H 30" />
-    <path d="M 48 40 H 60" />
-    <path d="M 78 40 H 90" />
-    <path d="M 108 40 H 120" />
-    <path d="M 138 40 H 150" />
-  </g>
-</svg>"""
-
-
-def _build_double_box_svg() -> str:
-    return """<svg xmlns="http://www.w3.org/2000/svg" width="180" height="110" viewBox="0 0 180 110">
-  <rect width="100%" height="100%" fill="#fbf7f0" />
-  <g stroke="#1f2933" stroke-width="4" fill="none">
-    <path d="M 20 25 H 68 V 73 H 20 Z" />
-    <path d="M 112 25 H 160 V 73 H 112 Z" />
-  </g>
-</svg>"""
+    pattern = patterns.get(pattern_id)
+    if pattern is None:
+        return None
+    return {
+        "name": pattern["name"],
+        "svg_text": (PATTERNS_DIR / pattern["filename"]).read_text(encoding="utf-8"),
+    }
