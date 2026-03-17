@@ -58,6 +58,11 @@ Frontend must never access hardware directly.
 - Pen tuning should stay backend or config driven by default.
 - Safe built-in hardware test patterns are preferred over arbitrary freeform motion tools.
 
+## Runtime Tuning Rules
+- Browser controls may update safe runtime hardware settings only when the backend remains the sole authority.
+- Runtime tuning changes must be clearly labeled as session-only unless they are also persisted to config.
+- If a UI control changes AxiDraw tuning, surface the effective value back through hardware status.
+
 ## Done Means
 A task is not complete unless:
 - relevant automated tests pass, or the reason they could not be run is stated clearly
@@ -99,8 +104,29 @@ Needs explicit discussion first:
 - undocumented AxiDraw behavior assumptions
 - iterative drawing engine work
 
+## Hardware UI Limits
+- Hardware-panel controls should stay narrow, diagnostic, and reversible.
+- Do not add arbitrary motion controls or freeform command entry without explicit discussion.
+- Prefer fixed safe actions and fixed small test patterns over generic manual control.
+
+## AxiDraw Persistence Note
+- Distinguish between config-backed defaults and runtime-only tuning.
+- If a tuning control is session-only, document that in the UI or user-facing notes.
+
 ## Practical Notes
 - Use `rg` for search.
 - Prefer `apply_patch` for edits.
 - Do not revert unrelated user changes.
 - Ignore generated folders like `node_modules`, `dist`, and caches unless the task is specifically about them.
+
+## Git Hygiene
+- Keep generated runtime artifacts out of git; retain only placeholder files like `.gitkeep` where needed.
+- Do not commit generated frontend build output or TypeScript build-info files.
+- Prefer small commits at slice boundaries, especially before hardware-facing changes.
+
+## Remote Workflow
+- Primary remote is GitHub.
+- Keep `main` stable and push working slice boundaries, not half-finished hardware experiments.
+- Before pushing hardware-related changes, make sure relevant tests pass or state clearly what was not verified.
+- Prefer short-lived branches for risky adapter or hardware-control changes.
+- Use `codex/` as the branch prefix for agent-created branches.

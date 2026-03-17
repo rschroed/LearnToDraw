@@ -1,12 +1,13 @@
 import type { ChangeEvent } from "react";
 
-import type { HardwareStatus } from "../../types/hardware";
+import type { HardwareStatus, PlotterWorkspace } from "../../types/hardware";
 import type { PlotRun, PlotStageState } from "../../types/plotting";
 
 import { usePlotWorkflow } from "./usePlotWorkflow";
 
 interface PlotWorkflowPanelProps {
   hardwareStatus: HardwareStatus;
+  plotterWorkspace: PlotterWorkspace | null;
 }
 
 function getStageLabel(run: PlotRun | null) {
@@ -48,32 +49,82 @@ function formatStageState(stageState: PlotStageState) {
   return stageState.status;
 }
 
-export function PlotWorkflowPanel({ hardwareStatus }: PlotWorkflowPanelProps) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function formatPhysicalSize(width: unknown, height: unknown) {
+  if (typeof width !== "number" || typeof height !== "number") {
+    return null;
+  }
+  return `${width.toFixed(1).replace(/\.0$/, "")} × ${height
+    .toFixed(1)
+    .replace(/\.0$/, "")} mm`;
+}
+
+export function PlotWorkflowPanel({
+  hardwareStatus,
+  plotterWorkspace,
+}: PlotWorkflowPanelProps) {
   const {
     selectedAsset,
+    selectionSource,
     latestRun,
     recentRuns,
     loading,
     refreshing,
     busyAction,
     activeRun,
+    sizingMode,
     error,
     notice,
     createBuiltInPattern,
     uploadSvg,
     startRun,
+    setSizingMode,
   } = usePlotWorkflow();
+  const fitWithinDrawableAreaSupported = hardwareStatus.plotter.driver !== "axidraw-pyapi";
+  const fitWithinDrawableAreaSelectedAndUnsupported =
+    sizingMode === "fit_to_draw_area" && !fitWithinDrawableAreaSupported;
 
   const startDisabled =
     !selectedAsset ||
     activeRun ||
     busyAction === "start" ||
+    fitWithinDrawableAreaSelectedAndUnsupported ||
     !hardwareStatus.plotter.available ||
     !hardwareStatus.camera.available ||
     hardwareStatus.plotter.busy ||
     hardwareStatus.camera.busy;
 
   const latestStatus = latestRun?.status ?? "idle";
+  const latestRunUsesDifferentSource =
+    selectionSource === "manual" &&
+    selectedAsset !== null &&
+    latestRun !== null &&
+    latestRun.asset.id !== selectedAsset.id;
+  const uploadedNativeSizingWarning =
+    selectedAsset?.kind === "uploaded_svg" && sizingMode === "native";
+  const preparation =
+    latestRun && isRecord(latestRun.plotter_run_details.preparation)
+      ? latestRun.plotter_run_details.preparation
+      : null;
+  const sourceSize = preparation
+    ? formatPhysicalSize(preparation.source_width, preparation.source_height)
+    : null;
+  const preparedSize = preparation
+    ? formatPhysicalSize(preparation.prepared_width_mm, preparation.prepared_height_mm)
+    : null;
+  const sourceUnits =
+    preparation && typeof preparation.source_units === "string"
+      ? preparation.source_units
+      : null;
+  const unitsInferred = preparation?.units_inferred === true;
+  const drawableAreaSummary = plotterWorkspace
+    ? `${plotterWorkspace.drawable_area_mm.width_mm.toFixed(1).replace(/\.0$/, "")} × ${plotterWorkspace.drawable_area_mm.height_mm
+        .toFixed(1)
+        .replace(/\.0$/, "")} mm`
+    : null;
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -138,6 +189,42 @@ export function PlotWorkflowPanel({ hardwareStatus }: PlotWorkflowPanelProps) {
             </button>
           </div>
 
+          <div className="workflow-settings">
+            <label className="field-group workflow-select">
+              <span>Plot sizing</span>
+              <select
+                value={sizingMode}
+                onChange={(event) => setSizingMode(event.target.value as typeof sizingMode)}
+                disabled={busyAction !== null || activeRun}
+              >
+                <option value="native">Use authored size</option>
+                <option
+                  value="fit_to_draw_area"
+                  disabled={!fitWithinDrawableAreaSupported}
+                >
+                  Fit within drawable area
+                </option>
+              </select>
+            </label>
+            {fitWithinDrawableAreaSelectedAndUnsupported ? (
+              <div className="inline-notice inline-notice-error">
+                Fit within drawable area is temporarily disabled for real AxiDraw plotting
+                because it can exceed safe machine bounds. Use authored size only for SVGs
+                with explicit physical units.
+              </div>
+            ) : null}
+            {uploadedNativeSizingWarning ? (
+              <div className="inline-notice inline-notice-info">
+                Use authored size only works for uploaded SVGs that declare physical dimensions
+                such as mm, cm, or in. Unitless uploads should use Fit within drawable area.
+              </div>
+            ) : null}
+            <p className="footer-note">
+              Current drawable area: {drawableAreaSummary ?? "unknown"}. Built-in diagnostic
+              patterns use explicit physical SVG dimensions in the backend.
+            </p>
+          </div>
+
           <div className="selection-grid">
             <div className="selection-card">
               <h3>Selected source</h3>
@@ -155,9 +242,14 @@ export function PlotWorkflowPanel({ hardwareStatus }: PlotWorkflowPanelProps) {
                     />
                   </div>
                   <p className="footer-note">
-                    {selectedAsset.name} · saved at{" "}
+                    Staged source: {selectedAsset.name} · saved at{" "}
                     {new Date(selectedAsset.timestamp).toLocaleString()}
                   </p>
+                  {latestRunUsesDifferentSource ? (
+                    <p className="footer-note">
+                      Latest run used a different source: {latestRun.asset.name}.
+                    </p>
+                  ) : null}
                 </>
               ) : (
                 <div className="empty-state">
@@ -198,6 +290,18 @@ export function PlotWorkflowPanel({ hardwareStatus }: PlotWorkflowPanelProps) {
                     ? "Loading plot workflow..."
                     : "Run state is polled over local HTTP."}
               </p>
+              {preparation ? (
+                <div className="workflow-sizing-summary">
+                  <p className="footer-note">
+                    Source size: {sourceSize ?? "unknown"}
+                    {sourceUnits ? ` · units ${sourceUnits}` : ""}
+                    {unitsInferred ? " · inferred for preparation" : ""}
+                  </p>
+                  <p className="footer-note">
+                    Prepared size: {preparedSize ?? "unknown"} · mode {latestRun?.sizing_mode}
+                  </p>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -251,7 +355,9 @@ export function PlotWorkflowPanel({ hardwareStatus }: PlotWorkflowPanelProps) {
                   <div className="empty-state">
                     {latestRun?.status === "failed"
                       ? latestRun.error ?? "Run failed before capture completed."
-                      : "Capture will appear here once the run reaches the camera stage."}
+                      : latestRun?.capture_mode === "skip"
+                        ? "Capture was skipped for this diagnostic run."
+                        : "Capture will appear here once the run reaches the camera stage."}
                   </div>
                 )}
               </div>

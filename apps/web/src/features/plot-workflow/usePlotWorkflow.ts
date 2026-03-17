@@ -7,15 +7,22 @@ import {
   fetchPlotRuns,
   uploadPlotAsset,
 } from "../../lib/api";
-import type { PlotAsset, PlotRun, PlotRunSummary } from "../../types/plotting";
+import type {
+  PlotAsset,
+  PlotRun,
+  PlotRunSummary,
+  PlotSizingMode,
+} from "../../types/plotting";
 
 type PlotAction = "upload" | "pattern" | "start" | null;
 type NoticeTone = "info" | "success" | "error";
+type SelectionSource = "manual" | "run-derived" | null;
 
 const ACTIVE_RUN_STATUSES = new Set(["pending", "plotting", "capturing"]);
 
 export function usePlotWorkflow() {
   const [selectedAsset, setSelectedAsset] = useState<PlotAsset | null>(null);
+  const [selectionSource, setSelectionSource] = useState<SelectionSource>(null);
   const [latestRun, setLatestRun] = useState<PlotRun | null>(null);
   const [recentRuns, setRecentRuns] = useState<PlotRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,9 +33,17 @@ export function usePlotWorkflow() {
     tone: NoticeTone;
     message: string;
   } | null>(null);
+  const [sizingMode, setSizingMode] = useState<PlotSizingMode>("native");
   const mountedRef = useRef(true);
+  const selectionSourceRef = useRef<SelectionSource>(null);
 
   const activeRun = latestRun ? ACTIVE_RUN_STATUSES.has(latestRun.status) : false;
+
+  function updateSelection(asset: PlotAsset | null, source: SelectionSource) {
+    selectionSourceRef.current = source;
+    setSelectionSource(source);
+    setSelectedAsset(asset);
+  }
 
   async function refresh({ silent = false }: { silent?: boolean } = {}) {
     if (!silent) {
@@ -42,7 +57,9 @@ export function usePlotWorkflow() {
       }
       setLatestRun(latest.run);
       setRecentRuns(runs.runs);
-      setSelectedAsset((currentAsset) => currentAsset ?? latest.run?.asset ?? null);
+      if (selectionSourceRef.current !== "manual") {
+        updateSelection(latest.run?.asset ?? null, latest.run?.asset ? "run-derived" : null);
+      }
       setError(null);
     } catch (refreshError) {
       if (!mountedRef.current) {
@@ -70,7 +87,8 @@ export function usePlotWorkflow() {
       if (!mountedRef.current) {
         return;
       }
-      setSelectedAsset(asset);
+      setSizingMode("native");
+      updateSelection(asset, "manual");
       setNotice({
         tone: "success",
         message: "Built-in test-grid pattern is ready to plot.",
@@ -98,10 +116,11 @@ export function usePlotWorkflow() {
       if (!mountedRef.current) {
         return;
       }
-      setSelectedAsset(asset);
+      setSizingMode("fit_to_draw_area");
+      updateSelection(asset, "manual");
       setNotice({
         tone: "success",
-        message: `Loaded ${asset.name} for plotting.`,
+        message: `Loaded ${asset.name} for plotting. Uploaded SVGs default to Fit within drawable area unless they declare physical units.`,
       });
     } catch (actionError) {
       if (!mountedRef.current) {
@@ -126,11 +145,12 @@ export function usePlotWorkflow() {
       setBusyAction("start");
       setError(null);
       setNotice({ tone: "info", message: "Starting plot run..." });
-      const run = await createPlotRun(selectedAsset.id);
+      const run = await createPlotRun(selectedAsset.id, { sizing_mode: sizingMode });
       if (!mountedRef.current) {
         return;
       }
       setLatestRun(run);
+      updateSelection(run.asset, "run-derived");
       await refresh({ silent: true });
       setNotice({ tone: "success", message: "Plot run started." });
     } catch (actionError) {
@@ -172,17 +192,20 @@ export function usePlotWorkflow() {
 
   return {
     selectedAsset,
+    selectionSource,
     latestRun,
     recentRuns,
     loading,
     refreshing,
     busyAction,
     activeRun,
+    sizingMode,
     error,
     notice,
     refresh,
     createBuiltInPattern,
     uploadSvg,
     startRun,
+    setSizingMode,
   };
 }

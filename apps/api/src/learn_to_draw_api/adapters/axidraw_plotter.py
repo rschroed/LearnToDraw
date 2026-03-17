@@ -32,6 +32,7 @@ class AxiDrawPlotter:
     ) -> None:
         self._client = client or PyAxiDrawClient(port=port)
         self._port = port
+        config_details = self._client.config_details()
         self._connected = False
         self._busy = False
         self._error: Optional[str] = None
@@ -42,6 +43,12 @@ class AxiDrawPlotter:
             "port": port or "auto",
             "firmware_version": None,
             "api_surface": None,
+            "plot_api_supported": False,
+            "manual_api_supported": False,
+            "config_source": config_details["config_source"],
+            "calibration_source": config_details["calibration_source"],
+            "native_res_factor": config_details["native_res_factor"],
+            "motion_scale": config_details["motion_scale"],
             "pen_tuning": self._client.pen_tuning(),
             "last_action": "idle",
             "last_action_status": None,
@@ -82,17 +89,30 @@ class AxiDrawPlotter:
             details=dict(self._details),
         )
 
-    def return_to_origin(self) -> None:
+    def apply_persisted_calibration(
+        self,
+        *,
+        native_res_factor: float,
+        motion_scale: float,
+    ) -> None:
+        self._client.apply_persisted_native_res_factor(
+            native_res_factor=native_res_factor,
+            motion_scale=motion_scale,
+        )
+        self._sync_config_details()
+        self._touch()
+
+    def walk_home(self) -> None:
         self._ensure_ready()
         self._busy = True
         self._error = None
-        self._details["last_action"] = "return_to_origin"
+        self._details["last_action"] = "walk_home"
         self._details["last_action_status"] = "in_progress"
         self._touch()
         try:
-            result = self._client.return_to_origin()
+            result = self._client.walk_home()
             self._apply_action_result(result)
-            self._details["position"] = "origin"
+            self._details["position"] = "walk_home"
             self._details["last_action_status"] = "succeeded"
             self._touch()
         except PyAxiDrawClientError as exc:
@@ -184,6 +204,12 @@ class AxiDrawPlotter:
         if probe.port is not None:
             self._details["port"] = probe.port
         self._details["api_surface"] = probe.api_surface
+        self._details["plot_api_supported"] = probe.plot_api_supported
+        self._details["manual_api_supported"] = probe.manual_api_supported
+        self._details["config_source"] = probe.config_source
+        self._details["calibration_source"] = probe.calibration_source
+        self._details["native_res_factor"] = probe.native_res_factor
+        self._details["motion_scale"] = probe.motion_scale
         self._details["last_action"] = "connect"
         self._details["last_action_status"] = "succeeded"
 
@@ -191,11 +217,30 @@ class AxiDrawPlotter:
         if result.port is not None:
             self._details["port"] = result.port
         self._details["api_surface"] = result.api_surface
+        self._details["plot_api_supported"] = result.plot_api_supported
+        self._details["manual_api_supported"] = result.manual_api_supported
+        self._details["config_source"] = result.config_source
+        self._details["calibration_source"] = result.calibration_source
+        self._details["native_res_factor"] = result.native_res_factor
+        self._details["motion_scale"] = result.motion_scale
 
     def _apply_plot_execution(self, execution: AxiDrawPlotExecution) -> None:
         if execution.port is not None:
             self._details["port"] = execution.port
         self._details["api_surface"] = execution.api_surface
+        self._details["plot_api_supported"] = execution.plot_api_supported
+        self._details["manual_api_supported"] = execution.manual_api_supported
+        self._details["config_source"] = execution.config_source
+        self._details["calibration_source"] = execution.calibration_source
+        self._details["native_res_factor"] = execution.native_res_factor
+        self._details["motion_scale"] = execution.motion_scale
+
+    def _sync_config_details(self) -> None:
+        config_details = self._client.config_details()
+        self._details["config_source"] = config_details["config_source"]
+        self._details["calibration_source"] = config_details["calibration_source"]
+        self._details["native_res_factor"] = config_details["native_res_factor"]
+        self._details["motion_scale"] = config_details["motion_scale"]
 
     def _touch(self) -> None:
         self._last_updated = datetime.now(timezone.utc)

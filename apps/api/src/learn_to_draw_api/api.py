@@ -20,6 +20,18 @@ from learn_to_draw_api.services.plot_workflow import (
     PlotRunStore,
     PlotWorkflowService,
 )
+from learn_to_draw_api.services.plotter_calibration import (
+    PlotterCalibrationService,
+    PlotterCalibrationStore,
+)
+from learn_to_draw_api.services.plotter_device_settings import (
+    PlotterDeviceSettingsService,
+    PlotterDeviceSettingsStore,
+)
+from learn_to_draw_api.services.plotter_workspace import (
+    PlotterWorkspaceService,
+    PlotterWorkspaceStore,
+)
 
 
 def create_app(
@@ -30,7 +42,26 @@ def create_app(
 ) -> FastAPI:
     app_config = config or AppConfig.from_env()
     app_config.ensure_directories()
-    plotter_adapter = plotter or build_plotter_adapter(app_config)
+    calibration_store = PlotterCalibrationStore(app_config.calibration_dir)
+    calibration_service = PlotterCalibrationService(
+        store=calibration_store,
+        config=app_config,
+    )
+    device_settings_store = PlotterDeviceSettingsStore(app_config.device_settings_dir)
+    device_settings_service = PlotterDeviceSettingsService(
+        store=device_settings_store,
+        config=app_config,
+    )
+    workspace_store = PlotterWorkspaceStore(app_config.workspace_dir)
+    workspace_service = PlotterWorkspaceService(
+        store=workspace_store,
+        config=app_config,
+        device_settings_service=device_settings_service,
+    )
+    plotter_adapter = plotter or build_plotter_adapter(
+        app_config,
+        calibration=calibration_service.current(),
+    )
     camera_adapter = camera or build_camera_adapter()
 
     capture_store = CaptureStore(
@@ -46,6 +77,9 @@ def create_app(
         plotter=plotter_adapter,
         camera=camera_adapter,
         capture_store=capture_store,
+        calibration_service=calibration_service,
+        device_settings_service=device_settings_service,
+        workspace_service=workspace_service,
     )
     plot_workflow_service = PlotWorkflowService(
         plotter=plotter_adapter,
@@ -53,6 +87,9 @@ def create_app(
         capture_store=capture_store,
         asset_store=plot_asset_store,
         run_store=plot_run_store,
+        calibration_service=calibration_service,
+        device_settings_service=device_settings_service,
+        workspace_service=workspace_service,
     )
 
     @asynccontextmanager
@@ -65,6 +102,9 @@ def create_app(
     app.state.config = app_config
     app.state.hardware_service = hardware_service
     app.state.plot_workflow_service = plot_workflow_service
+    app.state.plotter_calibration_service = calibration_service
+    app.state.plotter_device_settings_service = device_settings_service
+    app.state.plotter_workspace_service = workspace_service
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(app_config.cors_origins),

@@ -5,10 +5,13 @@ import { StatusPill } from "./StatusPill";
 
 interface HardwareCardProps {
   title: string;
-  actionLabel: string;
   status: DeviceStatus;
-  onAction: () => Promise<void>;
-  actionPending: boolean;
+  actionLabel?: string;
+  onAction?: (() => Promise<void>) | null;
+  actionPending?: boolean;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: (() => Promise<void>) | null;
+  secondaryActionPending?: boolean;
   notice?: {
     tone: "info" | "success" | "error";
     message: string;
@@ -37,16 +40,23 @@ function formatValue(value: unknown) {
 
 export function HardwareCard({
   title,
-  actionLabel,
   status,
+  actionLabel,
   onAction,
-  actionPending,
+  actionPending = false,
+  secondaryActionLabel,
+  onSecondaryAction,
+  secondaryActionPending = false,
   notice,
   footer,
   children,
 }: HardwareCardProps) {
   const details = formatDetails(status.details);
   const actionDisabled = actionPending || status.busy || !status.available;
+  const secondaryActionDisabled =
+    secondaryActionPending || status.busy || !status.available;
+  const hasPrimaryAction = Boolean(actionLabel && onAction);
+  const hasSecondaryAction = Boolean(secondaryActionLabel && onSecondaryAction);
 
   return (
     <section className="hardware-card">
@@ -100,16 +110,30 @@ export function HardwareCard({
         </div>
       ) : null}
 
-      <div className="actions">
-        <button
-          type="button"
-          className="button-primary"
-          onClick={() => void onAction()}
-          disabled={actionDisabled}
-        >
-          {actionPending ? "Working..." : actionLabel}
-        </button>
-      </div>
+      {hasPrimaryAction || hasSecondaryAction ? (
+        <div className="actions">
+          {hasPrimaryAction ? (
+            <button
+              type="button"
+              className="button-primary"
+              onClick={() => void onAction?.()}
+              disabled={actionDisabled}
+            >
+              {actionPending ? "Working..." : actionLabel}
+            </button>
+          ) : null}
+          {hasSecondaryAction ? (
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => void onSecondaryAction?.()}
+              disabled={secondaryActionDisabled}
+            >
+              {secondaryActionPending ? "Working..." : secondaryActionLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {children}
       {footer}

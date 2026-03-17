@@ -8,6 +8,10 @@ from learn_to_draw_api.models import (
     HardwareStatus,
     LatestPlotRunResponse,
     LatestCaptureResponse,
+    PlotterCalibration,
+    PlotterCalibrationRequest,
+    PlotterCalibrationResponse,
+    PlotterDeviceSettings,
     PatternAssetCreateRequest,
     PlotAsset,
     PlotterPenHeightsRequest,
@@ -16,6 +20,9 @@ from learn_to_draw_api.models import (
     PlotRunListResponse,
     PlotterCommandResponse,
     PlotterTestActionRequest,
+    PlotterWorkspace,
+    PlotterWorkspaceRequest,
+    PlotterWorkspaceResponse,
 )
 from learn_to_draw_api.services.hardware import HardwareService
 from learn_to_draw_api.services.plot_workflow import PlotWorkflowService
@@ -35,9 +42,9 @@ def build_api_router(
     def get_hardware_status() -> HardwareStatus:
         return hardware_service.get_hardware_status()
 
-    @router.post("/api/plotter/return-to-origin", response_model=PlotterCommandResponse)
-    def post_plotter_return_to_origin() -> PlotterCommandResponse:
-        return hardware_service.return_plotter_to_origin()
+    @router.post("/api/plotter/walk-home", response_model=PlotterCommandResponse)
+    def post_plotter_walk_home() -> PlotterCommandResponse:
+        return hardware_service.walk_plotter_home()
 
     @router.post("/api/plotter/test-actions", response_model=PlotterCommandResponse)
     def post_plotter_test_action(
@@ -50,6 +57,30 @@ def build_api_router(
         request: PlotterPenHeightsRequest,
     ) -> PlotterCommandResponse:
         return hardware_service.set_plotter_pen_heights(request)
+
+    @router.get("/api/plotter/calibration", response_model=PlotterCalibration)
+    def get_plotter_calibration() -> PlotterCalibration:
+        return hardware_service.get_plotter_calibration()
+
+    @router.get("/api/plotter/device", response_model=PlotterDeviceSettings)
+    def get_plotter_device() -> PlotterDeviceSettings:
+        return hardware_service.get_plotter_device_settings()
+
+    @router.post("/api/plotter/calibration", response_model=PlotterCalibrationResponse)
+    def post_plotter_calibration(
+        request: PlotterCalibrationRequest,
+    ) -> PlotterCalibrationResponse:
+        return hardware_service.set_plotter_calibration(request)
+
+    @router.get("/api/plotter/workspace", response_model=PlotterWorkspace)
+    def get_plotter_workspace() -> PlotterWorkspace:
+        return hardware_service.get_plotter_workspace()
+
+    @router.post("/api/plotter/workspace", response_model=PlotterWorkspaceResponse)
+    def post_plotter_workspace(
+        request: PlotterWorkspaceRequest,
+    ) -> PlotterWorkspaceResponse:
+        return hardware_service.set_plotter_workspace(request)
 
     @router.post("/api/camera/capture", response_model=CameraCaptureResponse)
     def post_camera_capture() -> CameraCaptureResponse:
@@ -83,6 +114,7 @@ def build_api_router(
             request.asset_id,
             purpose=request.purpose,
             capture_mode=request.capture_mode,
+            sizing_mode=request.sizing_mode,
         )
 
     @router.get("/api/plot-runs/latest", response_model=LatestPlotRunResponse)

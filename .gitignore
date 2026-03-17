@@ -16,7 +16,13 @@ apps/web/vite.config.d.ts
 
 artifacts/captures/*
 !artifacts/captures/.gitkeep
+artifacts/calibration/*
+!artifacts/calibration/.gitkeep
+artifacts/device_settings/*
+!artifacts/device_settings/.gitkeep
 artifacts/plot_assets/*
 !artifacts/plot_assets/.gitkeep
 artifacts/plot_runs/*
 !artifacts/plot_runs/.gitkeep
+artifacts/workspace/*
+!artifacts/workspace/.gitkeep
