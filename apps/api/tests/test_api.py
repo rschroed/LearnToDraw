@@ -209,9 +209,12 @@ def test_plotter_device_endpoint_reports_model_derived_bounds(tmp_path):
     payload = response.json()
     assert payload["plotter_model"]["code"] == 2
     assert payload["plotter_model"]["label"] == "AxiDraw V3/A3 or SE/A3"
-    assert payload["plotter_bounds_source"] == "model_default"
-    assert payload["plotter_bounds_mm"]["width_mm"] == 430.022
-    assert payload["plotter_bounds_mm"]["height_mm"] == 296.926
+    assert payload["nominal_plotter_bounds_source"] == "model_default"
+    assert payload["nominal_plotter_bounds_mm"]["width_mm"] == 430.022
+    assert payload["nominal_plotter_bounds_mm"]["height_mm"] == 296.926
+    assert payload["plotter_bounds_source"] == "default_clearance"
+    assert payload["plotter_bounds_mm"]["width_mm"] == 420.022
+    assert payload["plotter_bounds_mm"]["height_mm"] == 286.926
 
 
 def test_axidraw_without_explicit_bounds_degrades_safely(tmp_path):
@@ -262,9 +265,103 @@ def test_plotter_device_endpoint_reports_explicit_bounds_override(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["plotter_model"] is None
-    assert payload["plotter_bounds_source"] == "config_override"
-    assert payload["plotter_bounds_mm"]["width_mm"] == 300.0
-    assert payload["plotter_bounds_mm"]["height_mm"] == 218.0
+    assert payload["nominal_plotter_bounds_source"] == "config_override"
+    assert payload["nominal_plotter_bounds_mm"]["width_mm"] == 300.0
+    assert payload["nominal_plotter_bounds_mm"]["height_mm"] == 218.0
+    assert payload["plotter_bounds_source"] == "default_clearance"
+    assert payload["plotter_bounds_mm"]["width_mm"] == 290.0
+    assert payload["plotter_bounds_mm"]["height_mm"] == 208.0
+
+
+def test_plotter_safe_bounds_endpoint_persists_manual_override(tmp_path):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            plotter_bounds_width_mm=300.0,
+            plotter_bounds_height_mm=218.0,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        updated = client.post(
+            "/api/plotter/device/safe-bounds",
+            json={"width_mm": 280.0, "height_mm": 200.0},
+        )
+        current = client.get("/api/plotter/device")
+
+    assert updated.status_code == 200
+    assert updated.json()["device"]["plotter_bounds_source"] == "manual_override"
+    assert updated.json()["device"]["plotter_bounds_mm"]["width_mm"] == 280.0
+    assert updated.json()["device"]["plotter_bounds_mm"]["height_mm"] == 200.0
+    assert current.status_code == 200
+    assert current.json()["plotter_bounds_source"] == "manual_override"
+    assert current.json()["plotter_bounds_mm"]["width_mm"] == 280.0
+    assert current.json()["plotter_bounds_mm"]["height_mm"] == 200.0
+
+
+def test_plotter_safe_bounds_endpoint_clears_to_default_clearance(tmp_path):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            plotter_bounds_width_mm=300.0,
+            plotter_bounds_height_mm=218.0,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        client.post(
+            "/api/plotter/device/safe-bounds",
+            json={"width_mm": 280.0, "height_mm": 200.0},
+        )
+        cleared = client.post(
+            "/api/plotter/device/safe-bounds",
+            json={"width_mm": None, "height_mm": None},
+        )
+
+    assert cleared.status_code == 200
+    assert cleared.json()["device"]["plotter_bounds_source"] == "default_clearance"
+    assert cleared.json()["device"]["plotter_bounds_mm"]["width_mm"] == 290.0
+    assert cleared.json()["device"]["plotter_bounds_mm"]["height_mm"] == 208.0
+
+
+def test_plotter_safe_bounds_endpoint_rejects_partial_values(tmp_path):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            plotter_bounds_width_mm=300.0,
+            plotter_bounds_height_mm=218.0,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/plotter/device/safe-bounds",
+            json={"width_mm": 280.0, "height_mm": None},
+        )
+
+    assert response.status_code == 400
+    assert "Provide both width_mm and height_mm" in response.json()["detail"]
 
 
 def test_plotter_workspace_endpoint_persists_page_setup(tmp_path):

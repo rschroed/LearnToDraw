@@ -8,6 +8,7 @@ import {
   fetchLatestCapture,
   fetchPlotterCalibration,
   fetchPlotterDevice,
+  setPlotterSafeBounds,
   fetchPlotterWorkspace,
   walkPlotterHome,
   runPlotterTestAction,
@@ -30,6 +31,7 @@ type DiagnosticPatternId = "tiny-square" | "dash-row" | "double-box";
 type ActionName =
   | "plotter-walk-home"
   | "plotter-calibration"
+  | "plotter-safe-bounds"
   | "plotter-workspace"
   | "plotter-pen-heights"
   | "camera-capture"
@@ -207,6 +209,29 @@ export function useHardwareDashboard() {
         {
           pending: "Saving plotter calibration...",
           success: "Plotter calibration saved.",
+        },
+      ),
+    setPlotterSafeBounds: (safeBounds: {
+      width_mm: number | null;
+      height_mm: number | null;
+    }) =>
+      runAction(
+        "plotter-safe-bounds",
+        async () => {
+          const response = await setPlotterSafeBounds(safeBounds);
+          if (mountedRef.current) {
+            setPlotterDeviceState(response.device);
+          }
+        },
+        {
+          pending:
+            safeBounds.width_mm === null
+              ? "Resetting operational safe bounds..."
+              : "Saving operational safe bounds...",
+          success:
+            safeBounds.width_mm === null
+              ? "Operational safe bounds reset."
+              : "Operational safe bounds updated.",
         },
       ),
     setPlotterWorkspace: (workspace: {

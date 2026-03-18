@@ -20,6 +20,11 @@ interface CalibrationValue {
   nativeResFactor: string;
 }
 
+interface SafeBoundsValues {
+  widthMm: string;
+  heightMm: string;
+}
+
 interface WorkspaceValues {
   pageWidthMm: string;
   pageHeightMm: string;
@@ -60,6 +65,13 @@ function areCalibrationValuesEqual(
   right: CalibrationValue | null,
 ) {
   return left?.nativeResFactor === right?.nativeResFactor;
+}
+
+function areSafeBoundsValuesEqual(
+  left: SafeBoundsValues | null,
+  right: SafeBoundsValues | null,
+) {
+  return left?.widthMm === right?.widthMm && left?.heightMm === right?.heightMm;
 }
 
 function areWorkspaceValuesEqual(
@@ -121,6 +133,31 @@ function getCalibrationValidation(nativeResFactor: string): string | null {
     return "Native resolution factor must be greater than zero.";
   }
 
+  return null;
+}
+
+function getSafeBoundsValidation(
+  safeBounds: SafeBoundsValues,
+  nominalBounds: { width_mm: number; height_mm: number } | null,
+): string | null {
+  if (safeBounds.widthMm.trim() === "" || safeBounds.heightMm.trim() === "") {
+    return "Enter both operational safe bounds before saving.";
+  }
+
+  const widthMm = Number(safeBounds.widthMm);
+  const heightMm = Number(safeBounds.heightMm);
+  if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm)) {
+    return "Operational safe bounds must be numeric values.";
+  }
+  if (widthMm <= 0 || heightMm <= 0) {
+    return "Operational safe bounds must be greater than zero.";
+  }
+  if (
+    nominalBounds &&
+    (widthMm > nominalBounds.width_mm || heightMm > nominalBounds.height_mm)
+  ) {
+    return `Operational safe bounds cannot exceed nominal machine bounds of ${nominalBounds.width_mm} x ${nominalBounds.height_mm} mm.`;
+  }
   return null;
 }
 
@@ -255,6 +292,7 @@ export function HardwareDashboard() {
     runPlotterTestAction,
     runDiagnosticPattern,
     setPlotterCalibration,
+    setPlotterSafeBounds,
     setPlotterWorkspace,
     setPlotterPenHeights,
     capture,
@@ -272,6 +310,15 @@ export function HardwareDashboard() {
     useState<CalibrationValue | null>(null);
   const [pendingAppliedCalibration, setPendingAppliedCalibration] =
     useState<CalibrationValue | null>(null);
+  const [safeBoundsValues, setSafeBoundsValues] = useState<SafeBoundsValues>({
+    widthMm: "200",
+    heightMm: "200",
+  });
+  const [isSafeBoundsDirty, setIsSafeBoundsDirty] = useState(false);
+  const [lastSyncedSafeBounds, setLastSyncedSafeBounds] =
+    useState<SafeBoundsValues | null>(null);
+  const [pendingAppliedSafeBounds, setPendingAppliedSafeBounds] =
+    useState<SafeBoundsValues | null>(null);
   const [workspaceValues, setWorkspaceValues] = useState<WorkspaceValues>({
     pageWidthMm: "210",
     pageHeightMm: "297",
@@ -318,6 +365,13 @@ export function HardwareDashboard() {
           marginTopMm: String(plotterWorkspace.margins_mm.top_mm),
           marginRightMm: String(plotterWorkspace.margins_mm.right_mm),
           marginBottomMm: String(plotterWorkspace.margins_mm.bottom_mm),
+        }
+      : null;
+  const currentSafeBoundsValue =
+    plotterDevice !== null
+      ? {
+          widthMm: String(plotterDevice.plotter_bounds_mm.width_mm),
+          heightMm: String(plotterDevice.plotter_bounds_mm.height_mm),
         }
       : null;
 
@@ -409,6 +463,49 @@ export function HardwareDashboard() {
       actionFeedback.tone === "error"
     ) {
       setPendingAppliedCalibration(null);
+    }
+  }, [actionFeedback]);
+
+  useEffect(() => {
+    if (!currentSafeBoundsValue) {
+      return;
+    }
+
+    const shouldSyncDraft =
+      lastSyncedSafeBounds === null ||
+      !isSafeBoundsDirty ||
+      areSafeBoundsValuesEqual(pendingAppliedSafeBounds, currentSafeBoundsValue);
+
+    if (!shouldSyncDraft) {
+      return;
+    }
+
+    if (!areSafeBoundsValuesEqual(safeBoundsValues, currentSafeBoundsValue)) {
+      setSafeBoundsValues(currentSafeBoundsValue);
+    }
+
+    if (!areSafeBoundsValuesEqual(lastSyncedSafeBounds, currentSafeBoundsValue)) {
+      setLastSyncedSafeBounds(currentSafeBoundsValue);
+    }
+
+    if (areSafeBoundsValuesEqual(pendingAppliedSafeBounds, currentSafeBoundsValue)) {
+      setIsSafeBoundsDirty(false);
+      setPendingAppliedSafeBounds(null);
+    }
+  }, [
+    currentSafeBoundsValue,
+    isSafeBoundsDirty,
+    lastSyncedSafeBounds,
+    pendingAppliedSafeBounds,
+    safeBoundsValues,
+  ]);
+
+  useEffect(() => {
+    if (
+      actionFeedback?.action === "plotter-safe-bounds" &&
+      actionFeedback.tone === "error"
+    ) {
+      setPendingAppliedSafeBounds(null);
     }
   }, [actionFeedback]);
 
@@ -506,6 +603,11 @@ export function HardwareDashboard() {
       : null;
   const penHeightValidation = getPenHeightValidation(penPosUp, penPosDown);
   const calibrationValidation = getCalibrationValidation(nativeResFactor);
+  const nominalPlotterBounds = plotterDevice?.nominal_plotter_bounds_mm ?? null;
+  const safeBoundsValidation = getSafeBoundsValidation(
+    safeBoundsValues,
+    nominalPlotterBounds,
+  );
   const workspaceMetrics = getWorkspaceMetrics(workspaceValues);
   const workspaceValidation = getWorkspaceValidation(
     workspaceMetrics,
@@ -531,6 +633,8 @@ export function HardwareDashboard() {
       : plotterCalibration?.motion_scale ?? null;
   const plotterModelLabel = plotterDevice?.plotter_model?.label ?? null;
   const plotterBoundsSource = plotterDevice?.plotter_bounds_source ?? null;
+  const nominalPlotterBoundsSource =
+    plotterDevice?.nominal_plotter_bounds_source ?? null;
   const drawableWidth = workspaceMetrics.drawableWidthMm;
   const drawableHeight = workspaceMetrics.drawableHeightMm;
   const workspaceSourceLabel = plotterWorkspace?.source
@@ -546,6 +650,8 @@ export function HardwareDashboard() {
   const penHeightDisabled =
     actionName !== null || hardwareStatus.plotter.busy || !hardwareStatus.plotter.available;
   const calibrationDisabled =
+    actionName !== null || hardwareStatus.plotter.busy || !hardwareStatus.plotter.available;
+  const safeBoundsDisabled =
     actionName !== null || hardwareStatus.plotter.busy || !hardwareStatus.plotter.available;
   const workspaceDisabled =
     actionName !== null || hardwareStatus.plotter.busy || !hardwareStatus.plotter.available;
@@ -564,6 +670,11 @@ export function HardwareDashboard() {
         lastSyncedCalibration,
       ),
     );
+  }
+
+  function handleSafeBoundsChange(nextValues: SafeBoundsValues) {
+    setSafeBoundsValues(nextValues);
+    setIsSafeBoundsDirty(!areSafeBoundsValuesEqual(nextValues, lastSyncedSafeBounds));
   }
 
   function handleWorkspaceChange(nextValues: WorkspaceValues) {
@@ -613,6 +724,7 @@ export function HardwareDashboard() {
               : actionFeedback &&
                   (actionFeedback.action === "plotter-walk-home" ||
                     actionFeedback.action === "plotter-calibration" ||
+                    actionFeedback.action === "plotter-safe-bounds" ||
                     actionFeedback.action === "plotter-workspace" ||
                     actionFeedback.action === "plotter-pen-heights" ||
                     actionFeedback.action.startsWith("plotter-test:") ||
@@ -782,7 +894,7 @@ export function HardwareDashboard() {
                   <div className="workspace-card">
                     <div className="workspace-card-header">
                       <h4>Plotter</h4>
-                      <span className="workspace-unit-chip">Read only</span>
+                      <span className="workspace-unit-chip">Backend owned</span>
                     </div>
                     <ul className="details-list compact-details workspace-capability-list">
                       <li>
@@ -790,7 +902,23 @@ export function HardwareDashboard() {
                         <strong>{plotterModelLabel ?? "Model unavailable"}</strong>
                       </li>
                       <li>
-                        <span>Safe plotter bounds</span>
+                        <span>Nominal machine bounds</span>
+                        <strong>
+                          {plotterDevice
+                            ? `${formatMm(plotterDevice.nominal_plotter_bounds_mm.width_mm)} x ${formatMm(
+                                plotterDevice.nominal_plotter_bounds_mm.height_mm,
+                              )}`
+                            : "unknown"}
+                        </strong>
+                      </li>
+                      {nominalPlotterBoundsSource ? (
+                        <li>
+                          <span>Nominal source</span>
+                          <strong>{formatLabel(nominalPlotterBoundsSource)}</strong>
+                        </li>
+                      ) : null}
+                      <li>
+                        <span>Operational safe bounds</span>
                         <strong>
                           {plotterDevice
                             ? `${formatMm(plotterDevice.plotter_bounds_mm.width_mm)} x ${formatMm(
@@ -801,11 +929,87 @@ export function HardwareDashboard() {
                       </li>
                       {plotterBoundsSource ? (
                         <li>
-                          <span>Bounds source</span>
+                          <span>Operational source</span>
                           <strong>{formatLabel(plotterBoundsSource)}</strong>
                         </li>
                       ) : null}
                     </ul>
+                    {isAxiDraw ? (
+                      <div className="diagnostic-subsection">
+                        <h4>Operational safe bounds</h4>
+                        <div className="workspace-grid workspace-grid-two">
+                          {renderWorkspaceInput(
+                            "Width",
+                            safeBoundsValues.widthMm,
+                            (nextValue) =>
+                              handleSafeBoundsChange({
+                                ...safeBoundsValues,
+                                widthMm: nextValue,
+                              }),
+                            safeBoundsDisabled,
+                            1,
+                          )}
+                          {renderWorkspaceInput(
+                            "Height",
+                            safeBoundsValues.heightMm,
+                            (nextValue) =>
+                              handleSafeBoundsChange({
+                                ...safeBoundsValues,
+                                heightMm: nextValue,
+                              }),
+                            safeBoundsDisabled,
+                            1,
+                          )}
+                        </div>
+                        <div className="section-actions workspace-actions">
+                          <button
+                            type="button"
+                            className="button-secondary button-compact"
+                            onClick={() => {
+                              setPendingAppliedSafeBounds(safeBoundsValues);
+                              void setPlotterSafeBounds({
+                                width_mm: Number(safeBoundsValues.widthMm),
+                                height_mm: Number(safeBoundsValues.heightMm),
+                              });
+                            }}
+                            disabled={
+                              safeBoundsDisabled ||
+                              safeBoundsValidation !== null ||
+                              areSafeBoundsValuesEqual(safeBoundsValues, lastSyncedSafeBounds)
+                            }
+                          >
+                            Save safe bounds
+                          </button>
+                          <button
+                            type="button"
+                            className="button-secondary button-compact"
+                            onClick={() => {
+                              setPendingAppliedSafeBounds(null);
+                              void setPlotterSafeBounds({
+                                width_mm: null,
+                                height_mm: null,
+                              });
+                            }}
+                            disabled={
+                              safeBoundsDisabled ||
+                              plotterBoundsSource === "default_clearance"
+                            }
+                          >
+                            Reset to default clearance
+                          </button>
+                        </div>
+                        {safeBoundsValidation ? (
+                          <div className="inline-notice inline-notice-error workspace-inline-notice">
+                            {safeBoundsValidation}
+                          </div>
+                        ) : null}
+                        <p className="footer-note">
+                          Operational safe bounds are the backend-owned plotting envelope. Default
+                          clearance trims the nominal machine travel on the far right and bottom
+                          edges.
+                        </p>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="workspace-layout">

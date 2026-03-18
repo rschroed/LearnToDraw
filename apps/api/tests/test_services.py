@@ -164,9 +164,12 @@ def test_device_settings_service_uses_explicit_axidraw_model_bounds(tmp_path):
 
     assert settings.plotter_model is not None
     assert settings.plotter_model.code == 1
-    assert settings.plotter_bounds_source == "model_default"
-    assert settings.plotter_bounds_mm.width_mm == 299.974
-    assert settings.plotter_bounds_mm.height_mm == 217.932
+    assert settings.nominal_plotter_bounds_source == "model_default"
+    assert settings.nominal_plotter_bounds_mm.width_mm == 299.974
+    assert settings.nominal_plotter_bounds_mm.height_mm == 217.932
+    assert settings.plotter_bounds_source == "default_clearance"
+    assert settings.plotter_bounds_mm.width_mm == 289.974
+    assert settings.plotter_bounds_mm.height_mm == 207.932
 
 
 def test_device_settings_service_uses_explicit_axidraw_bounds_override(tmp_path):
@@ -182,9 +185,51 @@ def test_device_settings_service_uses_explicit_axidraw_bounds_override(tmp_path)
     settings = service.current()
 
     assert settings.plotter_model is None
-    assert settings.plotter_bounds_source == "config_override"
-    assert settings.plotter_bounds_mm.width_mm == 300.0
-    assert settings.plotter_bounds_mm.height_mm == 218.0
+    assert settings.nominal_plotter_bounds_source == "config_override"
+    assert settings.nominal_plotter_bounds_mm.width_mm == 300.0
+    assert settings.nominal_plotter_bounds_mm.height_mm == 218.0
+    assert settings.plotter_bounds_source == "default_clearance"
+    assert settings.plotter_bounds_mm.width_mm == 290.0
+    assert settings.plotter_bounds_mm.height_mm == 208.0
+
+
+def test_device_settings_service_persists_manual_safe_bounds_override(tmp_path):
+    service = build_device_settings_service(
+        tmp_path,
+        config_overrides={
+            "plotter_driver": "axidraw",
+            "plotter_bounds_width_mm": 300.0,
+            "plotter_bounds_height_mm": 218.0,
+        },
+    )
+
+    saved = service.save_safe_bounds_override(width_mm=280.0, height_mm=200.0)
+    current = service.current()
+
+    assert saved.plotter_bounds_source == "manual_override"
+    assert saved.plotter_bounds_mm.width_mm == 280.0
+    assert saved.plotter_bounds_mm.height_mm == 200.0
+    assert current.plotter_bounds_source == "manual_override"
+    assert current.plotter_bounds_mm.width_mm == 280.0
+    assert current.plotter_bounds_mm.height_mm == 200.0
+
+
+def test_device_settings_service_clears_manual_safe_bounds_override(tmp_path):
+    service = build_device_settings_service(
+        tmp_path,
+        config_overrides={
+            "plotter_driver": "axidraw",
+            "plotter_bounds_width_mm": 300.0,
+            "plotter_bounds_height_mm": 218.0,
+        },
+    )
+    service.save_safe_bounds_override(width_mm=280.0, height_mm=200.0)
+
+    cleared = service.save_safe_bounds_override(width_mm=None, height_mm=None)
+
+    assert cleared.plotter_bounds_source == "default_clearance"
+    assert cleared.plotter_bounds_mm.width_mm == 290.0
+    assert cleared.plotter_bounds_mm.height_mm == 208.0
 
 
 def test_device_settings_service_rejects_unconfigured_axidraw_bounds(tmp_path):
@@ -210,6 +255,30 @@ def test_device_settings_service_rejects_partial_axidraw_bounds_override(tmp_pat
 
     with pytest.raises(HardwareUnavailableError, match="Set both LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM"):
         service.current()
+
+
+def test_device_settings_service_rejects_safe_bounds_override_that_exceeds_nominal(tmp_path):
+    service = build_device_settings_service(
+        tmp_path,
+        config_overrides={
+            "plotter_driver": "axidraw",
+            "plotter_bounds_width_mm": 300.0,
+            "plotter_bounds_height_mm": 218.0,
+        },
+    )
+
+    with pytest.raises(InvalidArtifactError, match="cannot exceed the nominal machine bounds"):
+        service.save_safe_bounds_override(width_mm=301.0, height_mm=200.0)
+
+
+def test_mock_device_settings_keep_nominal_and_operational_bounds_identical(tmp_path):
+    service = build_device_settings_service(tmp_path)
+
+    settings = service.current()
+
+    assert settings.nominal_plotter_bounds_mm == settings.plotter_bounds_mm
+    assert settings.nominal_plotter_bounds_source == "config_default"
+    assert settings.plotter_bounds_source == "config_default"
 
 
 def test_workspace_service_returns_invalid_state_for_misaligned_axidraw_defaults(tmp_path):

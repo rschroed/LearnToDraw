@@ -43,6 +43,10 @@ export type PlotterCalibrationSource =
   | "env_override"
   | "explicit_path";
 export type PlotterBoundsSource =
+  | "manual_override"
+  | "default_clearance"
+  | "config_default";
+export type NominalPlotterBoundsSource =
   | "model_default"
   | "config_override"
   | "config_default";
@@ -71,10 +75,18 @@ export type PlotterDeviceSettingsSource = "config_default" | "persisted";
 export interface PlotterDeviceSettings {
   driver: string;
   plotter_model: PlotterModelDescriptor | null;
+  nominal_plotter_bounds_mm: SizeMm;
+  nominal_plotter_bounds_source: NominalPlotterBoundsSource;
   plotter_bounds_mm: SizeMm;
   plotter_bounds_source: PlotterBoundsSource;
   updated_at: string;
   source: PlotterDeviceSettingsSource;
+}
+
+export interface PlotterDeviceSettingsResponse {
+  ok: boolean;
+  message: string;
+  device: PlotterDeviceSettings;
 }
 
 export interface SizeMm {

@@ -48,6 +48,8 @@ This device-settings slice adds:
 - read-only plotter model visibility in the Plotter card
 - vendor-aligned model labels and default bounds for AxiDraw when a model is explicitly configured
 - explicit bounds-source reporting so model-derived defaults and config overrides are visible
+- separate nominal machine bounds and operational safe bounds for real AxiDraw
+- backend-owned default clearances on the far right and bottom edges, with an optional persisted safe-bounds override
 
 ## Repo layout
 
@@ -131,7 +133,7 @@ export LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM=300
 export LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM=218
 ```
 
-For a V2/V3/SE A4 machine, `300 × 218 mm` is the observed safe bound to configure,
+For a V2/V3/SE A4 machine, `300 × 218 mm` is the nominal machine-travel example to configure,
 but it is now an explicit example config rather than an implicit backend fallback.
 
 Optional motion settings:
@@ -218,9 +220,10 @@ Optional workspace storage override:
 export LEARN_TO_DRAW_WORKSPACE_DIR=/absolute/path/to/workspace
 ```
 
-The app now treats sizing constraints as two separate layers:
+The app now treats sizing constraints as three separate layers:
 
-- `plotter bounds`: the maximum safe physical area for the machine
+- `nominal machine bounds`: explicit model/env machine travel
+- `operational safe bounds`: the backend-owned plotting envelope actually used for validation and plotting
 - `session paper setup`: the current page size and margins mounted in the app
 
 For the AxiDraw driver, the app also keeps a separate device-settings record under:
@@ -229,9 +232,9 @@ For the AxiDraw driver, the app also keeps a separate device-settings record und
 artifacts/device_settings/plotter.json
 ```
 
-If `LEARN_TO_DRAW_AXIDRAW_MODEL` is explicitly set, the backend derives default plotter
+If `LEARN_TO_DRAW_AXIDRAW_MODEL` is explicitly set, the backend derives nominal machine
 bounds from the same vendor travel constants used by the AxiDraw stack and surfaces a
-descriptive model label in the Plotter card. Effective bounds precedence is:
+descriptive model label in the Plotter card. Nominal bounds precedence is:
 
 1. `LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM` / `LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM`
 2. model-derived AxiDraw bounds when `LEARN_TO_DRAW_AXIDRAW_MODEL` is explicitly configured
@@ -240,9 +243,22 @@ For the real AxiDraw driver, one of those two sources is now required. If neithe
 configured, the backend stays up but marks the plotter unavailable until explicit machine
 bounds or an explicit AxiDraw model are provided.
 
-The normal UI does not edit plotter bounds directly. It shows the current model, effective
-bounds, and bounds source read-only, while page size and margins remain editable session
-state through the backend.
+For real AxiDraw, the backend derives operational safe bounds from the nominal machine
+bounds by trimming `10 mm` from the far right edge and `10 mm` from the bottom edge.
+Those default clearances keep the current top-left origin unchanged while adding slack at
+the risky far edges. The Plotter card now shows both nominal machine bounds and operational
+safe bounds, and it allows a narrow backend-owned override/reset flow for the operational
+safe bounds only.
+
+The persisted device-settings record lives under:
+
+```text
+artifacts/device_settings/plotter.json
+```
+
+For real AxiDraw, that record stores the optional manual operational safe-bounds override.
+Clearing the override returns the backend to the default-clearance envelope derived from
+the nominal machine bounds.
 
 The persisted session workspace lives under:
 
@@ -252,7 +268,7 @@ artifacts/workspace/plotter.json
 
 The Plotter card can update page width, page height, and margins through the backend.
 The backend computes a drawable area from that session setup and validates that it stays
-inside the stable plotter bounds.
+inside the operational safe bounds.
 
 If corrected machine bounds make the saved paper setup invalid, `GET /api/plotter/workspace`
 now returns the persisted workspace plus `is_valid=false` and a `validation_error` message
@@ -266,11 +282,12 @@ Normal plotting now uses a single backend-owned preparation path:
 - the normal built-in `test-grid` uses this same preparation path
 - dedicated hardware diagnostics stay fixed-size and use a separate diagnostic passthrough path
 
-The backend refuses prepared output that would exceed the current drawable area or the configured plotter bounds.
+The backend refuses prepared output that would exceed the current drawable area or the
+current operational safe bounds.
 
 Each plot run now also records a preparation audit in the run metadata, including:
 
-- the effective plotter bounds, page size, and drawable area used for the run
+- the effective operational safe bounds, page size, and drawable area used for the run
 - derived workspace math such as drawable origin and remaining bounds headroom
 - preparation details such as strategy, placement origin, prepared content box, root `viewBox`, scale, and any computed overflow
 
