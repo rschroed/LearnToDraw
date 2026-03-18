@@ -50,5 +50,7 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Kept the helper lifecycle-only with localhost `/status`, `/start`, and `/stop` endpoints
 - Left backend and frontend hardware APIs unchanged while testing whether helper-owned startup improves camera permission reliability
 - Added OpenCV camera status diagnostics for open/read results and backend selection during real-camera validation
+- Added helper-aware dashboard startup so the web app can auto-start the backend on first load and show helper failure or retry states
+- Fixed helper restart to wait for owned backend shutdown before relaunching, avoiding false "outside helper control" failures during post-permission retries
 
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

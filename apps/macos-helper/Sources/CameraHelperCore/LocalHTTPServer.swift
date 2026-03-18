@@ -65,14 +65,17 @@ public final class LocalHTTPServer {
 
     private func route(request: ParsedRequest) async -> Data {
         switch (request.method, request.path) {
-        case ("GET", "/status"):
+        case ("GET", "/status"), ("GET", "/local-helper/status"):
             let status = await controller.status()
             return makeJSONResponse(statusCode: 200, payload: status)
-        case ("POST", "/start"):
+        case ("POST", "/start"), ("POST", "/local-helper/start"):
             let status = await controller.start()
             return makeJSONResponse(statusCode: 200, payload: status)
-        case ("POST", "/stop"):
+        case ("POST", "/stop"), ("POST", "/local-helper/stop"):
             let status = await controller.stop()
+            return makeJSONResponse(statusCode: 200, payload: status)
+        case ("POST", "/restart"), ("POST", "/local-helper/restart"):
+            let status = await controller.restart()
             return makeJSONResponse(statusCode: 200, payload: status)
         default:
             return makeTextResponse(statusCode: 404, body: "Not found")

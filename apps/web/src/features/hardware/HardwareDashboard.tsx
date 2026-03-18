@@ -281,10 +281,15 @@ export function HardwareDashboard() {
     latestCapture,
     loading,
     refreshing,
+    helperStatus,
+    helperConnectionState,
+    helperActionName,
     actionName,
     actionFeedback,
     error,
     refresh,
+    startBackend,
+    restartBackend,
     plotterCalibration,
     plotterDevice,
     plotterWorkspace,
@@ -552,12 +557,37 @@ export function HardwareDashboard() {
     }
   }, [actionFeedback]);
 
-  if (loading && !hardwareStatus) {
+  const helperStartupTitle =
+    helperActionName !== null ||
+    helperStatus?.state === "starting" ||
+    helperStatus?.backend_health === "starting"
+      ? "Starting local camera backend."
+      : helperConnectionState === "missing"
+        ? "Local helper not running."
+        : helperStatus?.state === "failed"
+          ? "Camera backend failed to start."
+          : helperStatus?.state === "stopped"
+            ? "Camera backend stopped."
+            : "Hardware status unavailable.";
+  const helperStartupMessage =
+    helperActionName !== null ||
+    helperStatus?.state === "starting" ||
+    helperStatus?.backend_health === "starting"
+      ? "Waiting for the helper-managed backend to come online."
+      : helperConnectionState === "missing"
+        ? "Open LearnToDrawCameraHelper.app, then retry the dashboard."
+        : helperStatus?.state === "failed"
+          ? helperStatus.last_error ?? "The local helper could not start the camera backend."
+          : helperStatus?.state === "stopped"
+            ? "The local helper is reachable, but the camera backend is not running."
+            : "Check that the backend is running on localhost and try again.";
+
+  if (loading && !hardwareStatus && helperConnectionState === "unknown" && !helperStatus) {
     return (
       <main className="page-shell">
         <section className="hero-card">
           <h1>Booting local hardware control.</h1>
-          <p>Waiting for backend status and latest capture metadata.</p>
+          <p>Checking backend and helper status.</p>
         </section>
       </main>
     );
@@ -567,17 +597,40 @@ export function HardwareDashboard() {
     return (
       <main className="page-shell">
         <section className="hero-card">
-          <h1>Hardware status unavailable.</h1>
-          <p>Check that the backend is running on localhost and try again.</p>
+          <h1>{helperStartupTitle}</h1>
+          <p>{helperStartupMessage}</p>
           <div className="actions" style={{ marginTop: 16 }}>
-            <button
-              type="button"
-              className="button-primary"
-              onClick={() => void refresh()}
-            >
-              Retry
-            </button>
+            {helperConnectionState === "missing" ? (
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => void refresh()}
+              >
+                Retry
+              </button>
+            ) : null}
+            {helperStatus?.state === "stopped" ? (
+              <button
+                type="button"
+                className="button-primary"
+                disabled={helperActionName !== null}
+                onClick={() => void startBackend()}
+              >
+                {helperActionName === "start" ? "Starting..." : "Start backend"}
+              </button>
+            ) : null}
+            {helperStatus?.state === "failed" ? (
+              <button
+                type="button"
+                className="button-primary"
+                disabled={helperActionName !== null}
+                onClick={() => void restartBackend()}
+              >
+                {helperActionName === "restart" ? "Restarting..." : "Restart backend"}
+              </button>
+            ) : null}
           </div>
+          {error ? <div className="banner" style={{ marginTop: 16 }}>{error}</div> : null}
         </section>
       </main>
     );

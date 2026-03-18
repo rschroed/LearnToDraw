@@ -145,9 +145,8 @@ public final class FoundationBackendProcessLauncher: BackendProcessLaunching {
         process.currentDirectoryURL = configuration.workingDirectoryURL
         process.environment = configuration.environment
 
-        let stdout = Pipe()
         let stderr = Pipe()
-        process.standardOutput = stdout
+        process.standardOutput = FileHandle.nullDevice
         process.standardError = stderr
 
         let managed = FoundationManagedProcess(process: process, stderrHandle: stderr.fileHandleForReading)

@@ -51,7 +51,7 @@ final class HelperControllerTests: XCTestCase {
         )
 
         _ = await controller.start()
-        launcher.process.emitExit(code: 1, stderr: "camera init failed")
+        launcher.lastLaunchedProcess?.emitExit(code: 1, stderr: "camera init failed")
         try? await Task.sleep(nanoseconds: 10_000_000)
         let status = await controller.status()
 
@@ -87,7 +87,63 @@ final class HelperControllerTests: XCTestCase {
 
         XCTAssertEqual(status.state, .stopped)
         XCTAssertEqual(status.backendHealth, .unreachable)
-        XCTAssertTrue(launcher.process.stopCalled)
+        XCTAssertTrue(launcher.launchedProcesses[0].stopCalled)
+    }
+
+    func testRestartStopsManagedProcessAndStartsNewProcess() async {
+        let launcher = MockLauncher()
+        let controller = makeController(
+            launcher: launcher,
+            healthChecker: MockHealthChecker(results: [false, false, false])
+        )
+
+        let initial = await controller.start()
+        let restarted = await controller.restart()
+
+        XCTAssertEqual(initial.managedPID, 4242)
+        XCTAssertEqual(restarted.managedPID, 4243)
+        XCTAssertEqual(launcher.launchCount, 2)
+        XCTAssertEqual(launcher.launchedProcesses.count, 2)
+        XCTAssertTrue(launcher.launchedProcesses[0].stopCalled)
+    }
+
+    func testRestartFromFailedBehavesLikeStart() async {
+        let launcher = MockLauncher()
+        let controller = makeController(
+            launcher: launcher,
+            healthChecker: MockHealthChecker(results: [false, false, false, false])
+        )
+
+        _ = await controller.start()
+        launcher.lastLaunchedProcess?.emitExit(code: 1, stderr: "camera init failed")
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        let restarted = await controller.restart()
+
+        XCTAssertEqual(restarted.state, .starting)
+        XCTAssertEqual(restarted.managedPID, 4243)
+        XCTAssertEqual(launcher.launchCount, 2)
+    }
+
+    func testRestartWaitsForOwnedBackendToStopBeforeRelaunching() async {
+        let launcher = MockLauncher()
+        let controller = makeController(
+            launcher: launcher,
+            healthChecker: MockHealthChecker(results: [
+                false, // initial start check
+                true,  // backend still healthy right after stop
+                false, // backend no longer healthy after shutdown
+                false, // restart start check
+            ])
+        )
+
+        _ = await controller.start()
+        let restarted = await controller.restart()
+
+        XCTAssertEqual(restarted.state, .starting)
+        XCTAssertEqual(restarted.managedPID, 4243)
+        XCTAssertEqual(launcher.launchCount, 2)
+        XCTAssertTrue(launcher.launchedProcesses[0].stopCalled)
     }
 
     private func makeController(
@@ -111,19 +167,29 @@ final class HelperControllerTests: XCTestCase {
 }
 
 private final class MockLauncher: BackendProcessLaunching, @unchecked Sendable {
-    let process = MockManagedProcess()
     private let queue = DispatchQueue(label: "mock-launcher")
     private var _launchCount = 0
+    private var _launchedProcesses: [MockManagedProcess] = []
 
     var launchCount: Int {
         queue.sync { _launchCount }
     }
 
+    var launchedProcesses: [MockManagedProcess] {
+        queue.sync { _launchedProcesses }
+    }
+
+    var lastLaunchedProcess: MockManagedProcess? {
+        queue.sync { _launchedProcesses.last }
+    }
+
     func launchBackend(configuration: BackendLaunchConfiguration) throws -> ManagedProcess {
         queue.sync {
             _launchCount += 1
+            let process = MockManagedProcess(processIdentifier: Int32(4241 + _launchCount))
+            _launchedProcesses.append(process)
+            return process
         }
-        return process
     }
 }
 
@@ -146,10 +212,14 @@ private final class MockHealthChecker: HealthChecking, @unchecked Sendable {
 }
 
 private final class MockManagedProcess: ManagedProcess, @unchecked Sendable {
-    var processIdentifier: Int32 = 4242
+    let processIdentifier: Int32
     var isRunning: Bool = true
     var onExit: (@Sendable (ManagedProcessExit) -> Void)?
     private(set) var stopCalled = false
+
+    init(processIdentifier: Int32) {
+        self.processIdentifier = processIdentifier
+    }
 
     func stop() {
         stopCalled = true

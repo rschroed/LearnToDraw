@@ -1,6 +1,7 @@
 import Foundation
 
 public actor HelperController {
+    private let shutdownTimeoutNanoseconds: UInt64 = 2_000_000_000
     private let launchConfiguration: BackendLaunchConfiguration
     private let launcher: BackendProcessLaunching
     private let healthChecker: HealthChecking
@@ -82,14 +83,22 @@ public actor HelperController {
         guard let managedProcess else {
             state = .stopped
             backendHealth = .unreachable
+            lastError = nil
             return currentStatus()
         }
 
         managedProcess.stop()
+        await waitForBackendShutdown(expectedPID: managedProcess.processIdentifier)
         self.managedProcess = nil
         state = .stopped
         backendHealth = .unreachable
+        lastError = nil
         return currentStatus()
+    }
+
+    public func restart() async -> HelperStatus {
+        _ = await stop()
+        return await start()
     }
 
     private func monitorStartup(expectedPID: Int32) async {
@@ -107,6 +116,26 @@ public actor HelperController {
             }
 
             if managedProcess?.isRunning != true {
+                return
+            }
+
+            do {
+                try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func waitForBackendShutdown(expectedPID: Int32) async {
+        let deadline = DispatchTime.now().uptimeNanoseconds + shutdownTimeoutNanoseconds
+
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            let processStillOwned = managedProcess?.processIdentifier == expectedPID
+            let processRunning = managedProcess?.isRunning == true
+            let backendStillHealthy = await healthChecker.isHealthy(url: launchConfiguration.backendURL)
+
+            if (!processStillOwned || !processRunning) && !backendStillHealthy {
                 return
             }
 

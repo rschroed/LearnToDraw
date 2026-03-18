@@ -41,9 +41,10 @@ The repository now includes a macOS-first helper proof under `apps/macos-helper`
 
 - the helper is lifecycle-only and does not become a second backend
 - it starts and stops the existing FastAPI backend for camera-mode testing
+- it can restart the managed backend for dashboard recovery
 - it exposes helper-local startup status on `127.0.0.1:8001`
 - all hardware access still stays in the backend on `127.0.0.1:8000`
-- the web app remains unchanged in this slice
+- the web app can use the helper only for startup, retry, and failure state while keeping backend APIs unchanged
 
 ## Adapters And Hardware Boundary
 

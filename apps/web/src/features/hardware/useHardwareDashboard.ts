@@ -5,17 +5,22 @@ import {
   createPatternAsset,
   createPlotRun,
   fetchHardwareStatus,
+  fetchHelperStatus,
   fetchLatestCapture,
   fetchPlotterCalibration,
   fetchPlotterDevice,
   setPlotterSafeBounds,
   fetchPlotterWorkspace,
+  isNetworkRequestError,
+  restartHelperBackend,
+  startHelperBackend,
   walkPlotterHome,
   runPlotterTestAction,
   setPlotterCalibration,
   setPlotterPenHeights,
   setPlotterWorkspace,
 } from "../../lib/api";
+import type { HelperStatus } from "../../types/helper";
 import type {
   CaptureMetadata,
   HardwareStatus,
@@ -39,6 +44,8 @@ type ActionName =
   | `plotter-pattern:${DiagnosticPatternId}`
   | null;
 type ActionTone = "info" | "success" | "error";
+type HelperActionName = "start" | "restart" | null;
+type HelperConnectionState = "unknown" | "reachable" | "missing";
 
 export function useHardwareDashboard() {
   const [hardwareStatus, setHardwareStatus] = useState<HardwareStatus | null>(null);
@@ -58,39 +65,153 @@ export function useHardwareDashboard() {
     message: string;
     tone: ActionTone;
   } | null>(null);
+  const [helperStatus, setHelperStatus] = useState<HelperStatus | null>(null);
+  const [helperConnectionState, setHelperConnectionState] =
+    useState<HelperConnectionState>("unknown");
+  const [helperActionName, setHelperActionName] =
+    useState<HelperActionName>(null);
   const mountedRef = useRef(true);
+  const initialAutoStartAttemptedRef = useRef(false);
 
-  async function refresh({ silent = false }: { silent?: boolean } = {}) {
+  function clearHardwareState() {
+    setHardwareStatus(null);
+    setPlotterCalibrationState(null);
+    setPlotterDeviceState(null);
+    setPlotterWorkspaceState(null);
+    setLatestCapture(null);
+  }
+
+  function applyHardwareSnapshot(snapshot: {
+    status: HardwareStatus;
+    calibration: PlotterCalibration;
+    device: PlotterDeviceSettings;
+    workspace: PlotterWorkspace;
+    latest: { capture: CaptureMetadata | null };
+  }) {
+    setHardwareStatus(snapshot.status);
+    setPlotterCalibrationState(snapshot.calibration);
+    setPlotterDeviceState(snapshot.device);
+    setPlotterWorkspaceState(snapshot.workspace);
+    setLatestCapture(snapshot.latest.capture);
+    setError(null);
+    setHelperStatus(null);
+    setHelperConnectionState("unknown");
+  }
+
+  async function fetchHardwareSnapshot() {
+    const [status, calibration, device, workspace, latest] = await Promise.all([
+      fetchHardwareStatus(),
+      fetchPlotterCalibration(),
+      fetchPlotterDevice(),
+      fetchPlotterWorkspace(),
+      fetchLatestCapture(),
+    ]);
+    return { status, calibration, device, workspace, latest };
+  }
+
+  async function reconcileBackendUnavailable({
+    allowInitialAutoStart,
+  }: {
+    allowInitialAutoStart: boolean;
+  }) {
+    clearHardwareState();
+    try {
+      const nextHelperStatus = await fetchHelperStatus();
+      if (!mountedRef.current) {
+        return;
+      }
+      setHelperConnectionState("reachable");
+      setHelperStatus(nextHelperStatus);
+      setError(null);
+
+      if (
+        allowInitialAutoStart &&
+        !initialAutoStartAttemptedRef.current &&
+        nextHelperStatus.state === "stopped"
+      ) {
+        initialAutoStartAttemptedRef.current = true;
+        const startedHelperStatus = await startHelperBackend();
+        if (!mountedRef.current) {
+          return;
+        }
+        setHelperStatus(startedHelperStatus);
+        setHelperConnectionState("reachable");
+        return;
+      }
+
+      if (
+        nextHelperStatus.state === "running" &&
+        nextHelperStatus.backend_health === "healthy"
+      ) {
+        try {
+          const snapshot = await fetchHardwareSnapshot();
+          if (!mountedRef.current) {
+            return;
+          }
+          applyHardwareSnapshot(snapshot);
+          return;
+        } catch (retryError) {
+          if (!mountedRef.current) {
+            return;
+          }
+          if (!isNetworkRequestError(retryError)) {
+            setError(
+              retryError instanceof Error
+                ? retryError.message
+                : "Failed to refresh hardware state.",
+            );
+          }
+        }
+      }
+    } catch (helperError) {
+      if (!mountedRef.current) {
+        return;
+      }
+      if (isNetworkRequestError(helperError)) {
+        setHelperConnectionState("missing");
+        setHelperStatus(null);
+        setError(null);
+        return;
+      }
+      setError(
+        helperError instanceof Error
+          ? helperError.message
+          : "Failed to refresh helper state.",
+      );
+    }
+  }
+
+  async function refresh({
+    silent = false,
+    allowInitialAutoStart = false,
+  }: {
+    silent?: boolean;
+    allowInitialAutoStart?: boolean;
+  } = {}) {
     if (!silent) {
       setRefreshing(true);
     }
 
     try {
-      const [status, calibration, device, workspace, latest] = await Promise.all([
-        fetchHardwareStatus(),
-        fetchPlotterCalibration(),
-        fetchPlotterDevice(),
-        fetchPlotterWorkspace(),
-        fetchLatestCapture(),
-      ]);
+      const snapshot = await fetchHardwareSnapshot();
       if (!mountedRef.current) {
         return;
       }
-      setHardwareStatus(status);
-      setPlotterCalibrationState(calibration);
-      setPlotterDeviceState(device);
-      setPlotterWorkspaceState(workspace);
-      setLatestCapture(latest.capture);
-      setError(null);
+      applyHardwareSnapshot(snapshot);
     } catch (refreshError) {
       if (!mountedRef.current) {
         return;
       }
-      setError(
-        refreshError instanceof Error
-          ? refreshError.message
-          : "Failed to refresh hardware state.",
-      );
+      if (isNetworkRequestError(refreshError)) {
+        await reconcileBackendUnavailable({ allowInitialAutoStart });
+      } else {
+        clearHardwareState();
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "Failed to refresh hardware state.",
+        );
+      }
     } finally {
       if (!mountedRef.current) {
         return;
@@ -137,9 +258,47 @@ export function useHardwareDashboard() {
     }
   }
 
+  async function runHelperAction(
+    name: Exclude<HelperActionName, null>,
+    action: () => Promise<HelperStatus>,
+  ) {
+    try {
+      setHelperActionName(name);
+      setError(null);
+      clearHardwareState();
+      const nextHelperStatus = await action();
+      if (!mountedRef.current) {
+        return;
+      }
+      setHelperConnectionState("reachable");
+      setHelperStatus(nextHelperStatus);
+      await refresh({ silent: true });
+    } catch (helperError) {
+      if (!mountedRef.current) {
+        return;
+      }
+      clearHardwareState();
+      if (isNetworkRequestError(helperError)) {
+        setHelperConnectionState("missing");
+        setHelperStatus(null);
+        return;
+      }
+      setError(
+        helperError instanceof Error
+          ? helperError.message
+          : "Failed to control the local helper.",
+      );
+    } finally {
+      if (!mountedRef.current) {
+        return;
+      }
+      setHelperActionName(null);
+    }
+  }
+
   useEffect(() => {
     mountedRef.current = true;
-    void refresh();
+    void refresh({ allowInitialAutoStart: true });
 
     const poller = window.setInterval(() => {
       void refresh({ silent: true });
@@ -162,7 +321,12 @@ export function useHardwareDashboard() {
     actionName,
     actionFeedback,
     error,
+    helperStatus,
+    helperConnectionState,
+    helperActionName,
     refresh,
+    startBackend: () => runHelperAction("start", startHelperBackend),
+    restartBackend: () => runHelperAction("restart", restartHelperBackend),
     walkHome: () =>
       runAction("plotter-walk-home", walkPlotterHome, {
         pending: "Walking plotter home...",

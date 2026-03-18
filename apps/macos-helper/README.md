@@ -31,6 +31,7 @@ The helper exposes:
 - `GET /status`
 - `POST /start`
 - `POST /stop`
+- `POST /restart`
 
 Example:
 
