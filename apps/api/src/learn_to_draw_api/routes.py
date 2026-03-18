@@ -12,9 +12,11 @@ from learn_to_draw_api.models import (
     PlotterCalibrationRequest,
     PlotterCalibrationResponse,
     PlotterDeviceSettings,
+    PlotterDeviceSettingsResponse,
     PatternAssetCreateRequest,
     PlotAsset,
     PlotterPenHeightsRequest,
+    PlotterSafeBoundsRequest,
     PlotRun,
     PlotRunCreateRequest,
     PlotRunListResponse,
@@ -65,6 +67,12 @@ def build_api_router(
     @router.get("/api/plotter/device", response_model=PlotterDeviceSettings)
     def get_plotter_device() -> PlotterDeviceSettings:
         return hardware_service.get_plotter_device_settings()
+
+    @router.post("/api/plotter/device/safe-bounds", response_model=PlotterDeviceSettingsResponse)
+    def post_plotter_safe_bounds(
+        request: PlotterSafeBoundsRequest,
+    ) -> PlotterDeviceSettingsResponse:
+        return hardware_service.set_plotter_safe_bounds(request)
 
     @router.post("/api/plotter/calibration", response_model=PlotterCalibrationResponse)
     def post_plotter_calibration(

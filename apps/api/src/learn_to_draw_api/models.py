@@ -138,7 +138,7 @@ class PlotPreparationMetadata(BaseModel):
     drawable_height_mm: float
     plotter_bounds_width_mm: float
     plotter_bounds_height_mm: float
-    plotter_bounds_source: Literal["model_default", "config_override", "config_default"]
+    plotter_bounds_source: Literal["manual_override", "default_clearance", "config_default"]
     plotter_model_code: Optional[int] = None
     plotter_model_label: Optional[str] = None
     units_inferred: bool = False
@@ -156,7 +156,8 @@ class PlotResult(BaseModel):
 PlotRunPurpose = Literal["normal", "diagnostic"]
 PlotRunCaptureMode = Literal["auto", "skip"]
 PlotterTestAction = Literal["raise_pen", "lower_pen", "cycle_pen", "align"]
-PlotterBoundsSource = Literal["model_default", "config_override", "config_default"]
+NominalPlotterBoundsSource = Literal["model_default", "config_override", "config_default"]
+PlotterBoundsSource = Literal["manual_override", "default_clearance", "config_default"]
 PlotterCalibrationSource = Literal[
     "vendor_default",
     "persisted",
@@ -299,10 +300,18 @@ class PlotterModelDescriptor(BaseModel):
 class PlotterDeviceSettings(BaseModel):
     driver: str
     plotter_model: Optional[PlotterModelDescriptor] = None
+    nominal_plotter_bounds_mm: SizeMm
+    nominal_plotter_bounds_source: NominalPlotterBoundsSource
     plotter_bounds_mm: SizeMm
     plotter_bounds_source: PlotterBoundsSource
     updated_at: datetime
     source: PlotterDeviceSettingsSource
+
+
+class PlotterDeviceSettingsRecord(BaseModel):
+    source: PlotterDeviceSettingsSource
+    updated_at: datetime
+    manual_safe_bounds_override_mm: Optional[SizeMm] = None
 
 
 class PlotterWorkspace(BaseModel):
@@ -337,3 +346,12 @@ class PlotterWorkspaceRequest(BaseModel):
 
 class PlotterWorkspaceResponse(CommandResponse):
     workspace: PlotterWorkspace
+
+
+class PlotterSafeBoundsRequest(BaseModel):
+    width_mm: Optional[float] = Field(default=None, gt=0)
+    height_mm: Optional[float] = Field(default=None, gt=0)
+
+
+class PlotterDeviceSettingsResponse(CommandResponse):
+    device: PlotterDeviceSettings

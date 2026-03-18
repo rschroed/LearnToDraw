@@ -93,6 +93,11 @@ const defaultWorkspace = {
 const defaultDevice = {
   driver: "mock",
   plotter_model: null,
+  nominal_plotter_bounds_mm: {
+    width_mm: 210,
+    height_mm: 297,
+  },
+  nominal_plotter_bounds_source: "config_default" as const,
   plotter_bounds_mm: {
     width_mm: 210,
     height_mm: 297,
@@ -143,11 +148,19 @@ type DeviceFixture = {
     code: number;
     label: string;
   } | null;
+  nominal_plotter_bounds_mm: {
+    width_mm: number;
+    height_mm: number;
+  };
+  nominal_plotter_bounds_source:
+    | "model_default"
+    | "config_override"
+    | "config_default";
   plotter_bounds_mm: {
     width_mm: number;
     height_mm: number;
   };
-  plotter_bounds_source: "model_default" | "config_override" | "config_default";
+  plotter_bounds_source: "manual_override" | "default_clearance" | "config_default";
   updated_at: string;
   source: "config_default" | "persisted";
 };
@@ -236,10 +249,17 @@ describe("Hardware dashboard", () => {
         };
 
         if (url === "/api/hardware/status") {
-          return new Response(JSON.stringify(hardwareStatus), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify(
+              currentDevice.driver === "axidraw"
+                ? axidrawHardwareStatus
+                : hardwareStatus,
+            ),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
 
         if (url === "/api/captures/latest") {
@@ -285,6 +305,67 @@ describe("Hardware dashboard", () => {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
+        }
+
+        if (url === "/api/plotter/device/safe-bounds" && method === "POST") {
+          const body = JSON.parse(String(init?.body ?? "{}"));
+          currentDevice = {
+            ...currentDevice,
+            plotter_bounds_mm:
+              body.width_mm === null && body.height_mm === null
+                ? {
+                    width_mm: currentDevice.nominal_plotter_bounds_mm.width_mm,
+                    height_mm: currentDevice.nominal_plotter_bounds_mm.height_mm,
+                  }
+                : {
+                    width_mm: body.width_mm,
+                    height_mm: body.height_mm,
+                  },
+            plotter_bounds_source:
+              body.width_mm === null && body.height_mm === null
+                ? currentDevice.driver === "axidraw"
+                  ? "default_clearance"
+                  : "config_default"
+                : "manual_override",
+            updated_at: "2026-03-15T20:00:11Z",
+            source: "persisted",
+          };
+          if (body.width_mm === null && body.height_mm === null && currentDevice.driver === "axidraw") {
+            currentDevice = {
+              ...currentDevice,
+              plotter_bounds_mm: {
+                width_mm: currentDevice.nominal_plotter_bounds_mm.width_mm - 10,
+                height_mm: currentDevice.nominal_plotter_bounds_mm.height_mm - 10,
+              },
+            };
+          }
+          currentWorkspace = {
+            ...currentWorkspace,
+            plotter_bounds_mm: currentDevice.plotter_bounds_mm,
+            is_valid:
+              currentWorkspace.page_size_mm.width_mm <= currentDevice.plotter_bounds_mm.width_mm &&
+              currentWorkspace.page_size_mm.height_mm <= currentDevice.plotter_bounds_mm.height_mm,
+            validation_error:
+              currentWorkspace.page_size_mm.width_mm > currentDevice.plotter_bounds_mm.width_mm
+                ? "Configured page width exceeds the plotter bounds width."
+                : currentWorkspace.page_size_mm.height_mm > currentDevice.plotter_bounds_mm.height_mm
+                  ? "Configured page height exceeds the plotter bounds height."
+                  : null,
+          };
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message:
+                body.width_mm === null && body.height_mm === null
+                  ? "Operational safe bounds reset to the default clearance."
+                  : "Operational safe bounds updated.",
+              device: currentDevice,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
 
         if (url === "/api/plotter/workspace") {
@@ -603,7 +684,8 @@ describe("Hardware dashboard", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/^paper setup$/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /^preview$/i })).toBeInTheDocument();
-    expect(screen.getByText(/safe plotter bounds/i)).toBeInTheDocument();
+    expect(screen.getByText(/nominal machine bounds/i)).toBeInTheDocument();
+    expect(screen.getByText(/operational safe bounds/i)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /paper setup preview/i })).toBeInTheDocument();
     expect(screen.getByText(/paper 210 x 297 mm/i)).toBeInTheDocument();
   });
@@ -710,17 +792,22 @@ describe("Hardware dashboard", () => {
     currentDevice = {
       ...currentDevice,
       driver: "axidraw",
-      plotter_bounds_mm: {
+      nominal_plotter_bounds_mm: {
         width_mm: 300,
         height_mm: 218,
       },
-      plotter_bounds_source: "config_override",
+      nominal_plotter_bounds_source: "config_override",
+      plotter_bounds_mm: {
+        width_mm: 290,
+        height_mm: 208,
+      },
+      plotter_bounds_source: "default_clearance",
     };
     currentWorkspace = {
       ...currentWorkspace,
       plotter_bounds_mm: {
-        width_mm: 300,
-        height_mm: 218,
+        width_mm: 290,
+        height_mm: 208,
       },
       is_valid: false,
       validation_error: "Configured page height exceeds the plotter bounds height.",
@@ -800,6 +887,49 @@ describe("Hardware dashboard", () => {
     expect(screen.getByRole("button", { name: /tiny square/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /start plot run/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /save paper setup/i })).toBeDisabled();
+  });
+
+  it("saves and resets operational safe bounds for axidraw", async () => {
+    currentDevice = {
+      ...currentDevice,
+      driver: "axidraw",
+      nominal_plotter_bounds_mm: {
+        width_mm: 300,
+        height_mm: 218,
+      },
+      nominal_plotter_bounds_source: "config_override",
+      plotter_bounds_mm: {
+        width_mm: 290,
+        height_mm: 208,
+      },
+      plotter_bounds_source: "default_clearance",
+    };
+    currentWorkspace = {
+      ...currentWorkspace,
+      plotter_bounds_mm: {
+        width_mm: 290,
+        height_mm: 208,
+      },
+    };
+
+    render(<App />);
+
+    const widthInputs = await screen.findAllByLabelText(/^width$/i);
+    const heightInputs = await screen.findAllByLabelText(/^height$/i);
+
+    fireEvent.change(widthInputs[0], { target: { value: "280" } });
+    fireEvent.change(heightInputs[0], { target: { value: "200" } });
+    fireEvent.click(screen.getByRole("button", { name: /save safe bounds/i }));
+
+    expect(await screen.findByText(/operational safe bounds updated\./i)).toBeInTheDocument();
+    expect(screen.getByText(/280 mm x 200 mm/i)).toBeInTheDocument();
+    expect(screen.getByText(/^manual override$/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /reset to default clearance/i }));
+
+    expect(await screen.findByText(/operational safe bounds reset\./i)).toBeInTheDocument();
+    expect(screen.getByText(/290 mm x 208 mm/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^default clearance$/i).length).toBeGreaterThan(0);
   });
 
   it("captures an image and refreshes the preview", async () => {
@@ -1589,10 +1719,13 @@ describe("Hardware dashboard", () => {
 
     render(<App />);
 
-    fireEvent.change(await screen.findByLabelText(/^width$/i), {
+    const widthInputs = await screen.findAllByLabelText(/^width$/i);
+    const heightInputs = await screen.findAllByLabelText(/^height$/i);
+
+    fireEvent.change(widthInputs[1], {
       target: { value: "148" },
     });
-    fireEvent.change(screen.getByLabelText(/^height$/i), {
+    fireEvent.change(heightInputs[1], {
       target: { value: "210" },
     });
     fireEvent.change(screen.getByLabelText(/^left$/i), {

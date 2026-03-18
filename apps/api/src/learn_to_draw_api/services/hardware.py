@@ -14,7 +14,9 @@ from learn_to_draw_api.models import (
     PlotterCalibrationResponse,
     PlotterCommandResponse,
     PlotterDeviceSettings,
+    PlotterDeviceSettingsResponse,
     PlotterPenHeightsRequest,
+    PlotterSafeBoundsRequest,
     PlotterTestAction,
     PlotterWorkspace,
     PlotterWorkspaceRequest,
@@ -114,6 +116,28 @@ class HardwareService:
 
     def get_plotter_device_settings(self) -> PlotterDeviceSettings:
         return self._device_settings_service.current()
+
+    def set_plotter_safe_bounds(
+        self,
+        request: PlotterSafeBoundsRequest,
+    ) -> PlotterDeviceSettingsResponse:
+        if not self._plotter_lock.acquire(blocking=False):
+            raise HardwareBusyError("Plotter is busy.")
+        try:
+            device = self._device_settings_service.save_safe_bounds_override(
+                width_mm=request.width_mm,
+                height_mm=request.height_mm,
+            )
+            return PlotterDeviceSettingsResponse(
+                message=(
+                    "Operational safe bounds reset to the default clearance."
+                    if request.width_mm is None
+                    else "Operational safe bounds updated."
+                ),
+                device=device,
+            )
+        finally:
+            self._plotter_lock.release()
 
     def set_plotter_calibration(
         self,

@@ -6,6 +6,7 @@ import type {
   PlotterCalibrationResponse,
   PlotterCommandResponse,
   PlotterDeviceSettings,
+  PlotterDeviceSettingsResponse,
   PlotterWorkspace,
   PlotterWorkspaceResponse,
 } from "../types/hardware";
@@ -94,6 +95,21 @@ export function setPlotterCalibration(nativeResFactor: number) {
 
 export function fetchPlotterWorkspace() {
   return requestJson<PlotterWorkspace>("/api/plotter/workspace");
+}
+
+export function setPlotterSafeBounds(
+  safeBounds: {
+    width_mm: number | null;
+    height_mm: number | null;
+  },
+) {
+  return requestJson<PlotterDeviceSettingsResponse>("/api/plotter/device/safe-bounds", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(safeBounds),
+  });
 }
 
 export function setPlotterWorkspace(workspace: {
