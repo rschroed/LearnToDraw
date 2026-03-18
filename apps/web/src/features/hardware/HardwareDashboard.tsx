@@ -511,6 +511,11 @@ export function HardwareDashboard() {
     workspaceMetrics,
     plotterDevice?.plotter_bounds_mm ?? plotterWorkspace?.plotter_bounds_mm ?? null,
   );
+  const persistedWorkspaceValidationError =
+    plotterWorkspace?.is_valid === false
+      ? plotterWorkspace.validation_error ??
+        "Saved paper setup no longer fits the current plotter bounds."
+      : null;
   const configSource =
     typeof plotterDetailsRecord.config_source === "string"
       ? plotterDetailsRecord.config_source
@@ -808,6 +813,12 @@ export function HardwareDashboard() {
                       <div className="workspace-card-header">
                         <h4>Paper on plotter</h4>
                       </div>
+                      {persistedWorkspaceValidationError ? (
+                        <div className="inline-notice inline-notice-error workspace-inline-notice">
+                          Saved paper setup is invalid for the current machine bounds:{" "}
+                          {persistedWorkspaceValidationError} Update it and save before plotting.
+                        </div>
+                      ) : null}
                       <div className="workspace-form-sections">
                         <div className="workspace-form-section">
                           <div className="workspace-form-label">Paper size</div>
@@ -955,6 +966,11 @@ export function HardwareDashboard() {
                 <>
                 <div className="diagnostic-section">
                   <h3>Diagnostic plots</h3>
+                  {persistedWorkspaceValidationError ? (
+                    <div className="inline-notice inline-notice-error">
+                      Plotting is blocked until the paper setup fits the current machine bounds.
+                    </div>
+                  ) : null}
                   <div className="actions">
                     <button
                       type="button"
@@ -963,7 +979,8 @@ export function HardwareDashboard() {
                       disabled={
                         actionName !== null ||
                         hardwareStatus.plotter.busy ||
-                        !hardwareStatus.plotter.available
+                        !hardwareStatus.plotter.available ||
+                        persistedWorkspaceValidationError !== null
                       }
                     >
                       Tiny square
@@ -975,7 +992,8 @@ export function HardwareDashboard() {
                       disabled={
                         actionName !== null ||
                         hardwareStatus.plotter.busy ||
-                        !hardwareStatus.plotter.available
+                        !hardwareStatus.plotter.available ||
+                        persistedWorkspaceValidationError !== null
                       }
                     >
                       Dash row
@@ -987,7 +1005,8 @@ export function HardwareDashboard() {
                       disabled={
                         actionName !== null ||
                         hardwareStatus.plotter.busy ||
-                        !hardwareStatus.plotter.available
+                        !hardwareStatus.plotter.available ||
+                        persistedWorkspaceValidationError !== null
                       }
                     >
                       Double box

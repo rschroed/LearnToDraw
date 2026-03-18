@@ -98,6 +98,8 @@ export interface PlotterWorkspace {
   drawable_area_mm: SizeMm;
   updated_at: string;
   source: PlotterWorkspaceSource;
+  is_valid: boolean;
+  validation_error: string | null;
 }
 
 export interface PlotterWorkspaceResponse {

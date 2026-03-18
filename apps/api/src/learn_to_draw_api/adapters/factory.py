@@ -4,8 +4,29 @@ from learn_to_draw_api.adapters.axidraw_client import PyAxiDrawClient
 from learn_to_draw_api.adapters.axidraw_plotter import AxiDrawPlotter
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
+from learn_to_draw_api.adapters.unavailable_plotter import UnavailablePlotter
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.models import PlotterCalibration
+
+
+def _missing_axidraw_bounds_message(config: AppConfig) -> str:
+    if (
+        config.plotter_bounds_width_mm is None
+        and config.plotter_bounds_height_mm is not None
+    ) or (
+        config.plotter_bounds_width_mm is not None
+        and config.plotter_bounds_height_mm is None
+    ):
+        return (
+            "Real AxiDraw requires explicit machine bounds configuration. Set both "
+            "LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM and "
+            "LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM, or set LEARN_TO_DRAW_AXIDRAW_MODEL."
+        )
+    return (
+        "Real AxiDraw requires explicit machine bounds configuration. Set "
+        "LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM and "
+        "LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM, or set LEARN_TO_DRAW_AXIDRAW_MODEL."
+    )
 
 
 def build_plotter_adapter(
@@ -17,6 +38,24 @@ def build_plotter_adapter(
     if driver == "mock":
         return MockPlotter()
     if driver == "axidraw":
+        if (
+            config.axidraw_model is None
+            and (
+                config.plotter_bounds_width_mm is None
+                or config.plotter_bounds_height_mm is None
+            )
+        ):
+            return UnavailablePlotter(
+                driver="axidraw-pyapi",
+                message=_missing_axidraw_bounds_message(config),
+                details={
+                    "model": "AxiDraw",
+                    "api_surface": None,
+                    "plot_api_supported": False,
+                    "manual_api_supported": False,
+                    "bounds_configured": False,
+                },
+            )
         native_res_factor = config.axidraw_native_res_factor
         calibration_source = "env_override" if native_res_factor is not None else None
         motion_scale = None
