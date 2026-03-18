@@ -14,7 +14,6 @@ import type {
   PlotAsset,
   PlotRun,
   PlotRunListResponse,
-  PlotSizingMode,
 } from "../types/plotting";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -144,7 +143,6 @@ export function createPlotRun(
   options?: {
     purpose?: "normal" | "diagnostic";
     capture_mode?: "auto" | "skip";
-    sizing_mode?: PlotSizingMode;
   },
 ) {
   return requestJson<PlotRun>("/api/plot-runs", {
@@ -156,7 +154,6 @@ export function createPlotRun(
       asset_id: assetId,
       purpose: options?.purpose ?? "normal",
       capture_mode: options?.capture_mode ?? "auto",
-      sizing_mode: options?.sizing_mode ?? "native",
     }),
   });
 }

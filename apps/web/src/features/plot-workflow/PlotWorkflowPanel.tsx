@@ -62,6 +62,14 @@ function formatPhysicalSize(width: unknown, height: unknown) {
     .replace(/\.0$/, "")} mm`;
 }
 
+function getNestedRecord(
+  record: Record<string, unknown> | null,
+  key: string,
+): Record<string, unknown> | null {
+  const value = record?.[key];
+  return isRecord(value) ? value : null;
+}
+
 export function PlotWorkflowPanel({
   hardwareStatus,
   plotterWorkspace,
@@ -75,23 +83,23 @@ export function PlotWorkflowPanel({
     refreshing,
     busyAction,
     activeRun,
-    sizingMode,
     error,
     notice,
     createBuiltInPattern,
     uploadSvg,
     startRun,
-    setSizingMode,
   } = usePlotWorkflow();
-  const fitWithinDrawableAreaSupported = hardwareStatus.plotter.driver !== "axidraw-pyapi";
-  const fitWithinDrawableAreaSelectedAndUnsupported =
-    sizingMode === "fit_to_draw_area" && !fitWithinDrawableAreaSupported;
+  const workspaceInvalidReason =
+    plotterWorkspace?.is_valid === false
+      ? plotterWorkspace.validation_error ??
+        "Saved paper setup no longer fits the current plotter bounds."
+      : null;
 
   const startDisabled =
     !selectedAsset ||
     activeRun ||
     busyAction === "start" ||
-    fitWithinDrawableAreaSelectedAndUnsupported ||
+    workspaceInvalidReason !== null ||
     !hardwareStatus.plotter.available ||
     !hardwareStatus.camera.available ||
     hardwareStatus.plotter.busy ||
@@ -103,12 +111,12 @@ export function PlotWorkflowPanel({
     selectedAsset !== null &&
     latestRun !== null &&
     latestRun.asset.id !== selectedAsset.id;
-  const uploadedNativeSizingWarning =
-    selectedAsset?.kind === "uploaded_svg" && sizingMode === "native";
   const preparation =
     latestRun && isRecord(latestRun.plotter_run_details.preparation)
       ? latestRun.plotter_run_details.preparation
       : null;
+  const workspaceAudit = getNestedRecord(preparation, "workspace_audit");
+  const preparationAudit = getNestedRecord(preparation, "preparation_audit");
   const sourceSize = preparation
     ? formatPhysicalSize(preparation.source_width, preparation.source_height)
     : null;
@@ -125,6 +133,78 @@ export function PlotWorkflowPanel({
         .toFixed(1)
         .replace(/\.0$/, "")} mm`
     : null;
+  const plotterBoundsSummary = preparation
+    ? formatPhysicalSize(
+        preparation.plotter_bounds_width_mm,
+        preparation.plotter_bounds_height_mm,
+      )
+    : null;
+  const pageSizeSummary = preparation
+    ? formatPhysicalSize(preparation.page_width_mm, preparation.page_height_mm)
+    : null;
+  const workspaceDrawableSummary = preparation
+    ? formatPhysicalSize(preparation.drawable_width_mm, preparation.drawable_height_mm)
+    : null;
+  const fitScale =
+    preparationAudit && typeof preparationAudit.fit_scale === "number"
+      ? preparationAudit.fit_scale.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")
+      : null;
+  const preparationStrategy =
+    preparationAudit && typeof preparationAudit.strategy === "string"
+      ? preparationAudit.strategy.replace(/_/g, " ")
+      : null;
+  const preparedViewBoxSummary =
+    preparationAudit &&
+    [
+      preparationAudit.prepared_viewbox_min_x,
+      preparationAudit.prepared_viewbox_min_y,
+      preparationAudit.prepared_viewbox_width,
+      preparationAudit.prepared_viewbox_height,
+    ].every((value) => typeof value === "number" && Number.isFinite(value))
+      ? `${preparationAudit.prepared_viewbox_min_x} ${preparationAudit.prepared_viewbox_min_y} ${preparationAudit.prepared_viewbox_width} ${preparationAudit.prepared_viewbox_height}`
+      : null;
+  const mathAuditStatus =
+    latestRun?.stage_states.prepare.status === "failed"
+      ? latestRun.stage_states.prepare.message ?? latestRun.error ?? "prepare failed"
+      : preparationAudit?.prepared_within_drawable_area === false
+        ? latestRun?.error ?? "prepared output exceeds drawable area"
+        : preparation
+          ? "Math audit ok"
+          : null;
+  const drawableOriginSummary =
+    workspaceAudit &&
+    formatPhysicalSize(
+      workspaceAudit.drawable_origin_x_mm,
+      workspaceAudit.drawable_origin_y_mm,
+    );
+  const remainingBoundsSummary =
+    workspaceAudit &&
+    formatPhysicalSize(
+      workspaceAudit.remaining_bounds_right_mm,
+      workspaceAudit.remaining_bounds_bottom_mm,
+    );
+  const overflowSummary =
+    preparationAudit &&
+    formatPhysicalSize(
+      preparationAudit.overflow_x_mm,
+      preparationAudit.overflow_y_mm,
+    );
+  const placementOriginSummary =
+    preparationAudit &&
+    formatPhysicalSize(
+      preparationAudit.placement_origin_x_mm,
+      preparationAudit.placement_origin_y_mm,
+    );
+  const contentBoxSummary =
+    preparationAudit &&
+    [
+      preparationAudit.content_min_x_mm,
+      preparationAudit.content_min_y_mm,
+      preparationAudit.content_max_x_mm,
+      preparationAudit.content_max_y_mm,
+    ].every((value) => typeof value === "number" && Number.isFinite(value))
+      ? `${preparationAudit.content_min_x_mm} ${preparationAudit.content_min_y_mm} → ${preparationAudit.content_max_x_mm} ${preparationAudit.content_max_y_mm} mm`
+      : null;
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -190,38 +270,16 @@ export function PlotWorkflowPanel({
           </div>
 
           <div className="workflow-settings">
-            <label className="field-group workflow-select">
-              <span>Plot sizing</span>
-              <select
-                value={sizingMode}
-                onChange={(event) => setSizingMode(event.target.value as typeof sizingMode)}
-                disabled={busyAction !== null || activeRun}
-              >
-                <option value="native">Use authored size</option>
-                <option
-                  value="fit_to_draw_area"
-                  disabled={!fitWithinDrawableAreaSupported}
-                >
-                  Fit within drawable area
-                </option>
-              </select>
-            </label>
-            {fitWithinDrawableAreaSelectedAndUnsupported ? (
+            {workspaceInvalidReason ? (
               <div className="inline-notice inline-notice-error">
-                Fit within drawable area is temporarily disabled for real AxiDraw plotting
-                because it can exceed safe machine bounds. Use authored size only for SVGs
-                with explicit physical units.
-              </div>
-            ) : null}
-            {uploadedNativeSizingWarning ? (
-              <div className="inline-notice inline-notice-info">
-                Use authored size only works for uploaded SVGs that declare physical dimensions
-                such as mm, cm, or in. Unitless uploads should use Fit within drawable area.
+                Plotting is blocked until Paper setup fits the current machine bounds:{" "}
+                {workspaceInvalidReason}
               </div>
             ) : null}
             <p className="footer-note">
-              Current drawable area: {drawableAreaSummary ?? "unknown"}. Built-in diagnostic
-              patterns use explicit physical SVG dimensions in the backend.
+              Current drawable area: {drawableAreaSummary ?? "unknown"}. Normal plots are
+              prepared automatically into the drawable area from its top-left origin. Dedicated
+              hardware diagnostics stay fixed-size.
             </p>
           </div>
 
@@ -298,8 +356,47 @@ export function PlotWorkflowPanel({
                     {unitsInferred ? " · inferred for preparation" : ""}
                   </p>
                   <p className="footer-note">
-                    Prepared size: {preparedSize ?? "unknown"} · mode {latestRun?.sizing_mode}
+                    Prepared size: {preparedSize ?? "unknown"}
                   </p>
+                  {preparationStrategy ? (
+                    <p className="footer-note">Preparation strategy: {preparationStrategy}</p>
+                  ) : null}
+                  <p className="footer-note">Math audit: {mathAuditStatus ?? "unavailable"}</p>
+                  {plotterBoundsSummary ? (
+                    <p className="footer-note">Plotter bounds: {plotterBoundsSummary}</p>
+                  ) : null}
+                  {pageSizeSummary || workspaceDrawableSummary ? (
+                    <p className="footer-note">
+                      Workspace: page {pageSizeSummary ?? "unknown"} · drawable{" "}
+                      {workspaceDrawableSummary ?? "unknown"}
+                    </p>
+                  ) : null}
+                  {drawableOriginSummary || remainingBoundsSummary ? (
+                    <p className="footer-note">
+                      Workspace audit: origin {drawableOriginSummary ?? "unknown"} · remaining
+                      bounds {remainingBoundsSummary ?? "unknown"}
+                    </p>
+                  ) : null}
+                  {fitScale ? (
+                    <p className="footer-note">Fit scale: {fitScale}</p>
+                  ) : null}
+                  {placementOriginSummary || contentBoxSummary ? (
+                    <p className="footer-note">
+                      Prepared placement: origin {placementOriginSummary ?? "unknown"} · content
+                      box {contentBoxSummary ?? "unknown"}
+                    </p>
+                  ) : null}
+                  {preparedViewBoxSummary ? (
+                    <p className="footer-note">Prepared root viewBox: {preparedViewBoxSummary}</p>
+                  ) : null}
+                  {overflowSummary ? (
+                    <p className="footer-note">Preparation overflow: {overflowSummary}</p>
+                  ) : null}
+                </div>
+              ) : null}
+              {!preparation && mathAuditStatus ? (
+                <div className="workflow-sizing-summary">
+                  <p className="footer-note">Math audit: {mathAuditStatus}</p>
                 </div>
               ) : null}
             </div>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import math
 from pathlib import Path
 import re
 from threading import Lock, Thread
@@ -25,7 +26,6 @@ from learn_to_draw_api.models import (
     PlotPreparationMetadata,
     PlotRun,
     PlotRunListResponse,
-    PlotSizingMode,
     PlotRunSummary,
     PlotStageState,
     PlotterDeviceSettings,
@@ -40,6 +40,9 @@ from learn_to_draw_api.services.plotter_workspace import PlotterWorkspaceService
 ACTIVE_RUN_STATUSES = {"pending", "plotting", "capturing"}
 SVG_MIME_TYPE = "image/svg+xml"
 PATTERNS_DIR = Path(__file__).resolve().parent.parent / "assets" / "patterns"
+PREPARATION_EPSILON_MM = 0.001
+NORMAL_PREPARATION_STRATEGY = "fit_top_left"
+DIAGNOSTIC_PREPARATION_STRATEGY = "diagnostic_passthrough"
 
 ET.register_namespace("", "http://www.w3.org/2000/svg")
 
@@ -214,7 +217,6 @@ class PlotWorkflowService:
         *,
         purpose: PlotRunPurpose = "normal",
         capture_mode: PlotRunCaptureMode = "auto",
-        sizing_mode: PlotSizingMode = "native",
     ) -> PlotRun:
         asset = self._asset_store.get(asset_id)
         now = datetime.now(timezone.utc)
@@ -223,7 +225,6 @@ class PlotWorkflowService:
             status="pending",
             purpose=purpose,
             capture_mode=capture_mode,
-            sizing_mode=sizing_mode,
             created_at=now,
             updated_at=now,
             asset=asset,
@@ -254,6 +255,8 @@ class PlotWorkflowService:
 
     def _execute_run(self, run_id: str) -> None:
         current_stage: Optional[str] = None
+        workspace: Optional[PlotterWorkspace] = None
+        device_settings: Optional[PlotterDeviceSettings] = None
         run = self._run_store.get(run_id)
         try:
             current_stage = "prepare"
@@ -263,11 +266,11 @@ class PlotWorkflowService:
                 status="in_progress",
                 message="Preparing SVG document.",
             )
-            workspace = self._workspace_service.current()
+            workspace = self._workspace_service.current_validated()
             device_settings = self._device_settings_service.current()
             document, preparation = self._load_document(
                 run.asset,
-                sizing_mode=run.sizing_mode,
+                purpose=run.purpose,
                 workspace=workspace,
                 device_settings=device_settings,
             )
@@ -354,6 +357,25 @@ class PlotWorkflowService:
             run.updated_at = datetime.now(timezone.utc)
             self._run_store.save(run)
         except Exception as exc:
+            if (
+                current_stage == "prepare"
+                and isinstance(exc, _PreparationValidationError)
+                and exc.preparation is not None
+            ):
+                run.plotter_run_details = {
+                    "driver": self._plotter.driver,
+                    "preparation": exc.preparation.model_dump(mode="json"),
+                    "device": (
+                        device_settings.model_dump(mode="json")
+                        if device_settings is not None
+                        else {}
+                    ),
+                    "workspace": (
+                        workspace.model_dump(mode="json")
+                        if workspace is not None
+                        else {}
+                    ),
+                }
             run.status = "failed"
             run.error = str(exc)
             run.updated_at = datetime.now(timezone.utc)
@@ -375,22 +397,16 @@ class PlotWorkflowService:
         self,
         asset: PlotAsset,
         *,
-        sizing_mode: PlotSizingMode,
+        purpose: PlotRunPurpose,
         workspace: PlotterWorkspace,
         device_settings: PlotterDeviceSettings,
     ) -> tuple[PlotDocument, PlotPreparationMetadata]:
-        if self._plotter.driver == "axidraw-pyapi" and sizing_mode == "fit_to_draw_area":
-            raise InvalidArtifactError(
-                "Fit within drawable area is temporarily disabled for real AxiDraw plotting "
-                "because the prepared SVG can exceed safe machine bounds. Use authored size "
-                "only for SVGs with explicit physical units."
-            )
         svg_text = Path(asset.file_path).read_text(encoding="utf-8")
         root = _parse_svg_root(svg_text)
         prepared_svg_text, preparation = _prepare_svg_for_plotting(
             svg_text,
             root,
-            sizing_mode=sizing_mode,
+            purpose=purpose,
             plot_area=workspace.to_plot_area(),
             device_settings=device_settings,
         )
@@ -487,74 +503,139 @@ def _prepare_svg_for_plotting(
     svg_text: str,
     root: ET.Element,
     *,
-    sizing_mode: PlotSizingMode,
+    purpose: PlotRunPurpose,
     plot_area: PlotArea,
     device_settings: PlotterDeviceSettings,
 ) -> tuple[str, PlotPreparationMetadata]:
     source_box = _extract_source_box(root)
     source_units = _classify_source_units(root)
     units_inferred = source_units in {"unitless", "px", "unknown"}
+    strategy = (
+        DIAGNOSTIC_PREPARATION_STRATEGY
+        if purpose == "diagnostic"
+        else NORMAL_PREPARATION_STRATEGY
+    )
+    workspace_audit = _build_workspace_audit(
+        plot_area=plot_area,
+        device_settings=device_settings,
+    )
 
-    if sizing_mode == "native":
+    if strategy == DIAGNOSTIC_PREPARATION_STRATEGY:
         if source_box.physical_width_mm is None or source_box.physical_height_mm is None:
             raise InvalidArtifactError(
-                "Native sizing requires explicit physical SVG dimensions such as mm, cm, or in."
+                "Diagnostic plotting requires explicit physical SVG dimensions such as mm, cm, or in."
             )
         prepared_width_mm = source_box.physical_width_mm
         prepared_height_mm = source_box.physical_height_mm
-        if (
-            prepared_width_mm > plot_area.draw_width_mm
-            or prepared_height_mm > plot_area.draw_height_mm
-        ):
-            raise InvalidArtifactError(
-                "Authored SVG size "
+        preparation_audit = _build_preparation_audit(
+            strategy=strategy,
+            plot_area=plot_area,
+            prepared_width_mm=prepared_width_mm,
+            prepared_height_mm=prepared_height_mm,
+            scale=None,
+            placement_origin_x_mm=0.0,
+            placement_origin_y_mm=0.0,
+            prepared_view_box=None,
+        )
+        _validate_preparation_consistency(
+            prepared_width_mm=prepared_width_mm,
+            prepared_height_mm=prepared_height_mm,
+            preparation_audit=preparation_audit,
+            drawable_width_mm=plot_area.draw_width_mm,
+            drawable_height_mm=plot_area.draw_height_mm,
+        )
+        if not preparation_audit.prepared_within_drawable_area:
+            preparation = _build_preparation_metadata(
+                source_box=source_box,
+                source_units=source_units,
+                units_inferred=units_inferred,
+                prepared_width_mm=prepared_width_mm,
+                prepared_height_mm=prepared_height_mm,
+                plot_area=plot_area,
+                device_settings=device_settings,
+                workspace_audit=workspace_audit,
+                preparation_audit=preparation_audit,
+            )
+            raise _PreparationValidationError(
+                "Diagnostic SVG size "
                 f"{_format_mm(prepared_width_mm)} x {_format_mm(prepared_height_mm)} mm "
                 "exceeds the current drawable area of "
-                f"{_format_mm(plot_area.draw_width_mm)} x {_format_mm(plot_area.draw_height_mm)} mm."
+                f"{_format_mm(plot_area.draw_width_mm)} x {_format_mm(plot_area.draw_height_mm)} mm.",
+                preparation=preparation,
             )
         prepared_svg_text = svg_text
     else:
         if source_box.view_box_width <= 0 or source_box.view_box_height <= 0:
             raise InvalidArtifactError("SVG content is missing usable size information.")
-        scale = min(
-            plot_area.draw_width_mm / source_box.view_box_width,
-            plot_area.draw_height_mm / source_box.view_box_height,
+        scale = _select_normal_preparation_scale(
+            plot_area=plot_area,
+            source_box=source_box,
         )
+        if not math.isfinite(scale):
+            raise _PreparationValidationError(
+                "Prepared SVG math produced non-finite bounds or scale."
+            )
+        if scale <= 0:
+            raise _PreparationValidationError(
+                "Prepared SVG math produced a non-positive output scale."
+            )
         prepared_width_mm = source_box.view_box_width * scale
         prepared_height_mm = source_box.view_box_height * scale
+        preparation_audit = _build_preparation_audit(
+            strategy=strategy,
+            plot_area=plot_area,
+            prepared_width_mm=prepared_width_mm,
+            prepared_height_mm=prepared_height_mm,
+            scale=scale,
+            placement_origin_x_mm=plot_area.margin_left_mm,
+            placement_origin_y_mm=plot_area.margin_top_mm,
+            prepared_view_box=(0.0, 0.0, plot_area.page_width_mm, plot_area.page_height_mm),
+        )
+        _validate_preparation_consistency(
+            prepared_width_mm=prepared_width_mm,
+            prepared_height_mm=prepared_height_mm,
+            preparation_audit=preparation_audit,
+            drawable_width_mm=plot_area.draw_width_mm,
+            drawable_height_mm=plot_area.draw_height_mm,
+        )
+        if not preparation_audit.prepared_within_drawable_area:
+            preparation = _build_preparation_metadata(
+                source_box=source_box,
+                source_units=source_units,
+                units_inferred=units_inferred,
+                prepared_width_mm=prepared_width_mm,
+                prepared_height_mm=prepared_height_mm,
+                plot_area=plot_area,
+                device_settings=device_settings,
+                workspace_audit=workspace_audit,
+                preparation_audit=preparation_audit,
+            )
+            raise _PreparationValidationError(
+                "Prepared SVG math exceeded the current drawable area by "
+                f"{_format_mm(preparation_audit.overflow_x_mm)} x "
+                f"{_format_mm(preparation_audit.overflow_y_mm)} mm.",
+                preparation=preparation,
+            )
         prepared_svg_text = _build_prepared_svg(
             root,
             plot_area=plot_area,
             source_box=source_box,
             scale=scale,
+            placement_origin_x_mm=plot_area.margin_left_mm,
+            placement_origin_y_mm=plot_area.margin_top_mm,
         )
     return (
         prepared_svg_text,
-        PlotPreparationMetadata(
-            source_width=source_box.reported_width,
-            source_height=source_box.reported_height,
+        _build_preparation_metadata(
+            source_box=source_box,
             source_units=source_units,
-            prepared_width_mm=round(prepared_width_mm, 3),
-            prepared_height_mm=round(prepared_height_mm, 3),
-            page_width_mm=round(plot_area.page_width_mm, 3),
-            page_height_mm=round(plot_area.page_height_mm, 3),
-            drawable_width_mm=round(plot_area.draw_width_mm, 3),
-            drawable_height_mm=round(plot_area.draw_height_mm, 3),
-            plotter_bounds_width_mm=round(device_settings.plotter_bounds_mm.width_mm, 3),
-            plotter_bounds_height_mm=round(device_settings.plotter_bounds_mm.height_mm, 3),
-            plotter_bounds_source=device_settings.plotter_bounds_source,
-            plotter_model_code=(
-                device_settings.plotter_model.code
-                if device_settings.plotter_model is not None
-                else None
-            ),
-            plotter_model_label=(
-                device_settings.plotter_model.label
-                if device_settings.plotter_model is not None
-                else None
-            ),
-            sizing_mode=sizing_mode,
             units_inferred=units_inferred,
+            prepared_width_mm=prepared_width_mm,
+            prepared_height_mm=prepared_height_mm,
+            plot_area=plot_area,
+            device_settings=device_settings,
+            workspace_audit=workspace_audit,
+            preparation_audit=preparation_audit,
         ),
     )
 
@@ -580,6 +661,17 @@ class _SourceBox:
         self.view_box_min_y = view_box_min_y
         self.view_box_width = view_box_width
         self.view_box_height = view_box_height
+
+
+class _PreparationValidationError(InvalidArtifactError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        preparation: Optional[PlotPreparationMetadata] = None,
+    ) -> None:
+        super().__init__(message)
+        self.preparation = preparation
 
 
 def _extract_source_box(root: ET.Element) -> _SourceBox:
@@ -614,30 +706,244 @@ def _extract_source_box(root: ET.Element) -> _SourceBox:
     )
 
 
+def _build_workspace_audit(
+    *,
+    plot_area: PlotArea,
+    device_settings: PlotterDeviceSettings,
+) -> PlotPreparationMetadata.WorkspaceAudit:
+    plotter_bounds = device_settings.plotter_bounds_mm
+    return PlotPreparationMetadata.WorkspaceAudit(
+        page_within_plotter_bounds=(
+            plot_area.page_width_mm <= plotter_bounds.width_mm + PREPARATION_EPSILON_MM
+            and plot_area.page_height_mm <= plotter_bounds.height_mm + PREPARATION_EPSILON_MM
+        ),
+        drawable_area_positive=(
+            plot_area.draw_width_mm > 0 and plot_area.draw_height_mm > 0
+        ),
+        drawable_origin_x_mm=round(plot_area.margin_left_mm, 3),
+        drawable_origin_y_mm=round(plot_area.margin_top_mm, 3),
+        remaining_bounds_right_mm=round(
+            plotter_bounds.width_mm - plot_area.page_width_mm,
+            3,
+        ),
+        remaining_bounds_bottom_mm=round(
+            plotter_bounds.height_mm - plot_area.page_height_mm,
+            3,
+        ),
+    )
+
+
+def _build_preparation_audit(
+    *,
+    strategy: str,
+    plot_area: PlotArea,
+    prepared_width_mm: float,
+    prepared_height_mm: float,
+    scale: Optional[float],
+    placement_origin_x_mm: Optional[float],
+    placement_origin_y_mm: Optional[float],
+    prepared_view_box: Optional[tuple[float, float, float, float]],
+) -> PlotPreparationMetadata.PreparationAudit:
+    overflow_x = max(0.0, prepared_width_mm - plot_area.draw_width_mm)
+    overflow_y = max(0.0, prepared_height_mm - plot_area.draw_height_mm)
+    content_min_x_mm = placement_origin_x_mm
+    content_min_y_mm = placement_origin_y_mm
+    content_max_x_mm = (
+        None
+        if placement_origin_x_mm is None
+        else placement_origin_x_mm + prepared_width_mm
+    )
+    content_max_y_mm = (
+        None
+        if placement_origin_y_mm is None
+        else placement_origin_y_mm + prepared_height_mm
+    )
+    return PlotPreparationMetadata.PreparationAudit(
+        strategy=strategy,
+        fit_scale=round(scale, 6) if scale is not None else None,
+        prepared_within_drawable_area=(
+            overflow_x <= PREPARATION_EPSILON_MM and overflow_y <= PREPARATION_EPSILON_MM
+        ),
+        overflow_x_mm=round(overflow_x, 6),
+        overflow_y_mm=round(overflow_y, 6),
+        placement_origin_x_mm=(
+            round(placement_origin_x_mm, 3)
+            if placement_origin_x_mm is not None
+            else None
+        ),
+        placement_origin_y_mm=(
+            round(placement_origin_y_mm, 3)
+            if placement_origin_y_mm is not None
+            else None
+        ),
+        content_min_x_mm=round(content_min_x_mm, 3) if content_min_x_mm is not None else None,
+        content_min_y_mm=round(content_min_y_mm, 3) if content_min_y_mm is not None else None,
+        content_max_x_mm=round(content_max_x_mm, 3) if content_max_x_mm is not None else None,
+        content_max_y_mm=round(content_max_y_mm, 3) if content_max_y_mm is not None else None,
+        content_width_mm=round(prepared_width_mm, 3),
+        content_height_mm=round(prepared_height_mm, 3),
+        prepared_viewbox_min_x=(
+            round(prepared_view_box[0], 3) if prepared_view_box is not None else None
+        ),
+        prepared_viewbox_min_y=(
+            round(prepared_view_box[1], 3) if prepared_view_box is not None else None
+        ),
+        prepared_viewbox_width=(
+            round(prepared_view_box[2], 3) if prepared_view_box is not None else None
+        ),
+        prepared_viewbox_height=(
+            round(prepared_view_box[3], 3) if prepared_view_box is not None else None
+        ),
+    )
+
+
+def _build_preparation_metadata(
+    *,
+    source_box: _SourceBox,
+    source_units: str,
+    units_inferred: bool,
+    prepared_width_mm: float,
+    prepared_height_mm: float,
+    plot_area: PlotArea,
+    device_settings: PlotterDeviceSettings,
+    workspace_audit: PlotPreparationMetadata.WorkspaceAudit,
+    preparation_audit: PlotPreparationMetadata.PreparationAudit,
+) -> PlotPreparationMetadata:
+    return PlotPreparationMetadata(
+        source_width=source_box.reported_width,
+        source_height=source_box.reported_height,
+        source_units=source_units,
+        prepared_width_mm=round(prepared_width_mm, 3),
+        prepared_height_mm=round(prepared_height_mm, 3),
+        page_width_mm=round(plot_area.page_width_mm, 3),
+        page_height_mm=round(plot_area.page_height_mm, 3),
+        drawable_width_mm=round(plot_area.draw_width_mm, 3),
+        drawable_height_mm=round(plot_area.draw_height_mm, 3),
+        plotter_bounds_width_mm=round(device_settings.plotter_bounds_mm.width_mm, 3),
+        plotter_bounds_height_mm=round(device_settings.plotter_bounds_mm.height_mm, 3),
+        plotter_bounds_source=device_settings.plotter_bounds_source,
+        plotter_model_code=(
+            device_settings.plotter_model.code
+            if device_settings.plotter_model is not None
+            else None
+        ),
+        plotter_model_label=(
+            device_settings.plotter_model.label
+            if device_settings.plotter_model is not None
+            else None
+        ),
+        units_inferred=units_inferred,
+        workspace_audit=workspace_audit,
+        preparation_audit=preparation_audit,
+    )
+
+
+def _validate_preparation_consistency(
+    *,
+    prepared_width_mm: float,
+    prepared_height_mm: float,
+    preparation_audit: PlotPreparationMetadata.PreparationAudit,
+    drawable_width_mm: float,
+    drawable_height_mm: float,
+) -> None:
+    values = [
+        prepared_width_mm,
+        prepared_height_mm,
+        drawable_width_mm,
+        drawable_height_mm,
+        preparation_audit.overflow_x_mm,
+        preparation_audit.overflow_y_mm,
+    ]
+    if preparation_audit.fit_scale is not None:
+        values.append(preparation_audit.fit_scale)
+    for maybe_value in (
+        preparation_audit.prepared_viewbox_min_x,
+        preparation_audit.prepared_viewbox_min_y,
+        preparation_audit.prepared_viewbox_width,
+        preparation_audit.prepared_viewbox_height,
+    ):
+        if maybe_value is not None:
+            values.append(maybe_value)
+    if not all(math.isfinite(value) for value in values):
+        raise _PreparationValidationError(
+            "Prepared SVG math produced non-finite bounds or scale."
+        )
+    if prepared_width_mm <= 0 or prepared_height_mm <= 0:
+        raise _PreparationValidationError(
+            "Prepared SVG math produced a non-positive output size."
+        )
+
+
+def _select_normal_preparation_scale(
+    *,
+    plot_area: PlotArea,
+    source_box: _SourceBox,
+) -> float:
+    fit_scale = min(
+        plot_area.draw_width_mm / source_box.view_box_width,
+        plot_area.draw_height_mm / source_box.view_box_height,
+    )
+    authored_scale = _authored_scale(source_box)
+    if authored_scale is None:
+        return fit_scale
+    authored_width_mm = source_box.view_box_width * authored_scale
+    authored_height_mm = source_box.view_box_height * authored_scale
+    if (
+        authored_width_mm <= plot_area.draw_width_mm + PREPARATION_EPSILON_MM
+        and authored_height_mm <= plot_area.draw_height_mm + PREPARATION_EPSILON_MM
+    ):
+        return authored_scale
+    return fit_scale
+
+
+def _authored_scale(source_box: _SourceBox) -> Optional[float]:
+    if source_box.physical_width_mm is None or source_box.physical_height_mm is None:
+        return None
+    scale_x = source_box.physical_width_mm / source_box.view_box_width
+    scale_y = source_box.physical_height_mm / source_box.view_box_height
+    return min(scale_x, scale_y)
+
+
 def _build_prepared_svg(
     root: ET.Element,
     *,
     plot_area: PlotArea,
     source_box: _SourceBox,
     scale: float,
+    placement_origin_x_mm: float,
+    placement_origin_y_mm: float,
 ) -> str:
-    page_width_mm = _format_mm(plot_area.page_width_mm)
-    page_height_mm = _format_mm(plot_area.page_height_mm)
-    expanded_view_box_width = plot_area.page_width_mm / scale
-    expanded_view_box_height = plot_area.page_height_mm / scale
-    expanded_view_box_min_x = source_box.view_box_min_x - (plot_area.margin_left_mm / scale)
-    expanded_view_box_min_y = source_box.view_box_min_y - (plot_area.margin_top_mm / scale)
-
     root_copy = copy.deepcopy(root)
-    root_copy.attrib["width"] = f"{page_width_mm}mm"
-    root_copy.attrib["height"] = f"{page_height_mm}mm"
+    root_copy.attrib["width"] = f"{_format_mm(plot_area.page_width_mm)}mm"
+    root_copy.attrib["height"] = f"{_format_mm(plot_area.page_height_mm)}mm"
     root_copy.attrib["viewBox"] = (
-        f"{_format_numeric(expanded_view_box_min_x)} "
-        f"{_format_numeric(expanded_view_box_min_y)} "
-        f"{_format_numeric(expanded_view_box_width)} "
-        f"{_format_numeric(expanded_view_box_height)}"
+        f"0 0 {_format_numeric(plot_area.page_width_mm)} {_format_numeric(plot_area.page_height_mm)}"
     )
+    wrapper = ET.Element(
+        _qualify_svg_tag(root_copy.tag, "g"),
+        {
+            "transform": (
+                f"translate({_format_numeric(placement_origin_x_mm)} "
+                f"{_format_numeric(placement_origin_y_mm)}) "
+                f"scale({_format_numeric(scale)}) "
+                f"translate({_format_numeric(-source_box.view_box_min_x)} "
+                f"{_format_numeric(-source_box.view_box_min_y)})"
+            )
+        },
+    )
+    existing_children = list(root_copy)
+    for child in existing_children:
+        root_copy.remove(child)
+        wrapper.append(child)
+    root_copy.append(wrapper)
     return ET.tostring(root_copy, encoding="unicode")
+
+
+def _qualify_svg_tag(root_tag: str, name: str) -> str:
+    if root_tag.startswith("{"):
+        namespace, _ = root_tag[1:].split("}", 1)
+        return f"{{{namespace}}}{name}"
+    return name
 
 
 def _classify_source_units(root: ET.Element) -> str:

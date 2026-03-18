@@ -114,7 +114,6 @@ def build_api_router(
             request.asset_id,
             purpose=request.purpose,
             capture_mode=request.capture_mode,
-            sizing_mode=request.sizing_mode,
         )
 
     @router.get("/api/plot-runs/latest", response_model=LatestPlotRunResponse)

@@ -179,7 +179,6 @@ export function useHardwareDashboard() {
           await createPlotRun(asset.id, {
             purpose: "diagnostic",
             capture_mode: "skip",
-            sizing_mode: "native",
           });
         },
         {

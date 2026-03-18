@@ -214,6 +214,59 @@ def test_plotter_device_endpoint_reports_model_derived_bounds(tmp_path):
     assert payload["plotter_bounds_mm"]["height_mm"] == 296.926
 
 
+def test_axidraw_without_explicit_bounds_degrades_safely(tmp_path):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+        ),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        status_response = client.get("/api/hardware/status")
+        device_response = client.get("/api/plotter/device")
+
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["plotter"]["driver"] == "axidraw-pyapi"
+    assert status_payload["plotter"]["available"] is False
+    assert "requires explicit machine bounds configuration" in status_payload["plotter"]["error"]
+    assert device_response.status_code == 503
+    assert "requires explicit machine bounds configuration" in device_response.json()["detail"]
+
+
+def test_plotter_device_endpoint_reports_explicit_bounds_override(tmp_path):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            plotter_bounds_width_mm=300.0,
+            plotter_bounds_height_mm=218.0,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/plotter/device")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["plotter_model"] is None
+    assert payload["plotter_bounds_source"] == "config_override"
+    assert payload["plotter_bounds_mm"]["width_mm"] == 300.0
+    assert payload["plotter_bounds_mm"]["height_mm"] == 218.0
+
+
 def test_plotter_workspace_endpoint_persists_page_setup(tmp_path):
     with create_test_client(tmp_path) as client:
         initial = client.get("/api/plotter/workspace")
@@ -238,6 +291,37 @@ def test_plotter_workspace_endpoint_persists_page_setup(tmp_path):
     assert current.status_code == 200
     assert current.json()["source"] == "persisted"
     assert current.json()["drawable_area_mm"]["height_mm"] == 190.0
+
+
+def test_axidraw_workspace_endpoint_returns_invalid_state_when_defaults_exceed_explicit_bounds(
+    tmp_path,
+):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            plotter_bounds_width_mm=300.0,
+            plotter_bounds_height_mm=218.0,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/plotter/workspace")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["is_valid"] is False
+    assert (
+        payload["validation_error"]
+        == "Configured page height exceeds the plotter bounds height."
+    )
+    assert payload["page_size_mm"]["height_mm"] == 297.0
 
 
 def test_plotter_workspace_endpoint_rejects_page_larger_than_bounds(tmp_path):
@@ -306,13 +390,15 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
         recent = client.get("/api/plot-runs")
 
     assert completed["status"] == "completed"
-    assert completed["sizing_mode"] == "native"
     assert completed["capture"]["public_url"].startswith("/captures/")
     assert completed["plotter_run_details"]["prepared_svg_path"].endswith("-prepared.svg")
     assert completed["plotter_run_details"]["preparation"]["source_units"] == "mm"
     assert completed["plotter_run_details"]["calibration"]["driver_calibration"]["native_res_factor"] == 1016.0
     assert completed["plotter_run_details"]["preparation"]["page_width_mm"] == 210.0
     assert completed["plotter_run_details"]["preparation"]["drawable_width_mm"] == 170.0
+    assert completed["plotter_run_details"]["preparation"]["workspace_audit"]["page_within_plotter_bounds"] is True
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["placement_origin_x_mm"] == 20.0
     assert latest.json()["run"]["id"] == run["id"]
     assert recent.json()["runs"][0]["id"] == run["id"]
 
@@ -335,7 +421,6 @@ def test_diagnostic_plot_run_skips_capture(tmp_path):
                 "asset_id": asset["id"],
                 "purpose": "diagnostic",
                 "capture_mode": "skip",
-                "sizing_mode": "native",
             },
         )
         run = run_response.json()
@@ -343,12 +428,15 @@ def test_diagnostic_plot_run_skips_capture(tmp_path):
 
     assert completed["status"] == "completed"
     assert completed["purpose"] == "diagnostic"
-    assert completed["sizing_mode"] == "native"
     assert completed["capture"] is None
     assert completed["stage_states"]["capture"]["message"] == "Capture skipped for diagnostic run."
+    assert (
+        completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"]
+        == "diagnostic_passthrough"
+    )
 
 
-def test_fit_to_draw_area_accepts_unitless_upload(tmp_path):
+def test_normal_preparation_accepts_unitless_upload(tmp_path):
     svg = b"<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' viewBox='0 0 200 100'></svg>"
 
     with create_test_client(
@@ -361,15 +449,16 @@ def test_fit_to_draw_area_accepts_unitless_upload(tmp_path):
             files={"file": ("sample.svg", svg, "image/svg+xml")},
         )
         asset = asset_response.json()
-        run_response = client.post(
-            "/api/plot-runs",
-            json={"asset_id": asset["id"], "sizing_mode": "fit_to_draw_area"},
-        )
+        run_response = client.post("/api/plot-runs", json={"asset_id": asset["id"]})
         completed = wait_for_run_completion(client, run_response.json()["id"])
 
     assert completed["status"] == "completed"
     assert completed["plotter_run_details"]["preparation"]["units_inferred"] is True
     assert completed["plotter_run_details"]["preparation"]["prepared_width_mm"] == 170.0
+    assert completed["plotter_run_details"]["preparation"]["workspace_audit"]["drawable_origin_x_mm"] == 20.0
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["fit_scale"] == 0.85
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["prepared_viewbox_min_x"] == 0.0
 
 
 def test_plot_run_conflict_returns_409(tmp_path):

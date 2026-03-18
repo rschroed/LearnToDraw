@@ -32,7 +32,8 @@ from learn_to_draw_api.services.plotter_workspace import (
 )
 
 
-def _build_service(tmp_path, *, plotter=None, camera=None):
+def _build_service(tmp_path, *, plotter=None, camera=None, config_overrides=None):
+    config_overrides = config_overrides or {}
     config = AppConfig(
         captures_dir=tmp_path / "captures-config",
         plot_assets_dir=tmp_path / "plot_assets-config",
@@ -40,6 +41,7 @@ def _build_service(tmp_path, *, plotter=None, camera=None):
         calibration_dir=tmp_path / "calibration",
         device_settings_dir=tmp_path / "device-settings",
         workspace_dir=tmp_path / "workspace",
+        **config_overrides,
     )
     calibration_service = PlotterCalibrationService(
         store=PlotterCalibrationStore(tmp_path / "calibration"),
@@ -108,10 +110,22 @@ def test_plot_workflow_service_completes_pattern_run(tmp_path):
     assert completed.plotter_run_details["workspace"]["page_size_mm"]["width_mm"] == 210.0
     prepared_svg_path = Path(completed.plotter_run_details["prepared_svg_path"])
     assert prepared_svg_path.exists()
-    assert prepared_svg_path.read_text(encoding="utf-8") == Path(asset.file_path).read_text(
-        encoding="utf-8"
-    )
-    assert completed.plotter_run_details["preparation"]["sizing_mode"] == "native"
+    prepared_svg_text = prepared_svg_path.read_text(encoding="utf-8")
+    assert prepared_svg_text != Path(asset.file_path).read_text(encoding="utf-8")
+    assert "<g transform=" in prepared_svg_text
+    assert 'width="210mm"' in prepared_svg_text
+    assert 'height="297mm"' in prepared_svg_text
+    assert 'viewBox="0 0 210 297"' in prepared_svg_text
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["page_within_plotter_bounds"] is True
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["drawable_origin_x_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["remaining_bounds_right_mm"] == 0.0
+    assert completed.plotter_run_details["preparation"]["prepared_width_mm"] == 160.0
+    assert completed.plotter_run_details["preparation"]["prepared_height_mm"] == 120.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["fit_scale"] == 0.166667
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["placement_origin_x_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["content_max_x_mm"] == 180.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_within_drawable_area"] is True
 
 
 def test_plot_workflow_service_fails_before_capture_on_plot_error(tmp_path):
@@ -180,7 +194,7 @@ def test_builtin_patterns_use_explicit_physical_units(tmp_path):
     assert 'height="12mm"' in dash_row_svg
 
 
-def test_fit_to_draw_area_prepares_unitless_upload(tmp_path):
+def test_normal_preparation_max_fits_unitless_upload(tmp_path):
     service = _build_service(tmp_path)
     asset = service.create_uploaded_asset(
         filename="unitless.svg",
@@ -191,11 +205,10 @@ def test_fit_to_draw_area_prepares_unitless_upload(tmp_path):
         content_type="image/svg+xml",
     )
 
-    run = service.create_run(asset.id, sizing_mode="fit_to_draw_area")
+    run = service.create_run(asset.id)
     completed = _wait_for_terminal_run(service, run.id)
 
     assert completed.status == "completed"
-    assert completed.sizing_mode == "fit_to_draw_area"
     assert completed.plotter_run_details["preparation"]["prepared_width_mm"] == 170.0
     assert completed.plotter_run_details["preparation"]["prepared_height_mm"] == 85.0
     assert completed.plotter_run_details["preparation"]["drawable_width_mm"] == 170.0
@@ -203,34 +216,58 @@ def test_fit_to_draw_area_prepares_unitless_upload(tmp_path):
     assert completed.plotter_run_details["preparation"]["plotter_bounds_width_mm"] == 210.0
     assert completed.plotter_run_details["preparation"]["plotter_bounds_source"] == "config_default"
     assert completed.plotter_run_details["preparation"]["units_inferred"] is True
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["page_within_plotter_bounds"] is True
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["drawable_area_positive"] is True
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["drawable_origin_x_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["drawable_origin_y_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["remaining_bounds_right_mm"] == 0.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["remaining_bounds_bottom_mm"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["fit_scale"] == 0.85
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_within_drawable_area"] is True
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["overflow_x_mm"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["overflow_y_mm"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["placement_origin_x_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["placement_origin_y_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["content_max_x_mm"] == 190.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["content_max_y_mm"] == 105.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_min_x"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_min_y"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_width"] == 210.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_height"] == 297.0
     prepared_svg_path = Path(completed.plotter_run_details["prepared_svg_path"])
     prepared_svg_text = prepared_svg_path.read_text(encoding="utf-8")
-    assert "<g transform=" not in prepared_svg_text
+    assert "<g transform=" in prepared_svg_text
     assert prepared_svg_text.startswith('<svg xmlns="http://www.w3.org/2000/svg"')
     assert 'width="210mm"' in prepared_svg_text
     assert 'height="297mm"' in prepared_svg_text
-    assert 'viewBox="-23.529 -23.529 247.059 349.412"' in prepared_svg_text
+    assert 'viewBox="0 0 210 297"' in prepared_svg_text
 
 
-def test_native_sizing_rejects_unitless_upload(tmp_path):
+def test_normal_preparation_preserves_smaller_explicit_unit_upload_size(tmp_path):
     service = _build_service(tmp_path)
     asset = service.create_uploaded_asset(
-        filename="unitless.svg",
+        filename="small-explicit.svg",
         content=(
-            b"<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' "
+            b"<svg xmlns='http://www.w3.org/2000/svg' width='40mm' height='20mm' "
             b"viewBox='0 0 200 100'><path d='M 0 0 H 200' /></svg>"
         ),
         content_type="image/svg+xml",
     )
 
-    run = service.create_run(asset.id, sizing_mode="native")
-    failed = _wait_for_terminal_run(service, run.id)
+    run = service.create_run(asset.id)
+    completed = _wait_for_terminal_run(service, run.id)
 
-    assert failed.status == "failed"
-    assert failed.error == "Native sizing requires explicit physical SVG dimensions such as mm, cm, or in."
+    assert completed.status == "completed"
+    assert completed.plotter_run_details["preparation"]["prepared_width_mm"] == 40.0
+    assert completed.plotter_run_details["preparation"]["prepared_height_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["fit_scale"] == 0.2
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["placement_origin_x_mm"] == 20.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["content_max_y_mm"] == 40.0
 
 
-def test_native_sizing_rejects_authored_svg_that_exceeds_drawable_area(tmp_path):
+def test_normal_preparation_downscales_oversized_explicit_unit_upload(tmp_path):
     service = _build_service(tmp_path)
     asset = service.create_uploaded_asset(
         filename="oversized.svg",
@@ -241,11 +278,38 @@ def test_native_sizing_rejects_authored_svg_that_exceeds_drawable_area(tmp_path)
         content_type="image/svg+xml",
     )
 
-    run = service.create_run(asset.id, sizing_mode="native")
+    run = service.create_run(asset.id)
+    completed = _wait_for_terminal_run(service, run.id)
+
+    assert completed.status == "completed"
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["page_within_plotter_bounds"] is True
+    assert completed.plotter_run_details["preparation"]["prepared_width_mm"] == 170.0
+    assert completed.plotter_run_details["preparation"]["prepared_height_mm"] == 221.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_within_drawable_area"] is True
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["fit_scale"] == 0.85
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["overflow_x_mm"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["overflow_y_mm"] == 0.0
+
+
+def test_plot_workflow_fails_cleanly_when_workspace_exceeds_current_bounds(tmp_path):
+    service = _build_service(
+        tmp_path,
+        config_overrides={
+            "plotter_driver": "axidraw",
+            "plotter_bounds_width_mm": 300.0,
+            "plotter_bounds_height_mm": 218.0,
+        },
+    )
+    asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="tiny-square"))
+
+    run = service.create_run(asset.id)
     failed = _wait_for_terminal_run(service, run.id)
 
     assert failed.status == "failed"
-    assert "exceeds the current drawable area of 170 x 257 mm" in failed.error
+    assert failed.error == "Configured page height exceeds the plotter bounds height."
+    assert failed.stage_states["prepare"].status == "failed"
+    assert failed.stage_states["prepare"].message == "Configured page height exceeds the plotter bounds height."
 
 
 def test_plot_workflow_records_effective_calibration(tmp_path):
@@ -255,7 +319,7 @@ def test_plot_workflow_records_effective_calibration(tmp_path):
     )
     asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="tiny-square"))
 
-    run = service.create_run(asset.id, sizing_mode="native")
+    run = service.create_run(asset.id)
     completed = _wait_for_terminal_run(service, run.id)
 
     assert completed.status == "completed"
@@ -266,7 +330,7 @@ def test_plot_workflow_records_effective_calibration(tmp_path):
     )
 
 
-def test_plot_workflow_uses_persisted_workspace_for_fit_mode(tmp_path):
+def test_plot_workflow_uses_persisted_workspace_for_normal_preparation(tmp_path):
     service = _build_service(tmp_path)
     service._workspace_service.save(  # noqa: SLF001
         PlotterWorkspaceRequest(
@@ -287,7 +351,7 @@ def test_plot_workflow_uses_persisted_workspace_for_fit_mode(tmp_path):
         content_type="image/svg+xml",
     )
 
-    run = service.create_run(asset.id, sizing_mode="fit_to_draw_area")
+    run = service.create_run(asset.id)
     completed = _wait_for_terminal_run(service, run.id)
 
     assert completed.status == "completed"
@@ -295,9 +359,16 @@ def test_plot_workflow_uses_persisted_workspace_for_fit_mode(tmp_path):
     assert completed.plotter_run_details["preparation"]["drawable_width_mm"] == 128.0
     assert completed.plotter_run_details["preparation"]["drawable_height_mm"] == 190.0
     assert completed.plotter_run_details["device"]["plotter_bounds_mm"]["width_mm"] == 210.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["drawable_origin_x_mm"] == 10.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["drawable_origin_y_mm"] == 10.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["remaining_bounds_right_mm"] == 62.0
+    assert completed.plotter_run_details["preparation"]["workspace_audit"]["remaining_bounds_bottom_mm"] == 87.0
+    assert completed.plotter_run_details["preparation"]["prepared_width_mm"] == 128.0
+    assert completed.plotter_run_details["preparation"]["prepared_height_mm"] == 64.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
 
 
-def test_fit_to_draw_area_prepares_letter_sized_upload_inside_persisted_workspace(tmp_path):
+def test_normal_preparation_places_letter_sized_upload_inside_persisted_workspace(tmp_path):
     service = _build_service(tmp_path)
     service._workspace_service.save(  # noqa: SLF001
         PlotterWorkspaceRequest(
@@ -318,25 +389,50 @@ def test_fit_to_draw_area_prepares_letter_sized_upload_inside_persisted_workspac
         content_type="image/svg+xml",
     )
 
-    run = service.create_run(asset.id, sizing_mode="fit_to_draw_area")
+    run = service.create_run(asset.id)
     completed = _wait_for_terminal_run(service, run.id)
 
     assert completed.status == "completed"
     assert completed.plotter_run_details["preparation"]["prepared_width_mm"] == 190.0
     assert completed.plotter_run_details["preparation"]["prepared_height_mm"] == 245.882
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["fit_scale"] == 0.310458
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_min_x"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_min_y"] == 0.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_width"] == 210.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["prepared_viewbox_height"] == 297.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["placement_origin_x_mm"] == 10.0
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["content_max_x_mm"] == 200.0
     prepared_svg_path = Path(completed.plotter_run_details["prepared_svg_path"])
     prepared_svg_text = prepared_svg_path.read_text(encoding="utf-8")
-    assert "<g transform=" not in prepared_svg_text
+    assert "<g transform=" in prepared_svg_text
     assert prepared_svg_text.startswith('<svg xmlns="http://www.w3.org/2000/svg"')
     assert 'width="210mm"' in prepared_svg_text
     assert 'height="297mm"' in prepared_svg_text
-    assert 'viewBox="-32.211 -32.211 676.421 956.653"' in prepared_svg_text
+    assert 'viewBox="0 0 210 297"' in prepared_svg_text
 
 
-def test_fit_to_draw_area_is_rejected_for_real_axidraw_plotting(tmp_path):
+def test_normal_preparation_rejects_non_finite_preparation_math(tmp_path):
+    service = _build_service(tmp_path)
+    asset = service.create_uploaded_asset(
+        filename="nan-viewbox.svg",
+        content=(
+            b"<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' "
+            b"viewBox='0 0 NaN 100'><path d='M 0 0 H 200' /></svg>"
+        ),
+        content_type="image/svg+xml",
+    )
+
+    run = service.create_run(asset.id)
+    failed = _wait_for_terminal_run(service, run.id)
+
+    assert failed.status == "failed"
+    assert failed.error == "Prepared SVG math produced non-finite bounds or scale."
+
+
+def test_normal_preparation_is_allowed_for_real_axidraw_plotting(tmp_path):
     service = _build_service(
         tmp_path,
-        plotter=AxiDrawPlotter.__new__(AxiDrawPlotter),  # noqa: SLF001
+        plotter=MockPlotter(plot_delay_s=0),
     )
     service._plotter.driver = "axidraw-pyapi"  # noqa: SLF001
     asset = service.create_uploaded_asset(
@@ -348,13 +444,8 @@ def test_fit_to_draw_area_is_rejected_for_real_axidraw_plotting(tmp_path):
         content_type="image/svg+xml",
     )
 
-    run = service.create_run(asset.id, sizing_mode="fit_to_draw_area")
-    failed = _wait_for_terminal_run(service, run.id)
+    run = service.create_run(asset.id)
+    completed = _wait_for_terminal_run(service, run.id)
 
-    assert failed.status == "failed"
-    assert (
-        failed.error
-        == "Fit within drawable area is temporarily disabled for real AxiDraw plotting "
-        "because the prepared SVG can exceed safe machine bounds. Use authored size "
-        "only for SVGs with explicit physical units."
-    )
+    assert completed.status == "completed"
+    assert completed.plotter_run_details["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
