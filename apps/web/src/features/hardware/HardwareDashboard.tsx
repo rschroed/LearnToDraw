@@ -655,6 +655,17 @@ export function HardwareDashboard() {
     actionName !== null || hardwareStatus.plotter.busy || !hardwareStatus.plotter.available;
   const workspaceDisabled =
     actionName !== null || hardwareStatus.plotter.busy || !hardwareStatus.plotter.available;
+  const cameraInitializationState =
+    typeof hardwareStatus.camera.details.initialization_state === "string"
+      ? hardwareStatus.camera.details.initialization_state
+      : null;
+  const captureDisabled =
+    actionName === "camera-capture" ||
+    hardwareStatus.camera.busy ||
+    (!hardwareStatus.camera.available &&
+      cameraInitializationState !== "uninitialized") ||
+    (hardwareStatus.camera.error !== null &&
+      cameraInitializationState !== "uninitialized");
 
   function handlePenHeightChange(nextValues: PenHeightValues) {
     setPenPosUp(nextValues.penPosUp);
@@ -1350,6 +1361,7 @@ export function HardwareDashboard() {
           status={hardwareStatus.camera}
           onAction={capture}
           actionPending={actionName === "camera-capture"}
+          actionDisabled={captureDisabled}
           notice={
             hardwareStatus.camera.error
               ? { tone: "error", message: hardwareStatus.camera.error }

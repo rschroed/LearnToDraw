@@ -1076,6 +1076,27 @@ describe("Hardware dashboard", () => {
     expect(screen.getByText(/1920 x 1080/i)).toBeInTheDocument();
   });
 
+  it("keeps capture enabled while the opencv camera is uninitialized", async () => {
+    currentHardwareStatus.camera = {
+      ...currentHardwareStatus.camera,
+      available: false,
+      connected: false,
+      driver: "opencv-camera",
+      details: {
+        camera_index: 0,
+        initialization_state: "uninitialized",
+        last_capture_id: null,
+        resolution: null,
+      } as Record<string, unknown>,
+    };
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("button", { name: /capture image/i }),
+    ).toBeEnabled();
+  });
+
   it("creates a built-in pattern and completes a plot run", async () => {
     render(<App />);
 

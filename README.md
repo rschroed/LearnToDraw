@@ -45,7 +45,15 @@ Then open [http://127.0.0.1:5173](http://127.0.0.1:5173).
 
 By default, the backend runs against the mock plotter path so the app can be explored locally without hardware.
 
-Camera capture also defaults to the mock adapter. To use a real camera, install the backend dependencies with `make api-install` and set:
+Camera capture also defaults to the mock adapter. For frontend testing with a real local camera, use:
+
+```bash
+make api-dev-camera
+```
+
+That keeps the plotter on the mock backend and starts the API with the OpenCV camera adapter enabled.
+
+If you need to start the backend manually instead, install the backend dependencies with `make api-install` and set:
 
 ```bash
 export LEARN_TO_DRAW_CAMERA_DRIVER=opencv
