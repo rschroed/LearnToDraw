@@ -44,4 +44,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added vendor-aligned model labels and model-derived nominal bounds for explicit AxiDraw configurations
 - Separated nominal machine bounds from operational safe bounds, including backend-owned clearances and narrow override support
 
+## macOS Helper Proof Slice
+
+- Added a macOS-first helper proof in `apps/macos-helper` to own backend startup for OpenCV camera testing
+- Kept the helper lifecycle-only with localhost `/status`, `/start`, and `/stop` endpoints
+- Left backend and frontend hardware APIs unchanged while testing whether helper-owned startup improves camera permission reliability
+- Added OpenCV camera status diagnostics for open/read results and backend selection during real-camera validation
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

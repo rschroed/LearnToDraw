@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import platform
 import time
 from typing import Any, Optional
 from uuid import uuid4
@@ -41,6 +42,10 @@ class OpenCVCamera:
         self._error: Optional[str] = None
         self._last_capture_id: Optional[str] = None
         self._last_resolution: Optional[str] = None
+        self._last_open_result = "not_attempted"
+        self._last_read_result = "not_attempted"
+        self._last_backend_name: Optional[str] = None
+        self._last_open_message: Optional[str] = None
         self._last_updated = datetime.now(timezone.utc)
 
     def connect(self) -> None:
@@ -74,6 +79,12 @@ class OpenCVCamera:
                 "last_capture_id": self._last_capture_id,
                 "resolution": self._last_resolution,
                 "last_action": "idle" if not self._busy else "capturing",
+                "last_open_result": self._last_open_result,
+                "last_open_message": self._last_open_message,
+                "last_read_result": self._last_read_result,
+                "last_backend_name": self._last_backend_name,
+                "opencv_version": self._opencv_version(),
+                "platform": platform.platform(),
             },
         )
 
@@ -124,6 +135,12 @@ class OpenCVCamera:
             self._connected = False
             self._available = False
             self._state = "unavailable"
+            self._last_open_result = "failed"
+            self._last_backend_name = None
+            self._last_open_message = (
+                f"VideoCapture({self._camera_index}) did not open. macOS camera access "
+                "may still be denied, the selected index may be wrong, or the device may be busy."
+            )
             self._error = (
                 f"OpenCV camera index {self._camera_index} is unavailable or permission "
                 "was denied."
@@ -135,6 +152,9 @@ class OpenCVCamera:
         self._available = True
         self._initialized = True
         self._state = "ready"
+        self._last_open_result = "opened"
+        self._last_open_message = f"VideoCapture({self._camera_index}) opened successfully."
+        self._last_backend_name = self._capture_backend_name(capture)
         self._error = None
         self._touch()
 
@@ -151,12 +171,14 @@ class OpenCVCamera:
         if not ok or frame is None:
             self._capture.release()
             self._capture = None
+            self._last_read_result = "failed"
             self._error = f"OpenCV camera index {self._camera_index} failed to read a frame."
             self._available = False
             self._connected = False
             self._state = "unavailable"
             self._touch()
             raise HardwareOperationError(self._error)
+        self._last_read_result = "succeeded"
         return frame
 
     def _encode_frame(self, frame: Any) -> bytes:
@@ -186,6 +208,21 @@ class OpenCVCamera:
 
     def _initialization_state(self) -> str:
         return self._state
+
+    def _capture_backend_name(self, capture: Any) -> Optional[str]:
+        get_backend_name = getattr(capture, "getBackendName", None)
+        if not callable(get_backend_name):
+            return None
+        try:
+            return str(get_backend_name())
+        except Exception:
+            return None
+
+    def _opencv_version(self) -> Optional[str]:
+        if cv2 is None:
+            return None
+        version = getattr(cv2, "__version__", None)
+        return str(version) if version is not None else None
 
     def _touch(self) -> None:
         self._last_updated = datetime.now(timezone.utc)

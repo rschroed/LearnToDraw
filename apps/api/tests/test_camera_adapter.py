@@ -25,9 +25,10 @@ class FakeBuffer:
 
 
 class FakeVideoCapture:
-    def __init__(self, *, opened: bool = True, frames=None) -> None:
+    def __init__(self, *, opened: bool = True, frames=None, backend_name: str = "AVFOUNDATION") -> None:
         self._opened = opened
         self._frames = list(frames or [(True, FakeFrame())])
+        self._backend_name = backend_name
         self.release_called = False
         self.read_calls = 0
 
@@ -42,6 +43,9 @@ class FakeVideoCapture:
 
     def release(self) -> None:
         self.release_called = True
+
+    def getBackendName(self) -> str:
+        return self._backend_name
 
 
 def _config(tmp_path, **overrides):
@@ -92,6 +96,9 @@ def test_opencv_camera_reports_uninitialized_status():
     assert status.error is None
     assert status.details["initialization_state"] == "uninitialized"
     assert status.details["resolution"] is None
+    assert status.details["last_open_result"] == "not_attempted"
+    assert status.details["last_read_result"] == "not_attempted"
+    assert status.details["last_backend_name"] is None
 
 
 def test_opencv_camera_capture_is_lazy_and_records_actual_frame_dimensions(monkeypatch):
@@ -118,6 +125,9 @@ def test_opencv_camera_capture_is_lazy_and_records_actual_frame_dimensions(monke
     assert status.details["camera_index"] == 2
     assert status.details["resolution"] == "640x480"
     assert status.details["last_capture_id"] == artifact.capture_id
+    assert status.details["last_open_result"] == "opened"
+    assert status.details["last_read_result"] == "succeeded"
+    assert status.details["last_backend_name"] == "AVFOUNDATION"
 
 
 def test_opencv_camera_connect_keeps_lazy_uninitialized_state(monkeypatch):
@@ -154,6 +164,9 @@ def test_opencv_camera_reports_unavailable_when_open_fails_on_capture(monkeypatc
     assert status.available is False
     assert status.connected is False
     assert status.details["initialization_state"] == "unavailable"
+    assert status.details["last_open_result"] == "failed"
+    assert status.details["last_backend_name"] is None
+    assert "VideoCapture(0) did not open" in status.details["last_open_message"]
     assert "permission was denied" in status.error
 
 
@@ -168,6 +181,10 @@ def test_opencv_camera_raises_when_frame_read_fails(monkeypatch):
 
     with pytest.raises(HardwareOperationError, match="failed to read a frame"):
         camera.capture()
+
+    status = camera.get_status()
+    assert status.details["last_open_result"] == "opened"
+    assert status.details["last_read_result"] == "failed"
 
 
 def test_opencv_camera_raises_when_jpeg_encode_fails(monkeypatch):

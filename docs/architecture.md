@@ -35,6 +35,16 @@ The frontend is a lightweight local dashboard.
 - presents read-only hardware detail plus a small number of bounded controls
 - previews planned-vs-captured output and current workspace information without becoming a second hardware API
 
+## Local Helper Proof Slice
+
+The repository now includes a macOS-first helper proof under `apps/macos-helper`.
+
+- the helper is lifecycle-only and does not become a second backend
+- it starts and stops the existing FastAPI backend for camera-mode testing
+- it exposes helper-local startup status on `127.0.0.1:8001`
+- all hardware access still stays in the backend on `127.0.0.1:8000`
+- the web app remains unchanged in this slice
+
 ## Adapters And Hardware Boundary
 
 Hardware integration stays behind backend interfaces.
