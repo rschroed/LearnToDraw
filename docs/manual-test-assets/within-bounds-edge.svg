@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="110mm" height="197mm" viewBox="0 0 110 197">
+  <title>Within Bounds Edge Test</title>
+  <desc>Native-size manual audit fixture sized to the current 110 x 197 mm drawable area.</desc>
+  <rect x="0.5" y="0.5" width="109" height="196" fill="none" stroke="#000" stroke-width="0.5" />
+  <line x1="0.5" y1="98.5" x2="109.5" y2="98.5" stroke="#000" stroke-width="0.35" />
+  <line x1="55" y1="0.5" x2="55" y2="196.5" stroke="#000" stroke-width="0.35" />
+</svg>

@@ -450,6 +450,7 @@ def test_build_plotter_adapter_uses_configured_driver(tmp_path):
         plot_runs_dir=tmp_path / "plot_runs2",
         plotter_driver="axidraw",
         axidraw_port="usb-real",
+        axidraw_model=1,
     )
 
     mock_plotter = build_plotter_adapter(mock_config)
@@ -457,3 +458,19 @@ def test_build_plotter_adapter_uses_configured_driver(tmp_path):
 
     assert mock_plotter.driver == "mock-plotter"
     assert axidraw_plotter.driver == "axidraw-pyapi"
+
+
+def test_build_plotter_adapter_degrades_when_axidraw_bounds_are_unconfigured(tmp_path):
+    axidraw_config = AppConfig(
+        captures_dir=tmp_path / "captures",
+        plot_assets_dir=tmp_path / "plot_assets",
+        plot_runs_dir=tmp_path / "plot_runs",
+        plotter_driver="axidraw",
+    )
+
+    plotter = build_plotter_adapter(axidraw_config)
+    status = plotter.get_status()
+
+    assert plotter.driver == "axidraw-pyapi"
+    assert status.available is False
+    assert "requires explicit machine bounds configuration" in status.error

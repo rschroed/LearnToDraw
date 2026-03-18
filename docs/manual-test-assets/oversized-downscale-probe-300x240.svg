@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300mm" height="240mm" viewBox="0 0 300 240">
+  <title>Oversized Downscale Probe 300x240 mm</title>
+  <desc>
+    Explicit-mm oversize probe for drawable-area downscale testing. Under a 290 x 208 mm
+    drawable area, this should prepare to 260 x 208 mm while staying top-left anchored.
+  </desc>
+  <rect x="0.5" y="0.5" width="299" height="239" fill="none" stroke="#000" stroke-width="0.5" />
+  <line x1="150" y1="0.5" x2="150" y2="239.5" stroke="#000" stroke-width="0.35" />
+  <line x1="0.5" y1="120" x2="299.5" y2="120" stroke="#000" stroke-width="0.35" />
+  <rect x="20" y="20" width="60" height="40" fill="none" stroke="#000" stroke-width="0.35" />
+  <rect x="220" y="180" width="60" height="40" fill="none" stroke="#000" stroke-width="0.35" />
+</svg>

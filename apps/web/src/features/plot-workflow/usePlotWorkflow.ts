@@ -11,7 +11,6 @@ import type {
   PlotAsset,
   PlotRun,
   PlotRunSummary,
-  PlotSizingMode,
 } from "../../types/plotting";
 
 type PlotAction = "upload" | "pattern" | "start" | null;
@@ -33,7 +32,6 @@ export function usePlotWorkflow() {
     tone: NoticeTone;
     message: string;
   } | null>(null);
-  const [sizingMode, setSizingMode] = useState<PlotSizingMode>("native");
   const mountedRef = useRef(true);
   const selectionSourceRef = useRef<SelectionSource>(null);
 
@@ -87,11 +85,10 @@ export function usePlotWorkflow() {
       if (!mountedRef.current) {
         return;
       }
-      setSizingMode("native");
       updateSelection(asset, "manual");
       setNotice({
         tone: "success",
-        message: "Built-in test-grid pattern is ready to plot.",
+        message: "Built-in test-grid pattern is ready to plot with automatic drawable-area preparation.",
       });
     } catch (actionError) {
       if (!mountedRef.current) {
@@ -116,11 +113,10 @@ export function usePlotWorkflow() {
       if (!mountedRef.current) {
         return;
       }
-      setSizingMode("fit_to_draw_area");
       updateSelection(asset, "manual");
       setNotice({
         tone: "success",
-        message: `Loaded ${asset.name} for plotting. Uploaded SVGs default to Fit within drawable area unless they declare physical units.`,
+        message: `Loaded ${asset.name} for plotting. Uploaded SVGs are prepared automatically into the current drawable area.`,
       });
     } catch (actionError) {
       if (!mountedRef.current) {
@@ -145,7 +141,7 @@ export function usePlotWorkflow() {
       setBusyAction("start");
       setError(null);
       setNotice({ tone: "info", message: "Starting plot run..." });
-      const run = await createPlotRun(selectedAsset.id, { sizing_mode: sizingMode });
+      const run = await createPlotRun(selectedAsset.id);
       if (!mountedRef.current) {
         return;
       }
@@ -199,13 +195,11 @@ export function usePlotWorkflow() {
     refreshing,
     busyAction,
     activeRun,
-    sizingMode,
     error,
     notice,
     refresh,
     createBuiltInPattern,
     uploadSvg,
     startRun,
-    setSizingMode,
   };
 }

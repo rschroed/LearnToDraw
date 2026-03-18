@@ -100,6 +100,33 @@ class MarginsMm(BaseModel):
 
 
 class PlotPreparationMetadata(BaseModel):
+    class WorkspaceAudit(BaseModel):
+        page_within_plotter_bounds: bool
+        drawable_area_positive: bool
+        drawable_origin_x_mm: float
+        drawable_origin_y_mm: float
+        remaining_bounds_right_mm: float
+        remaining_bounds_bottom_mm: float
+
+    class PreparationAudit(BaseModel):
+        strategy: str
+        fit_scale: Optional[float] = None
+        prepared_within_drawable_area: bool
+        overflow_x_mm: float
+        overflow_y_mm: float
+        placement_origin_x_mm: Optional[float] = None
+        placement_origin_y_mm: Optional[float] = None
+        content_min_x_mm: Optional[float] = None
+        content_min_y_mm: Optional[float] = None
+        content_max_x_mm: Optional[float] = None
+        content_max_y_mm: Optional[float] = None
+        content_width_mm: Optional[float] = None
+        content_height_mm: Optional[float] = None
+        prepared_viewbox_min_x: Optional[float] = None
+        prepared_viewbox_min_y: Optional[float] = None
+        prepared_viewbox_width: Optional[float] = None
+        prepared_viewbox_height: Optional[float] = None
+
     source_width: float
     source_height: float
     source_units: Literal["mm", "cm", "in", "px", "unitless", "mixed", "unknown"]
@@ -114,8 +141,9 @@ class PlotPreparationMetadata(BaseModel):
     plotter_bounds_source: Literal["model_default", "config_override", "config_default"]
     plotter_model_code: Optional[int] = None
     plotter_model_label: Optional[str] = None
-    sizing_mode: Literal["native", "fit_to_draw_area"]
     units_inferred: bool = False
+    workspace_audit: WorkspaceAudit
+    preparation_audit: PreparationAudit
 
 
 class PlotResult(BaseModel):
@@ -127,7 +155,6 @@ class PlotResult(BaseModel):
 
 PlotRunPurpose = Literal["normal", "diagnostic"]
 PlotRunCaptureMode = Literal["auto", "skip"]
-PlotSizingMode = Literal["native", "fit_to_draw_area"]
 PlotterTestAction = Literal["raise_pen", "lower_pen", "cycle_pen", "align"]
 PlotterBoundsSource = Literal["model_default", "config_override", "config_default"]
 PlotterCalibrationSource = Literal[
@@ -163,7 +190,6 @@ class PlotRun(BaseModel):
     status: Literal["pending", "plotting", "capturing", "completed", "failed"]
     purpose: PlotRunPurpose = "normal"
     capture_mode: PlotRunCaptureMode = "auto"
-    sizing_mode: PlotSizingMode = "native"
     created_at: datetime
     updated_at: datetime
     asset: PlotAsset
@@ -234,7 +260,6 @@ class PlotRunCreateRequest(BaseModel):
     asset_id: str
     purpose: PlotRunPurpose = "normal"
     capture_mode: PlotRunCaptureMode = "auto"
-    sizing_mode: PlotSizingMode = "native"
 
 
 class PatternAssetCreateRequest(BaseModel):
@@ -287,6 +312,8 @@ class PlotterWorkspace(BaseModel):
     drawable_area_mm: SizeMm
     updated_at: datetime
     source: PlotterWorkspaceSource
+    is_valid: bool = True
+    validation_error: Optional[str] = None
 
     def to_plot_area(self) -> PlotArea:
         return PlotArea(

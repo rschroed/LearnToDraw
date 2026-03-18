@@ -31,7 +31,7 @@ This pen-reliability slice adds:
 This plot-sizing slice adds:
 
 - explicit physical `mm` dimensions for built-in plot patterns
-- backend-owned plot sizing with `native` and `fit_to_draw_area`
+- backend-owned drawable-area preparation for normal plots
 - a configurable backend draw area for future page-layout and iterative drawing work
 - prepared plot-size metadata surfaced in plot-run records and the local UI
 
@@ -70,6 +70,15 @@ make api-dev
 ```
 
 `make api-dev` uses `PYTHONPATH=src`, so a non-editable install is enough for local development on older system Python setups.
+For explicit driver startup, use:
+
+```bash
+make api-dev-mock
+make api-dev-axidraw
+```
+
+These targets keep driver selection backend-owned and require a backend restart when you switch modes.
+Any AxiDraw-specific env overrides already in your shell still apply to `make api-dev-axidraw`.
 
 Run tests:
 
@@ -95,11 +104,35 @@ It also proxies `/plot-assets` for planned SVG previews.
 
 ## Real AxiDraw adapter
 
-The backend still defaults to the mock plotter. To switch to the real AxiDraw adapter, set:
+The backend still defaults to the mock plotter. For local switching, prefer:
+
+```bash
+make api-dev-mock
+make api-dev-axidraw
+```
+
+If you need to launch the backend another way, set:
 
 ```bash
 export LEARN_TO_DRAW_PLOTTER_DRIVER=axidraw
 ```
+
+Real AxiDraw no longer falls back to a generic hard-coded machine size. You must also
+configure either:
+
+```bash
+export LEARN_TO_DRAW_AXIDRAW_MODEL=1
+```
+
+or explicit machine bounds:
+
+```bash
+export LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM=300
+export LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM=218
+```
+
+For a V2/V3/SE A4 machine, `300 × 218 mm` is the observed safe bound to configure,
+but it is now an explicit example config rather than an implicit backend fallback.
 
 Optional motion settings:
 
@@ -164,8 +197,8 @@ Uploaded SVG sizing is prepared in the backend before the plotter adapter runs.
 Stable backend plotter-bounds settings:
 
 ```bash
-export LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM=210
-export LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM=297
+export LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM=300
+export LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM=218
 ```
 
 Default session page-setup settings:
@@ -202,7 +235,10 @@ descriptive model label in the Plotter card. Effective bounds precedence is:
 
 1. `LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM` / `LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM`
 2. model-derived AxiDraw bounds when `LEARN_TO_DRAW_AXIDRAW_MODEL` is explicitly configured
-3. backend config defaults
+
+For the real AxiDraw driver, one of those two sources is now required. If neither is
+configured, the backend stays up but marks the plotter unavailable until explicit machine
+bounds or an explicit AxiDraw model are provided.
 
 The normal UI does not edit plotter bounds directly. It shows the current model, effective
 bounds, and bounds source read-only, while page size and margins remain editable session
@@ -218,9 +254,25 @@ The Plotter card can update page width, page height, and margins through the bac
 The backend computes a drawable area from that session setup and validates that it stays
 inside the stable plotter bounds.
 
-Current sizing modes:
+If corrected machine bounds make the saved paper setup invalid, `GET /api/plotter/workspace`
+now returns the persisted workspace plus `is_valid=false` and a `validation_error` message
+so the UI can stay usable while plotting remains blocked until the paper setup is fixed.
 
-- `native`: requires explicit physical SVG dimensions such as `mm`, `cm`, or `in`, preserves the authored size, and fails if the authored result exceeds the current drawable area
-- `fit_to_draw_area`: scales uniformly into the current drawable area while preserving aspect ratio
+Normal plotting now uses a single backend-owned preparation path:
 
-Unitless uploaded SVGs are rejected in `native` mode and allowed in `fit_to_draw_area` mode with inferred sizing metadata. In both modes, the backend refuses prepared output that would exceed the current drawable area or the configured plotter bounds.
+- normal runs are prepared into page-mm coordinates and anchored at the drawable area's top-left origin
+- uploaded SVGs with explicit physical units keep their authored size when already within the drawable area and are only downscaled when oversized
+- unitless or px-only uploads are max-fit into the drawable area
+- the normal built-in `test-grid` uses this same preparation path
+- dedicated hardware diagnostics stay fixed-size and use a separate diagnostic passthrough path
+
+The backend refuses prepared output that would exceed the current drawable area or the configured plotter bounds.
+
+Each plot run now also records a preparation audit in the run metadata, including:
+
+- the effective plotter bounds, page size, and drawable area used for the run
+- derived workspace math such as drawable origin and remaining bounds headroom
+- preparation details such as strategy, placement origin, prepared content box, root `viewBox`, scale, and any computed overflow
+
+The Plot Workflow panel shows this audit as a compact read-only summary so bounds,
+workspace math, and prepared placement can be inspected alongside each run.

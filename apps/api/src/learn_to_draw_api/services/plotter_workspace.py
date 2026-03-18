@@ -59,21 +59,35 @@ class PlotterWorkspaceService:
     def current(self) -> PlotterWorkspace:
         persisted = self._store.load()
         if persisted is not None:
-            return self._validate_workspace(persisted, source="persisted")
+            return self._validate_workspace(
+                persisted,
+                source="persisted",
+                allow_invalid=True,
+            )
         return self._build_workspace(
             self._default_request,
             source="config_default",
             updated_at=datetime.now(timezone.utc),
+            allow_invalid=True,
+        )
+
+    def current_validated(self) -> PlotterWorkspace:
+        workspace = self.current()
+        if workspace.is_valid:
+            return workspace
+        raise InvalidArtifactError(
+            workspace.validation_error or "Configured plotter workspace is invalid."
         )
 
     def current_plot_area(self) -> PlotArea:
-        return self.current().to_plot_area()
+        return self.current_validated().to_plot_area()
 
     def save(self, request: PlotterWorkspaceRequest) -> PlotterWorkspace:
         workspace = self._build_workspace(
             request,
             source="persisted",
             updated_at=datetime.now(timezone.utc),
+            allow_invalid=False,
         )
         self._store.save(workspace)
         return workspace
@@ -84,6 +98,7 @@ class PlotterWorkspaceService:
         *,
         source: str,
         updated_at: datetime,
+        allow_invalid: bool,
     ) -> PlotterWorkspace:
         device_settings = self._device_settings_service.current()
         plot_area = PlotArea(
@@ -94,7 +109,12 @@ class PlotterWorkspaceService:
             margin_right_mm=request.margin_right_mm,
             margin_bottom_mm=request.margin_bottom_mm,
         )
-        self._validate_plot_area(plot_area, device_settings.plotter_bounds_mm)
+        validation_error = self._get_plot_area_validation_error(
+            plot_area,
+            device_settings.plotter_bounds_mm,
+        )
+        if validation_error is not None and not allow_invalid:
+            raise InvalidArtifactError(validation_error)
         return PlotterWorkspace(
             plotter_bounds_mm=device_settings.plotter_bounds_mm,
             page_size_mm=SizeMm(
@@ -113,6 +133,8 @@ class PlotterWorkspaceService:
             ),
             updated_at=updated_at,
             source=source,
+            is_valid=validation_error is None,
+            validation_error=validation_error,
         )
 
     def _validate_workspace(
@@ -120,6 +142,7 @@ class PlotterWorkspaceService:
         workspace: PlotterWorkspace,
         *,
         source: str,
+        allow_invalid: bool,
     ) -> PlotterWorkspace:
         return self._build_workspace(
             PlotterWorkspaceRequest(
@@ -132,18 +155,18 @@ class PlotterWorkspaceService:
             ),
             source=source,
             updated_at=workspace.updated_at,
+            allow_invalid=allow_invalid,
         )
 
-    def _validate_plot_area(self, plot_area: PlotArea, plotter_bounds: SizeMm) -> None:
+    def _get_plot_area_validation_error(
+        self,
+        plot_area: PlotArea,
+        plotter_bounds: SizeMm,
+    ) -> Optional[str]:
         if plot_area.page_width_mm > plotter_bounds.width_mm:
-            raise InvalidArtifactError(
-                "Configured page width exceeds the plotter bounds width."
-            )
+            return "Configured page width exceeds the plotter bounds width."
         if plot_area.page_height_mm > plotter_bounds.height_mm:
-            raise InvalidArtifactError(
-                "Configured page height exceeds the plotter bounds height."
-            )
+            return "Configured page height exceeds the plotter bounds height."
         if plot_area.draw_width_mm <= 0 or plot_area.draw_height_mm <= 0:
-            raise InvalidArtifactError(
-                "Configured margins must leave a positive drawable area."
-            )
+            return "Configured margins must leave a positive drawable area."
+        return None

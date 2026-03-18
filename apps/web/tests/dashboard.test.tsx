@@ -86,6 +86,8 @@ const defaultWorkspace = {
   },
   updated_at: "2026-03-15T20:00:00Z",
   source: "config_default" as const,
+  is_valid: true,
+  validation_error: null,
 };
 
 const defaultDevice = {
@@ -131,6 +133,8 @@ type WorkspaceFixture = {
   };
   updated_at: string;
   source: "config_default" | "persisted";
+  is_valid: boolean;
+  validation_error: string | null;
 };
 
 type DeviceFixture = {
@@ -165,7 +169,6 @@ describe("Hardware dashboard", () => {
         status: "pending" | "plotting" | "capturing" | "completed";
         purpose: "normal" | "diagnostic";
         capture_mode: "auto" | "skip";
-        sizing_mode: "native" | "fit_to_draw_area";
         created_at: string;
         updated_at: string;
         asset: {
@@ -305,6 +308,8 @@ describe("Hardware dashboard", () => {
               },
               updated_at: "2026-03-15T20:00:12Z",
               source: "persisted",
+              is_valid: true,
+              validation_error: null,
             };
             return new Response(
               JSON.stringify({
@@ -431,7 +436,6 @@ describe("Hardware dashboard", () => {
             status: "pending",
             purpose: "normal",
             capture_mode: "auto",
-            sizing_mode: "native",
             created_at: "2026-03-15T20:04:00Z",
             updated_at: "2026-03-15T20:04:00Z",
             asset: patternAsset,
@@ -464,8 +468,41 @@ describe("Hardware dashboard", () => {
                 source_units: "mm",
                 prepared_width_mm: 160,
                 prepared_height_mm: 120,
-                sizing_mode: "native",
+                page_width_mm: 210,
+                page_height_mm: 297,
+                drawable_width_mm: 170,
+                drawable_height_mm: 257,
+                plotter_bounds_width_mm: 210,
+                plotter_bounds_height_mm: 297,
+                plotter_bounds_source: "config_default",
                 units_inferred: false,
+                workspace_audit: {
+                  page_within_plotter_bounds: true,
+                  drawable_area_positive: true,
+                  drawable_origin_x_mm: 20,
+                  drawable_origin_y_mm: 20,
+                  remaining_bounds_right_mm: 0,
+                  remaining_bounds_bottom_mm: 0,
+                },
+                preparation_audit: {
+                  strategy: "fit_top_left",
+                  fit_scale: 0.166667,
+                  prepared_within_drawable_area: true,
+                  overflow_x_mm: 0,
+                  overflow_y_mm: 0,
+                  placement_origin_x_mm: 20,
+                  placement_origin_y_mm: 20,
+                  content_min_x_mm: 20,
+                  content_min_y_mm: 20,
+                  content_max_x_mm: 180,
+                  content_max_y_mm: 140,
+                  content_width_mm: 160,
+                  content_height_mm: 120,
+                  prepared_viewbox_min_x: null,
+                  prepared_viewbox_min_y: null,
+                  prepared_viewbox_width: 210,
+                  prepared_viewbox_height: 297,
+                },
               },
             },
             camera_run_details: {},
@@ -561,8 +598,9 @@ describe("Hardware dashboard", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/plot workflow/i)).toBeInTheDocument();
     expect(screen.getByText(/load test-grid/i)).toBeInTheDocument();
-    expect(screen.getByText(/use authored size/i)).toBeInTheDocument();
-    expect(screen.getByText(/fit within drawable area/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/normal plots are prepared automatically into the drawable area/i),
+    ).toBeInTheDocument();
     expect(screen.getByText(/^paper setup$/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /^preview$/i })).toBeInTheDocument();
     expect(screen.getByText(/safe plotter bounds/i)).toBeInTheDocument();
@@ -667,6 +705,103 @@ describe("Hardware dashboard", () => {
     expect(screen.getByText("160 mm x 252 mm")).toBeInTheDocument();
   });
 
+  it("keeps an invalid saved paper setup readable while blocking plotting", async () => {
+    vi.restoreAllMocks();
+    currentDevice = {
+      ...currentDevice,
+      driver: "axidraw",
+      plotter_bounds_mm: {
+        width_mm: 300,
+        height_mm: 218,
+      },
+      plotter_bounds_source: "config_override",
+    };
+    currentWorkspace = {
+      ...currentWorkspace,
+      plotter_bounds_mm: {
+        width_mm: 300,
+        height_mm: 218,
+      },
+      is_valid: false,
+      validation_error: "Configured page height exceeds the plotter bounds height.",
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    expect(
+      await screen.findByText(
+        /saved paper setup is invalid for the current machine bounds/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/plotting is blocked until paper setup fits the current machine bounds/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/configured page height exceeds the plotter bounds height\./i),
+    ).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /tiny square/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /start plot run/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /save paper setup/i })).toBeDisabled();
+  });
+
   it("captures an image and refreshes the preview", async () => {
     render(<App />);
 
@@ -692,7 +827,9 @@ describe("Hardware dashboard", () => {
     );
 
     expect(
-      await screen.findByText(/built-in test-grid pattern is ready to plot\./i),
+      await screen.findByText(
+        /built-in test-grid pattern is ready to plot with automatic drawable-area preparation\./i,
+      ),
     ).toBeInTheDocument();
 
     fireEvent.click(
@@ -714,9 +851,117 @@ describe("Hardware dashboard", () => {
 
     expect(screen.getAllByText(/test grid/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/completed/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/math audit: math audit ok/i)).toBeInTheDocument();
+    expect(screen.getByText(/plotter bounds: 210 × 297 mm/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/workspace: page 210 × 297 mm · drawable 170 × 257 mm/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/workspace audit: origin 20 × 20 mm · remaining bounds 0 × 0 mm/i)).toBeInTheDocument();
   });
 
-  it("defaults uploaded SVGs to fit within drawable area and warns about native sizing", async () => {
+  it("shows fit preparation audit details for the latest run", async () => {
+    latestRun = {
+      id: "run-fit-001",
+      status: "completed",
+      purpose: "normal",
+      capture_mode: "skip",
+      created_at: "2026-03-15T20:06:00Z",
+      updated_at: "2026-03-15T20:06:05Z",
+      asset: {
+        id: "asset-fit-001",
+        kind: "uploaded_svg",
+        pattern_id: null,
+        name: "Unitless upload",
+        timestamp: "2026-03-15T20:06:00Z",
+        file_path: "/tmp/unitless-upload.svg",
+        public_url: "/plot-assets/unitless-upload.svg",
+        mime_type: "image/svg+xml",
+      },
+      capture: null,
+      error: null,
+      stage_states: {
+        prepare: {
+          status: "completed",
+          started_at: "2026-03-15T20:06:00Z",
+          completed_at: "2026-03-15T20:06:01Z",
+          message: "SVG document prepared.",
+        },
+        plot: {
+          status: "completed",
+          started_at: "2026-03-15T20:06:02Z",
+          completed_at: "2026-03-15T20:06:03Z",
+          message: "Plot completed.",
+        },
+        capture: {
+          status: "completed",
+          started_at: null,
+          completed_at: null,
+          message: "Capture skipped for diagnostic run.",
+        },
+      },
+      plotter_run_details: {
+        preparation: {
+          source_width: 200,
+          source_height: 100,
+          source_units: "unitless",
+          prepared_width_mm: 170,
+          prepared_height_mm: 85,
+          page_width_mm: 210,
+          page_height_mm: 297,
+          drawable_width_mm: 170,
+          drawable_height_mm: 257,
+          plotter_bounds_width_mm: 210,
+          plotter_bounds_height_mm: 297,
+          plotter_bounds_source: "config_default",
+          units_inferred: true,
+          workspace_audit: {
+            page_within_plotter_bounds: true,
+            drawable_area_positive: true,
+            drawable_origin_x_mm: 20,
+            drawable_origin_y_mm: 20,
+            remaining_bounds_right_mm: 0,
+            remaining_bounds_bottom_mm: 0,
+          },
+          preparation_audit: {
+            strategy: "fit_top_left",
+            fit_scale: 0.85,
+            prepared_within_drawable_area: true,
+            overflow_x_mm: 0,
+            overflow_y_mm: 0,
+            placement_origin_x_mm: 20,
+            placement_origin_y_mm: 20,
+            content_min_x_mm: 20,
+            content_min_y_mm: 20,
+            content_max_x_mm: 190,
+            content_max_y_mm: 105,
+            content_width_mm: 170,
+            content_height_mm: 85,
+            prepared_viewbox_min_x: 0,
+            prepared_viewbox_min_y: 0,
+            prepared_viewbox_width: 210,
+            prepared_viewbox_height: 297,
+          },
+        },
+      },
+      camera_run_details: {
+        capture_mode: "skip",
+      },
+    };
+
+    render(<App />);
+
+    expect(await screen.findByText(/math audit: math audit ok/i)).toBeInTheDocument();
+    expect(screen.getByText(/preparation strategy: fit top left/i)).toBeInTheDocument();
+    expect(screen.getByText(/fit scale: 0.85/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/prepared placement: origin 20 × 20 mm · content box 20 20 → 190 105 mm/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/prepared root viewbox: 0 0 210 297/i),
+    ).toBeInTheDocument();
+  });
+
+  it("prepares uploaded SVGs automatically without a sizing selector", async () => {
     vi.restoreAllMocks();
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -805,20 +1050,14 @@ describe("Hardware dashboard", () => {
     fireEvent.change(fileInput, { target: { files: [file] } });
 
     expect(
-      await screen.findByText(/uploaded svgs default to fit within drawable area unless they declare physical units\./i),
+      await screen.findByText(
+        /uploaded svgs are prepared automatically into the current drawable area\./i,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText(/plot sizing/i)).toHaveValue("fit_to_draw_area");
-
-    fireEvent.change(screen.getByLabelText(/plot sizing/i), {
-      target: { value: "native" },
-    });
-
-    expect(
-      screen.getByText(/use authored size only works for uploaded svgs that declare physical dimensions/i),
-    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/plot sizing/i)).not.toBeInTheDocument();
   });
 
-  it("blocks fit within drawable area for real axidraw uploads", async () => {
+  it("allows real axidraw uploads without a fit-mode block", async () => {
     vi.restoreAllMocks();
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -907,10 +1146,12 @@ describe("Hardware dashboard", () => {
     fireEvent.change(fileInput, { target: { files: [file] } });
 
     expect(
-      await screen.findByText(/fit within drawable area is temporarily disabled for real axidraw plotting/i),
+      await screen.findByText(
+        /uploaded svgs are prepared automatically into the current drawable area\./i,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText(/plot sizing/i)).toHaveValue("fit_to_draw_area");
-    expect(screen.getByRole("button", { name: /start plot run/i })).toBeDisabled();
+    expect(screen.queryByLabelText(/plot sizing/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start plot run/i })).toBeEnabled();
   });
 
   it("updates axidraw pen heights from the hardware panel", async () => {
@@ -1060,6 +1301,8 @@ describe("Hardware dashboard", () => {
               },
               updated_at: "2026-03-15T20:00:15Z",
               source: "persisted",
+              is_valid: true,
+              validation_error: null,
             };
             return new Response(
               JSON.stringify({
@@ -1290,6 +1533,8 @@ describe("Hardware dashboard", () => {
               },
               updated_at: "2026-03-15T20:00:18Z",
               source: "persisted",
+              is_valid: true,
+              validation_error: null,
             };
             return new Response(
               JSON.stringify({
@@ -1460,7 +1705,6 @@ describe("Hardware dashboard", () => {
           status: "completed" as const,
           purpose: "diagnostic" as const,
           capture_mode: "skip" as const,
-          sizing_mode: "native" as const,
           created_at: "2026-03-15T20:10:00Z",
           updated_at: "2026-03-15T20:10:10Z",
           asset: diagnosticAsset,
@@ -1493,8 +1737,41 @@ describe("Hardware dashboard", () => {
               source_units: "mm",
               prepared_width_mm: 40,
               prepared_height_mm: 12,
-              sizing_mode: "native",
+              page_width_mm: 210,
+              page_height_mm: 297,
+              drawable_width_mm: 170,
+              drawable_height_mm: 257,
+              plotter_bounds_width_mm: 210,
+              plotter_bounds_height_mm: 297,
+              plotter_bounds_source: "config_default",
               units_inferred: false,
+              workspace_audit: {
+                page_within_plotter_bounds: true,
+                drawable_area_positive: true,
+                drawable_origin_x_mm: 20,
+                drawable_origin_y_mm: 20,
+                remaining_bounds_right_mm: 0,
+                remaining_bounds_bottom_mm: 0,
+              },
+              preparation_audit: {
+                strategy: "diagnostic_passthrough",
+                fit_scale: null,
+                prepared_within_drawable_area: true,
+                overflow_x_mm: 0,
+                overflow_y_mm: 0,
+                placement_origin_x_mm: 0,
+                placement_origin_y_mm: 0,
+                content_min_x_mm: 0,
+                content_min_y_mm: 0,
+                content_max_x_mm: 40,
+                content_max_y_mm: 12,
+                content_width_mm: 40,
+                content_height_mm: 12,
+                prepared_viewbox_min_x: null,
+                prepared_viewbox_min_y: null,
+                prepared_viewbox_width: null,
+                prepared_viewbox_height: null,
+              },
             },
           },
           camera_run_details: {},
@@ -1605,7 +1882,6 @@ describe("Hardware dashboard", () => {
       status: "completed";
       purpose: "diagnostic";
       capture_mode: "skip";
-      sizing_mode: "native";
       created_at: string;
       updated_at: string;
       asset: typeof externalAsset;
@@ -1720,7 +1996,6 @@ describe("Hardware dashboard", () => {
       asset: externalAsset,
       capture: null,
       error: null,
-      sizing_mode: "native",
       stage_states: {
         prepare: {
           status: "completed",
@@ -1748,8 +2023,41 @@ describe("Hardware dashboard", () => {
           source_units: "mm",
           prepared_width_mm: 40,
           prepared_height_mm: 20,
-          sizing_mode: "native",
+          page_width_mm: 210,
+          page_height_mm: 297,
+          drawable_width_mm: 170,
+          drawable_height_mm: 257,
+          plotter_bounds_width_mm: 210,
+          plotter_bounds_height_mm: 297,
+          plotter_bounds_source: "config_default",
           units_inferred: false,
+          workspace_audit: {
+            page_within_plotter_bounds: true,
+            drawable_area_positive: true,
+            drawable_origin_x_mm: 20,
+            drawable_origin_y_mm: 20,
+            remaining_bounds_right_mm: 0,
+            remaining_bounds_bottom_mm: 0,
+          },
+          preparation_audit: {
+            strategy: "diagnostic_passthrough",
+            fit_scale: null,
+            prepared_within_drawable_area: true,
+            overflow_x_mm: 0,
+            overflow_y_mm: 0,
+            placement_origin_x_mm: 0,
+            placement_origin_y_mm: 0,
+            content_min_x_mm: 0,
+            content_min_y_mm: 0,
+            content_max_x_mm: 40,
+            content_max_y_mm: 20,
+            content_width_mm: 40,
+            content_height_mm: 20,
+            prepared_viewbox_min_x: null,
+            prepared_viewbox_min_y: null,
+            prepared_viewbox_width: null,
+            prepared_viewbox_height: null,
+          },
         },
       },
       camera_run_details: {},

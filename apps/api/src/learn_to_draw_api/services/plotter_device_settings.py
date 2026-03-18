@@ -8,6 +8,7 @@ from typing import Optional
 from learn_to_draw_api.adapters.axidraw_models import resolve_axidraw_model_info
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.models import (
+    HardwareUnavailableError,
     PlotterBoundsSource,
     PlotterDeviceSettings,
     PlotterModelDescriptor,
@@ -46,7 +47,15 @@ class PlotterDeviceSettingsService:
         self._config = config
 
     def current(self) -> PlotterDeviceSettings:
+        driver = self._config.plotter_driver.strip().lower()
         persisted = self._store.load()
+        if driver == "axidraw":
+            settings = self._build_current_axidraw_settings(
+                source=persisted.source if persisted is not None else "config_default",
+                updated_at=persisted.updated_at if persisted is not None else datetime.now(timezone.utc),
+            )
+            self._store.save(settings)
+            return settings
         if persisted is not None:
             return self._validate_settings(persisted, source=persisted.source)
         settings = self._build_default_settings(source="config_default")
@@ -59,7 +68,8 @@ class PlotterDeviceSettingsService:
         *,
         source: str,
     ) -> PlotterDeviceSettings:
-        if self._config.plotter_driver.strip().lower() != "axidraw":
+        driver = self._config.plotter_driver.strip().lower()
+        if driver != "axidraw":
             return PlotterDeviceSettings(
                 driver=settings.driver,
                 plotter_model=None,
@@ -71,61 +81,87 @@ class PlotterDeviceSettingsService:
                 updated_at=settings.updated_at,
                 source=source,
             )
-
-        model_code = settings.plotter_model.code if settings.plotter_model is not None else None
-        model_info = resolve_axidraw_model_info(model_code or self._config.axidraw_model)
-        use_model_bounds = source == "persisted" or self._config.axidraw_model is not None
-        return PlotterDeviceSettings(
-            driver=self._config.plotter_driver,
-            plotter_model=PlotterModelDescriptor(code=model_info.code, label=model_info.label),
-            plotter_bounds_mm=self._resolve_effective_bounds(
-                SizeMm(
-                    width_mm=model_info.bounds_width_mm,
-                    height_mm=model_info.bounds_height_mm,
-                )
-                if use_model_bounds
-                else DEFAULT_CONFIG_BOUNDS
-            ),
-            plotter_bounds_source=self._resolve_bounds_source(
-                driver=self._config.plotter_driver,
-                has_model=use_model_bounds,
-            ),
-            updated_at=settings.updated_at,
+        return self._build_current_axidraw_settings(
             source=source,
+            updated_at=settings.updated_at,
         )
 
     def _build_default_settings(self, *, source: str) -> PlotterDeviceSettings:
         driver = self._config.plotter_driver.strip().lower()
         updated_at = datetime.now(timezone.utc)
         if driver == "axidraw":
-            model_info = resolve_axidraw_model_info(self._config.axidraw_model)
-            use_model_bounds = self._config.axidraw_model is not None
-            return PlotterDeviceSettings(
-                driver=self._config.plotter_driver,
-                plotter_model=PlotterModelDescriptor(
-                    code=model_info.code,
-                    label=model_info.label,
-                ),
-                plotter_bounds_mm=self._resolve_effective_bounds(
-                    SizeMm(
-                        width_mm=model_info.bounds_width_mm,
-                        height_mm=model_info.bounds_height_mm,
-                    )
-                    if use_model_bounds
-                    else DEFAULT_CONFIG_BOUNDS
-                ),
-                plotter_bounds_source=self._resolve_bounds_source(
-                    driver=self._config.plotter_driver,
-                    has_model=use_model_bounds,
-                ),
-                updated_at=updated_at,
-                source=source,
-            )
+            return self._build_current_axidraw_settings(source=source, updated_at=updated_at)
         return PlotterDeviceSettings(
             driver=self._config.plotter_driver,
             plotter_model=None,
             plotter_bounds_mm=self._resolve_effective_bounds(DEFAULT_CONFIG_BOUNDS),
             plotter_bounds_source=self._resolve_bounds_source(driver=driver, has_model=False),
+            updated_at=updated_at,
+            source=source,
+        )
+
+    def _build_current_axidraw_settings(
+        self,
+        *,
+        source: str,
+        updated_at: datetime,
+    ) -> PlotterDeviceSettings:
+        if (
+            self._config.plotter_bounds_width_mm is None
+            and self._config.plotter_bounds_height_mm is not None
+        ) or (
+            self._config.plotter_bounds_width_mm is not None
+            and self._config.plotter_bounds_height_mm is None
+        ):
+            raise HardwareUnavailableError(
+                "Real AxiDraw requires explicit machine bounds configuration. Set both "
+                "LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM and "
+                "LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM, or set LEARN_TO_DRAW_AXIDRAW_MODEL."
+            )
+        if (
+            self._config.plotter_bounds_width_mm is None
+            and self._config.plotter_bounds_height_mm is None
+            and self._config.axidraw_model is None
+        ):
+            raise HardwareUnavailableError(
+                "Real AxiDraw requires explicit machine bounds configuration. Set "
+                "LEARN_TO_DRAW_PLOTTER_BOUNDS_WIDTH_MM and "
+                "LEARN_TO_DRAW_PLOTTER_BOUNDS_HEIGHT_MM, or set LEARN_TO_DRAW_AXIDRAW_MODEL."
+            )
+
+        explicit_bounds = (
+            self._config.plotter_bounds_width_mm is not None
+            and self._config.plotter_bounds_height_mm is not None
+        )
+        model_info = (
+            resolve_axidraw_model_info(self._config.axidraw_model)
+            if self._config.axidraw_model is not None
+            else None
+        )
+
+        if explicit_bounds:
+            bounds = SizeMm(
+                width_mm=self._config.plotter_bounds_width_mm,
+                height_mm=self._config.plotter_bounds_height_mm,
+            )
+            bounds_source: PlotterBoundsSource = "config_override"
+        else:
+            assert model_info is not None
+            bounds = SizeMm(
+                width_mm=model_info.bounds_width_mm,
+                height_mm=model_info.bounds_height_mm,
+            )
+            bounds_source = "model_default"
+
+        return PlotterDeviceSettings(
+            driver=self._config.plotter_driver,
+            plotter_model=(
+                PlotterModelDescriptor(code=model_info.code, label=model_info.label)
+                if model_info is not None
+                else None
+            ),
+            plotter_bounds_mm=bounds,
+            plotter_bounds_source=bounds_source,
             updated_at=updated_at,
             source=source,
         )
