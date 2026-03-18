@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="111mm" height="198mm" viewBox="0 0 111 198">
+  <title>Oversized Edge Test</title>
+  <desc>Native-size manual audit fixture intentionally larger than a 110 x 197 mm drawable area.</desc>
+  <rect x="0.5" y="0.5" width="110" height="197" fill="none" stroke="#000" stroke-width="0.5" />
+  <line x1="0.5" y1="99" x2="110.5" y2="99" stroke="#000" stroke-width="0.35" />
+  <line x1="55.5" y1="0.5" x2="55.5" y2="197.5" stroke="#000" stroke-width="0.35" />
+</svg>

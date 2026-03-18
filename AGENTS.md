@@ -123,6 +123,7 @@ Needs explicit discussion first:
 - Keep generated runtime artifacts out of git; retain only placeholder files like `.gitkeep` where needed.
 - Do not commit generated frontend build output or TypeScript build-info files.
 - Prefer small commits at slice boundaries, especially before hardware-facing changes.
+- If a task starts from `main`, create a short-lived `codex/` branch before making edits unless the user explicitly asks to work directly on `main`.
 
 ## Remote Workflow
 - Primary remote is GitHub.
