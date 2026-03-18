@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import type { HardwareStatus } from "../src/types/hardware";
 
 const hardwareStatus = {
   plotter: {
@@ -166,6 +167,7 @@ type DeviceFixture = {
 };
 
 describe("Hardware dashboard", () => {
+  let currentHardwareStatus: HardwareStatus;
   let latestCapture: null | {
     id: string;
     timestamp: string;
@@ -225,6 +227,7 @@ describe("Hardware dashboard", () => {
   let currentWorkspace: WorkspaceFixture;
 
   beforeEach(() => {
+    currentHardwareStatus = structuredClone(hardwareStatus);
     latestCapture = null;
     latestRun = null;
     recentRuns = [];
@@ -253,7 +256,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify(
               currentDevice.driver === "axidraw"
                 ? axidrawHardwareStatus
-                : hardwareStatus,
+                : currentHardwareStatus,
             ),
             {
               status: 200,
@@ -606,7 +609,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify({
               ok: true,
               message: "Plotter walked home.",
-              status: hardwareStatus.plotter,
+              status: currentHardwareStatus.plotter,
             }),
             {
               status: 200,
@@ -621,7 +624,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify({
               ok: true,
               message: `Plotter test action '${body.action}' completed.`,
-              status: hardwareStatus.plotter,
+              status: currentHardwareStatus.plotter,
             }),
             {
               status: 200,
@@ -644,7 +647,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify({
               ok: true,
               message: "Image captured.",
-              status: hardwareStatus.camera,
+              status: currentHardwareStatus.camera,
               capture: latestCapture,
             }),
             {
@@ -947,6 +950,130 @@ describe("Hardware dashboard", () => {
     });
     expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
     expect(screen.getByText(/image\/svg\+xml/i)).toBeInTheDocument();
+  });
+
+  it("renders a jpeg capture from the opencv camera path", async () => {
+    currentHardwareStatus.camera = {
+      ...currentHardwareStatus.camera,
+      driver: "opencv-camera",
+      details: {
+        camera_index: 0,
+        initialization_state: "uninitialized",
+        last_capture_id: null,
+        resolution: null,
+      } as Record<string, unknown>,
+    };
+
+    vi.mocked(globalThis.fetch).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(currentHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: latestCapture }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: latestRun }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs") {
+          return new Response(JSON.stringify({ runs: recentRuns }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/camera/capture" && method === "POST") {
+          latestCapture = {
+            id: "capture-real-001",
+            timestamp: "2026-03-18T17:24:33Z",
+            file_path: "/tmp/capture-real-001.jpg",
+            public_url: "/captures/capture-real-001.jpg",
+            width: 1920,
+            height: 1080,
+            mime_type: "image/jpeg",
+          };
+          currentHardwareStatus.camera = {
+            ...currentHardwareStatus.camera,
+            available: true,
+            connected: true,
+            details: {
+              camera_index: 0,
+              initialization_state: "ready",
+              last_capture_id: "capture-real-001",
+              resolution: "1920x1080",
+            } as Record<string, unknown>,
+          };
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: "Image captured.",
+              status: currentHardwareStatus.camera,
+              capture: latestCapture,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /capture image/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("img", { name: /latest camera capture capture-real-001/i }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
+    expect(screen.getByText(/image\/jpeg/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/opencv-camera/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/1920 x 1080/i)).toBeInTheDocument();
   });
 
   it("creates a built-in pattern and completes a plot run", async () => {
