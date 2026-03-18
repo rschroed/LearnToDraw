@@ -9,6 +9,7 @@ LearnToDraw is a local-first control panel for a pen-plotter workflow. The backe
 - Supports tracked plot runs from uploaded SVGs or built-in patterns
 - Persists captures, plot assets, plot runs, calibration, and workspace/device settings locally
 - Supports both mock adapters for development and a real AxiDraw-backed plotter path
+- Supports both mock camera capture and an OpenCV-backed real camera path
 
 ## Architecture At A Glance
 
@@ -43,6 +44,22 @@ make web-dev
 Then open [http://127.0.0.1:5173](http://127.0.0.1:5173).
 
 By default, the backend runs against the mock plotter path so the app can be explored locally without hardware.
+
+Camera capture also defaults to the mock adapter. To use a real camera, install the backend dependencies with `make api-install` and set:
+
+```bash
+export LEARN_TO_DRAW_CAMERA_DRIVER=opencv
+```
+
+Optional camera tuning env vars:
+
+```bash
+export LEARN_TO_DRAW_OPENCV_CAMERA_INDEX=0
+export LEARN_TO_DRAW_CAMERA_WARMUP_MS=150
+export LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES=2
+```
+
+On macOS, the first real capture may trigger a camera permission prompt. A denied permission or missing device will surface through the backend camera status and capture endpoint.
 
 ## Mock Vs Real Hardware
 

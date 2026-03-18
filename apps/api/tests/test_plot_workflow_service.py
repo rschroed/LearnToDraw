@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
 from learn_to_draw_api.adapters.axidraw_plotter import AxiDrawPlotter
@@ -30,6 +31,37 @@ from learn_to_draw_api.services.plotter_workspace import (
     PlotterWorkspaceService,
     PlotterWorkspaceStore,
 )
+
+
+class StubRealCamera:
+    driver = "opencv-camera"
+
+    def __init__(self) -> None:
+        self._connected = False
+        self._capture_count = 0
+
+    def connect(self) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def get_status(self):
+        return MockCamera(driver=self.driver).get_status().model_copy(
+            update={"connected": self._connected}
+        )
+
+    def capture(self) -> CaptureArtifact:
+        self._capture_count += 1
+        return CaptureArtifact(
+            capture_id=f"real-capture-{self._capture_count}",
+            timestamp=MockCamera(capture_delay_s=0).capture().timestamp,
+            filename=f"real-capture-{self._capture_count}.jpg",
+            content=b"jpeg-bytes",
+            media_type="image/jpeg",
+            width=640,
+            height=480,
+        )
 
 
 def _build_service(tmp_path, *, plotter=None, camera=None, config_overrides=None):
@@ -178,6 +210,23 @@ def test_plot_workflow_service_skips_capture_for_diagnostic_run(tmp_path):
     assert completed.capture is None
     assert completed.stage_states["capture"].status == "completed"
     assert completed.camera_run_details["capture_mode"] == "skip"
+
+
+def test_plot_workflow_service_persists_real_camera_capture(tmp_path):
+    service = _build_service(tmp_path, camera=StubRealCamera())
+    asset = service.create_pattern_asset(
+        PatternAssetCreateRequest(pattern_id="test-grid")
+    )
+
+    run = service.create_run(asset.id)
+    completed = _wait_for_terminal_run(service, run.id)
+
+    assert completed.status == "completed"
+    assert completed.capture is not None
+    assert completed.capture.mime_type == "image/jpeg"
+    assert completed.capture.public_url.endswith(".jpg")
+    assert completed.camera_run_details["driver"] == "opencv-camera"
+    assert completed.camera_run_details["resolution"] == "640x480"
 
 
 def test_builtin_patterns_use_explicit_physical_units(tmp_path):

@@ -37,6 +37,10 @@ class AppConfig:
     plot_margin_right_mm: float = 20.0
     plot_margin_bottom_mm: float = 20.0
     capture_url_prefix: str = "/captures"
+    camera_driver: str = "mock"
+    opencv_camera_index: int = 0
+    camera_warmup_ms: int = 150
+    camera_discard_frames: int = 2
     plot_assets_url_prefix: str = "/plot-assets"
     cors_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
@@ -83,6 +87,13 @@ class AppConfig:
             )
         )
         capture_url_prefix = os.getenv("LEARN_TO_DRAW_CAPTURE_URL_PREFIX", "/captures")
+        camera_driver = os.getenv("LEARN_TO_DRAW_CAMERA_DRIVER", "mock")
+        opencv_camera_index = _read_optional_int("LEARN_TO_DRAW_OPENCV_CAMERA_INDEX", 0)
+        camera_warmup_ms = _read_optional_int("LEARN_TO_DRAW_CAMERA_WARMUP_MS", 150)
+        camera_discard_frames = _read_optional_int(
+            "LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES",
+            2,
+        )
         plotter_driver = os.getenv("LEARN_TO_DRAW_PLOTTER_DRIVER", "mock")
         axidraw_port = os.getenv("LEARN_TO_DRAW_AXIDRAW_PORT")
         axidraw_speed_pendown = _read_optional_int(
@@ -152,6 +163,10 @@ class AppConfig:
             plot_margin_right_mm=plot_margin_right_mm,
             plot_margin_bottom_mm=plot_margin_bottom_mm,
             capture_url_prefix=capture_url_prefix,
+            camera_driver=camera_driver,
+            opencv_camera_index=opencv_camera_index,
+            camera_warmup_ms=camera_warmup_ms,
+            camera_discard_frames=camera_discard_frames,
             plot_assets_url_prefix=plot_assets_url_prefix,
         )
 
@@ -181,10 +196,10 @@ class AppConfig:
         return prefix.rstrip("/") or fallback
 
 
-def _read_optional_int(env_name: str) -> Optional[int]:
+def _read_optional_int(env_name: str, default: Optional[int] = None) -> Optional[int]:
     value = os.getenv(env_name)
     if value is None or value == "":
-        return None
+        return default
     return int(value)
 
 

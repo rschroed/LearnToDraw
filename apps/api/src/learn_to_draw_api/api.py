@@ -62,7 +62,7 @@ def create_app(
         app_config,
         calibration=calibration_service.current(),
     )
-    camera_adapter = camera or build_camera_adapter()
+    camera_adapter = camera or build_camera_adapter(app_config)
 
     capture_store = CaptureStore(
         captures_dir=app_config.captures_dir,

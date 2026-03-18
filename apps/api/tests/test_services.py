@@ -7,6 +7,7 @@ import pytest
 
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
+from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.models import (
     HardwareBusyError,
@@ -27,6 +28,35 @@ from learn_to_draw_api.services.plotter_workspace import (
     PlotterWorkspaceService,
     PlotterWorkspaceStore,
 )
+
+
+class StubRealCamera:
+    driver = "opencv-camera"
+
+    def __init__(self) -> None:
+        self._connected = False
+
+    def connect(self) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def get_status(self):
+        return MockCamera(driver=self.driver).get_status().model_copy(
+            update={"connected": self._connected}
+        )
+
+    def capture(self) -> CaptureArtifact:
+        return CaptureArtifact(
+            capture_id="real-capture",
+            timestamp=MockCamera(capture_delay_s=0).capture().timestamp,
+            filename="real-capture.jpg",
+            content=b"jpeg-bytes",
+            media_type="image/jpeg",
+            width=640,
+            height=480,
+        )
 
 
 def build_calibration_service(tmp_path):
@@ -128,6 +158,25 @@ def test_hardware_service_runs_walk_home_and_capture(tmp_path):
     assert origin_response.status.details["position"] == "walk_home"
     assert capture_response.capture.public_url.endswith(".svg")
     assert service.latest_capture().capture.id == capture_response.capture.id
+
+
+def test_hardware_service_persists_real_camera_capture_metadata(tmp_path):
+    service = HardwareService(
+        plotter=MockPlotter(origin_delay_s=0),
+        camera=StubRealCamera(),
+        capture_store=CaptureStore(tmp_path, "/captures"),
+        calibration_service=build_calibration_service(tmp_path),
+        device_settings_service=build_device_settings_service(tmp_path),
+        workspace_service=build_workspace_service(tmp_path),
+    )
+    service.startup()
+
+    capture_response = service.capture_image()
+
+    assert capture_response.capture.public_url.endswith(".jpg")
+    assert capture_response.capture.mime_type == "image/jpeg"
+    assert capture_response.capture.width == 640
+    assert capture_response.capture.height == 480
 
 
 def test_hardware_service_rejects_concurrent_plotter_actions(tmp_path):
