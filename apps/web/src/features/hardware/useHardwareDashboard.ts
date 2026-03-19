@@ -12,6 +12,7 @@ import {
   setPlotterSafeBounds,
   fetchPlotterWorkspace,
   isNetworkRequestError,
+  openHelperApp,
   restartHelperBackend,
   startHelperBackend,
   walkPlotterHome,
@@ -30,6 +31,7 @@ import type {
 } from "../../types/hardware";
 
 const POLL_INTERVAL_MS = 2500;
+const HELPER_RECONNECT_WINDOW_MS = 15000;
 
 type PlotterDiagnosticAction = "raise_pen" | "lower_pen" | "cycle_pen" | "align";
 type DiagnosticPatternId = "tiny-square" | "dash-row" | "double-box";
@@ -72,6 +74,8 @@ export function useHardwareDashboard() {
     useState<HelperActionName>(null);
   const mountedRef = useRef(true);
   const initialAutoStartAttemptedRef = useRef(false);
+  const helperReconnectUntilRef = useRef(0);
+  const helperReconnectTimerRef = useRef<number | null>(null);
 
   function clearHardwareState() {
     setHardwareStatus(null);
@@ -95,7 +99,27 @@ export function useHardwareDashboard() {
     setLatestCapture(snapshot.latest.capture);
     setError(null);
     setHelperStatus(null);
-    setHelperConnectionState("unknown");
+  }
+
+  async function syncHelperConnection() {
+    try {
+      const nextHelperStatus = await fetchHelperStatus();
+      if (!mountedRef.current) {
+        return;
+      }
+      setHelperConnectionState("reachable");
+      setHelperStatus(nextHelperStatus);
+    } catch (helperError) {
+      if (!mountedRef.current) {
+        return;
+      }
+      if (isNetworkRequestError(helperError)) {
+        setHelperConnectionState("missing");
+        setHelperStatus(null);
+        return;
+      }
+      setHelperConnectionState("unknown");
+    }
   }
 
   async function fetchHardwareSnapshot() {
@@ -115,6 +139,7 @@ export function useHardwareDashboard() {
     allowInitialAutoStart: boolean;
   }) {
     clearHardwareState();
+    const allowReconnectAutoStart = Date.now() < helperReconnectUntilRef.current;
     try {
       const nextHelperStatus = await fetchHelperStatus();
       if (!mountedRef.current) {
@@ -125,11 +150,16 @@ export function useHardwareDashboard() {
       setError(null);
 
       if (
-        allowInitialAutoStart &&
-        !initialAutoStartAttemptedRef.current &&
+        (
+          (allowInitialAutoStart && !initialAutoStartAttemptedRef.current) ||
+          allowReconnectAutoStart
+        ) &&
         nextHelperStatus.state === "stopped"
       ) {
-        initialAutoStartAttemptedRef.current = true;
+        if (allowInitialAutoStart) {
+          initialAutoStartAttemptedRef.current = true;
+        }
+        helperReconnectUntilRef.current = 0;
         const startedHelperStatus = await startHelperBackend();
         if (!mountedRef.current) {
           return;
@@ -143,6 +173,7 @@ export function useHardwareDashboard() {
         nextHelperStatus.state === "running" &&
         nextHelperStatus.backend_health === "healthy"
       ) {
+        helperReconnectUntilRef.current = 0;
         try {
           const snapshot = await fetchHardwareSnapshot();
           if (!mountedRef.current) {
@@ -198,6 +229,7 @@ export function useHardwareDashboard() {
         return;
       }
       applyHardwareSnapshot(snapshot);
+      void syncHelperConnection();
     } catch (refreshError) {
       if (!mountedRef.current) {
         return;
@@ -296,6 +328,23 @@ export function useHardwareDashboard() {
     }
   }
 
+  function openHelper() {
+    helperReconnectUntilRef.current = Date.now() + HELPER_RECONNECT_WINDOW_MS;
+    setError(null);
+    openHelperApp();
+
+    if (helperReconnectTimerRef.current !== null) {
+      window.clearTimeout(helperReconnectTimerRef.current);
+    }
+
+    helperReconnectTimerRef.current = window.setTimeout(() => {
+      if (!mountedRef.current) {
+        return;
+      }
+      void refresh({ silent: true });
+    }, 750);
+  }
+
   useEffect(() => {
     mountedRef.current = true;
     void refresh({ allowInitialAutoStart: true });
@@ -306,6 +355,9 @@ export function useHardwareDashboard() {
 
     return () => {
       mountedRef.current = false;
+      if (helperReconnectTimerRef.current !== null) {
+        window.clearTimeout(helperReconnectTimerRef.current);
+      }
       window.clearInterval(poller);
     };
   }, []);
@@ -325,6 +377,7 @@ export function useHardwareDashboard() {
     helperConnectionState,
     helperActionName,
     refresh,
+    openHelper,
     startBackend: () => runHelperAction("start", startHelperBackend),
     restartBackend: () => runHelperAction("restart", restartHelperBackend),
     walkHome: () =>

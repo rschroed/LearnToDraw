@@ -43,6 +43,9 @@ The repository now includes a macOS-first helper proof under `apps/macos-helper`
 - it starts and stops the existing FastAPI backend for camera-mode testing
 - it can restart the managed backend for dashboard recovery
 - it exposes helper-local startup status on `127.0.0.1:8001`
+- packaged helper bundles embed the current repo root so they can launch reliably from Finder or `/Applications`
+- the helper registers `learntodraw-helper://open` so the dashboard can prompt macOS to open it when missing
+- reliable URL-scheme launch depends on macOS LaunchServices recognizing a stable installed bundle, with `/Applications/LearnToDrawCameraHelper.app` as the recommended location
 - all hardware access still stays in the backend on `127.0.0.1:8000`
 - the web app can use the helper only for startup, retry, and failure state while keeping backend APIs unchanged
 

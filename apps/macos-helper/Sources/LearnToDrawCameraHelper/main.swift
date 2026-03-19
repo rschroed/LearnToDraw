@@ -5,17 +5,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var helperServer: LocalHTTPServer?
     private var statusItem: NSStatusItem?
     private let controller: HelperController
+    private let runtimeConfiguration: HelperRuntimeConfiguration
 
     override init() {
-        let launchConfiguration: BackendLaunchConfiguration
+        let runtimeConfiguration: HelperRuntimeConfiguration
         do {
-            launchConfiguration = try BackendLaunchConfiguration.live()
+            runtimeConfiguration = try HelperRuntimeConfiguration.live()
         } catch {
             fatalError(error.localizedDescription)
         }
 
+        self.runtimeConfiguration = runtimeConfiguration
         self.controller = HelperController(
-            launchConfiguration: launchConfiguration,
+            launchConfiguration: runtimeConfiguration.launchConfiguration,
             launcher: FoundationBackendProcessLauncher(),
             healthChecker: URLSessionHealthChecker()
         )
@@ -24,8 +26,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
+        ensureHelperServerStarted()
+    }
 
-        let server = LocalHTTPServer(controller: controller)
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let shouldHandle = urls.contains { $0.scheme == "learntodraw-helper" }
+        guard shouldHandle else {
+            return
+        }
+
+        ensureHelperServerStarted()
+    }
+
+    private func ensureHelperServerStarted() {
+        guard helperServer == nil else {
+            return
+        }
+
+        let server = LocalHTTPServer(
+            controller: controller,
+            host: runtimeConfiguration.helperHost,
+            port: runtimeConfiguration.helperPort
+        )
         do {
             try server.start()
             helperServer = server

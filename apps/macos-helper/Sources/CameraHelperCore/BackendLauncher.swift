@@ -1,5 +1,197 @@
 import Foundation
 
+public struct PackagedHelperConfiguration: Codable, Equatable, Sendable {
+    public let repoRoot: String
+    public let backendHost: String
+    public let backendPort: UInt16
+    public let helperHost: String
+    public let helperPort: UInt16
+
+    public init(
+        repoRoot: String,
+        backendHost: String,
+        backendPort: UInt16,
+        helperHost: String,
+        helperPort: UInt16
+    ) {
+        self.repoRoot = repoRoot
+        self.backendHost = backendHost
+        self.backendPort = backendPort
+        self.helperHost = helperHost
+        self.helperPort = helperPort
+    }
+}
+
+public enum PackagedHelperConfigurationLoader {
+    public static let fileName = "LearnToDrawHelperConfig"
+    public static let fileExtension = "json"
+
+    public static func load(
+        bundle: Bundle = .main,
+        fileManager: FileManager = .default
+    ) throws -> PackagedHelperConfiguration? {
+        try load(resourceDirectoryURL: bundle.resourceURL, fileManager: fileManager)
+    }
+
+    static func load(
+        resourceDirectoryURL: URL?,
+        fileManager: FileManager = .default
+    ) throws -> PackagedHelperConfiguration? {
+        guard let resourceDirectoryURL else {
+            return nil
+        }
+
+        let configURL = resourceDirectoryURL.appending(
+            path: "\(fileName).\(fileExtension)",
+            directoryHint: .notDirectory
+        )
+        guard fileManager.fileExists(atPath: configURL.path) else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: configURL)
+        let configuration = try JSONDecoder().decode(PackagedHelperConfiguration.self, from: data)
+        let repoRootURL = URL(fileURLWithPath: configuration.repoRoot, isDirectory: true)
+
+        guard RepoRootLocator.isRepositoryRoot(at: repoRootURL, fileManager: fileManager) else {
+            throw NSError(
+                domain: "LearnToDrawCameraHelper",
+                code: 2,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Packaged helper config points to an invalid LearnToDraw repository root: \(configuration.repoRoot)",
+                ]
+            )
+        }
+
+        return configuration
+    }
+}
+
+public struct HelperRuntimeConfiguration: Sendable {
+    public let launchConfiguration: BackendLaunchConfiguration
+    public let helperHost: String
+    public let helperPort: UInt16
+
+    public init(
+        launchConfiguration: BackendLaunchConfiguration,
+        helperHost: String,
+        helperPort: UInt16
+    ) {
+        self.launchConfiguration = launchConfiguration
+        self.helperHost = helperHost
+        self.helperPort = helperPort
+    }
+
+    public static func live(
+        bundle: Bundle = .main,
+        fileManager: FileManager = .default,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executablePath: String = CommandLine.arguments[0]
+    ) throws -> HelperRuntimeConfiguration {
+        try live(
+            resourceDirectoryURL: bundle.resourceURL,
+            fileManager: fileManager,
+            environment: environment,
+            executablePath: executablePath
+        )
+    }
+
+    static func live(
+        resourceDirectoryURL: URL?,
+        fileManager: FileManager = .default,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executablePath: String = CommandLine.arguments[0]
+    ) throws -> HelperRuntimeConfiguration {
+        if let packagedConfiguration = try PackagedHelperConfigurationLoader.load(
+            resourceDirectoryURL: resourceDirectoryURL,
+            fileManager: fileManager
+        ) {
+            return try make(
+                repoRoot: URL(fileURLWithPath: packagedConfiguration.repoRoot, isDirectory: true),
+                backendHost: packagedConfiguration.backendHost,
+                backendPort: packagedConfiguration.backendPort,
+                helperHost: packagedConfiguration.helperHost,
+                helperPort: packagedConfiguration.helperPort,
+                environment: environment,
+                fileManager: fileManager
+            )
+        }
+
+        let repoRoot = try RepoRootLocator.locate(
+            fileManager: fileManager,
+            executablePath: executablePath
+        )
+        return try make(
+            repoRoot: repoRoot,
+            backendHost: "127.0.0.1",
+            backendPort: 8000,
+            helperHost: "127.0.0.1",
+            helperPort: 8001,
+            environment: environment,
+            fileManager: fileManager
+        )
+    }
+
+    private static func make(
+        repoRoot: URL,
+        backendHost: String,
+        backendPort: UInt16,
+        helperHost: String,
+        helperPort: UInt16,
+        environment: [String: String],
+        fileManager: FileManager
+    ) throws -> HelperRuntimeConfiguration {
+        guard RepoRootLocator.isRepositoryRoot(at: repoRoot, fileManager: fileManager) else {
+            throw NSError(
+                domain: "LearnToDrawCameraHelper",
+                code: 3,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Could not find the LearnToDraw repository at \(repoRoot.path).",
+                ]
+            )
+        }
+
+        let apiDirectory = repoRoot.appending(path: "apps/api", directoryHint: .isDirectory)
+        let backendURL = URL(string: "http://\(backendHost):\(backendPort)")!
+        var launchEnvironment = environment
+        launchEnvironment["PYTHONPATH"] = "src"
+        launchEnvironment["LEARN_TO_DRAW_PLOTTER_DRIVER"] = "mock"
+        launchEnvironment["LEARN_TO_DRAW_CAMERA_DRIVER"] = "opencv"
+
+        let forwardedKeys = [
+            "LEARN_TO_DRAW_OPENCV_CAMERA_INDEX",
+            "LEARN_TO_DRAW_CAMERA_WARMUP_MS",
+            "LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES",
+        ]
+        for key in forwardedKeys where environment[key] == nil {
+            launchEnvironment.removeValue(forKey: key)
+        }
+
+        return HelperRuntimeConfiguration(
+            launchConfiguration: BackendLaunchConfiguration(
+                executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: [
+                    "python3",
+                    "-m",
+                    "uvicorn",
+                    "learn_to_draw_api.main:app",
+                    "--host",
+                    backendHost,
+                    "--port",
+                    String(backendPort),
+                ],
+                workingDirectoryURL: apiDirectory,
+                environment: launchEnvironment,
+                backendURL: backendURL
+            ),
+            helperHost: helperHost,
+            helperPort: helperPort
+        )
+    }
+}
+
 public struct BackendLaunchConfiguration: Sendable {
     public let executableURL: URL
     public let arguments: [String]
@@ -22,42 +214,17 @@ public struct BackendLaunchConfiguration: Sendable {
     }
 
     public static func live(
+        bundle: Bundle = .main,
         fileManager: FileManager = .default,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executablePath: String = CommandLine.arguments[0]
     ) throws -> BackendLaunchConfiguration {
-        let repoRoot = try RepoRootLocator.locate(fileManager: fileManager)
-        let apiDirectory = repoRoot.appending(path: "apps/api", directoryHint: .isDirectory)
-        let backendURL = URL(string: "http://127.0.0.1:8000")!
-        var launchEnvironment = environment
-        launchEnvironment["PYTHONPATH"] = "src"
-        launchEnvironment["LEARN_TO_DRAW_PLOTTER_DRIVER"] = "mock"
-        launchEnvironment["LEARN_TO_DRAW_CAMERA_DRIVER"] = "opencv"
-
-        let forwardedKeys = [
-            "LEARN_TO_DRAW_OPENCV_CAMERA_INDEX",
-            "LEARN_TO_DRAW_CAMERA_WARMUP_MS",
-            "LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES",
-        ]
-        for key in forwardedKeys where environment[key] == nil {
-            launchEnvironment.removeValue(forKey: key)
-        }
-
-        return BackendLaunchConfiguration(
-            executableURL: URL(fileURLWithPath: "/usr/bin/env"),
-            arguments: [
-                "python3",
-                "-m",
-                "uvicorn",
-                "learn_to_draw_api.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "8000",
-            ],
-            workingDirectoryURL: apiDirectory,
-            environment: launchEnvironment,
-            backendURL: backendURL
-        )
+        try HelperRuntimeConfiguration.live(
+            bundle: bundle,
+            fileManager: fileManager,
+            environment: environment,
+            executablePath: executablePath
+        ).launchConfiguration
     }
 }
 
@@ -73,7 +240,7 @@ public enum RepoRootLocator {
 
         for candidate in candidates {
             for directory in ancestorDirectories(of: candidate) {
-                if hasRepositoryShape(at: directory, fileManager: fileManager) {
+                if isRepositoryRoot(at: directory, fileManager: fileManager) {
                     return directory
                 }
             }
@@ -106,7 +273,7 @@ public enum RepoRootLocator {
         return result
     }
 
-    private static func hasRepositoryShape(at url: URL, fileManager: FileManager) -> Bool {
+    static func isRepositoryRoot(at url: URL, fileManager: FileManager) -> Bool {
         let apiProject = url.appending(path: "apps/api/pyproject.toml")
         let webProject = url.appending(path: "apps/web/package.json")
         return fileManager.fileExists(atPath: apiProject.path)

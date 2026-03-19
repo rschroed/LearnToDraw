@@ -19,6 +19,7 @@ import type {
 import type { HelperStatus } from "../types/helper";
 
 const REQUEST_TIMEOUT_MS = 2000;
+const HELPER_OPEN_URL = "learntodraw-helper://open";
 
 export class ApiRequestError extends Error {
   readonly statusCode: number | null;
@@ -279,4 +280,8 @@ export function restartHelperBackend() {
   return requestJson<HelperStatus>("/local-helper/restart", {
     method: "POST",
   });
+}
+
+export function openHelperApp() {
+  window.location.assign(HELPER_OPEN_URL);
 }

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import * as api from "../src/lib/api";
 import type { HardwareStatus } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
 
@@ -847,10 +848,68 @@ describe("Hardware dashboard", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/open learntodrawcamerahelper\.app, then retry the dashboard/i),
+      screen.getByText(/open the learntodraw helper to bring localhost control online/i),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open helper/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
+
+  it("shows a non-blocking helper warning when the backend is up but the helper is missing", async () => {
+    backendReachable = true;
+    helperReachable = false;
+    const openHelperSpy = vi.spyOn(api, "openHelperApp").mockImplementation(() => {});
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      await screen.findByText(
+        /backend is running, but the local helper is not\. dashboard start and restart controls are unavailable until the helper is open\./i,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /open helper/i }));
+    expect(openHelperSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the helper app and recovers when the helper becomes reachable", async () => {
+    backendReachable = false;
+    helperReachable = false;
+    const openHelperSpy = vi.spyOn(api, "openHelperApp").mockImplementation(() => {
+      helperReachable = true;
+      helperStatus = makeHelperStatus({
+        state: "stopped",
+        backend_health: "unreachable",
+      });
+    });
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /open helper/i,
+      }),
+    );
+
+    expect(openHelperSpy).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(helperStartCount).toBe(1);
+    }, { timeout: 4000 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", {
+          name: /learntodraw local control panel/i,
+        }),
+      ).toBeInTheDocument();
+    }, { timeout: 6000 });
+  }, 8000);
 
   it("auto-starts the backend when the dev proxy returns 500 for a missing backend", async () => {
     backendReachable = false;

@@ -52,5 +52,7 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added OpenCV camera status diagnostics for open/read results and backend selection during real-camera validation
 - Added helper-aware dashboard startup so the web app can auto-start the backend on first load and show helper failure or retry states
 - Fixed helper restart to wait for owned backend shutdown before relaunching, avoiding false "outside helper control" failures during post-permission retries
+- Made packaged helper bundles movable by embedding the repo root in a generated app resource config instead of deriving it from the bundle path
+- Added a dashboard `Open helper` action backed by the `learntodraw-helper://open` custom URL scheme for helper-missing recovery
 
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

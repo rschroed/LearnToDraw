@@ -288,6 +288,7 @@ export function HardwareDashboard() {
     actionFeedback,
     error,
     refresh,
+    openHelper,
     startBackend,
     restartBackend,
     plotterCalibration,
@@ -575,7 +576,7 @@ export function HardwareDashboard() {
     helperStatus?.backend_health === "starting"
       ? "Waiting for the helper-managed backend to come online."
       : helperConnectionState === "missing"
-        ? "Open LearnToDrawCameraHelper.app, then retry the dashboard."
+        ? "Open the LearnToDraw helper to bring localhost control online, then retry if needed."
         : helperStatus?.state === "failed"
           ? helperStatus.last_error ?? "The local helper could not start the camera backend."
           : helperStatus?.state === "stopped"
@@ -601,13 +602,22 @@ export function HardwareDashboard() {
           <p>{helperStartupMessage}</p>
           <div className="actions" style={{ marginTop: 16 }}>
             {helperConnectionState === "missing" ? (
-              <button
-                type="button"
-                className="button-primary"
-                onClick={() => void refresh()}
-              >
-                Retry
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={() => openHelper()}
+                >
+                  Open helper
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => void refresh()}
+                >
+                  Retry
+                </button>
+              </>
             ) : null}
             {helperStatus?.state === "stopped" ? (
               <button
@@ -777,6 +787,28 @@ export function HardwareDashboard() {
       </section>
 
       {error ? <div className="banner">{error}</div> : null}
+      {helperConnectionState === "missing" ? (
+        <div className="banner" style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <span>
+            Backend is running, but the local helper is not. Dashboard start and
+            restart controls are unavailable until the helper is open.
+          </span>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => openHelper()}
+          >
+            Open helper
+          </button>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => void refresh()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       <section className="status-grid">
         <HardwareCard

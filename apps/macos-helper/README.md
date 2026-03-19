@@ -22,9 +22,28 @@ To package a real `.app` bundle for macOS permission testing:
 
 ```sh
 swift build
-./scripts/package-app.sh
-open .build/LearnToDrawCameraHelper.app
+./scripts/package-app.sh ~/Desktop/LearnToDrawCameraHelper.app
+open ~/Desktop/LearnToDrawCameraHelper.app
 ```
+
+The packaged app embeds the current repo root so it can be moved to `~/Desktop`,
+`/Applications`, or another stable location and still launch the backend from the
+same checkout.
+
+Recommended stable install location:
+
+```sh
+./scripts/package-app.sh /Applications/LearnToDrawCameraHelper.app
+open /Applications/LearnToDrawCameraHelper.app
+```
+
+The custom URL scheme `learntodraw-helper://open` only works when macOS LaunchServices
+has registered a stable installed bundle that claims that scheme. `/Applications` is
+the recommended location. Temporary copies such as `/tmp` may launch manually but are
+not a reliable URL-scheme target.
+
+The helper also registers the custom URL scheme `learntodraw-helper://open`, which
+the dashboard can use to prompt macOS to open the app when it is missing.
 
 The helper exposes:
 
