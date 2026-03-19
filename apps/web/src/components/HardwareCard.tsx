@@ -9,9 +9,11 @@ interface HardwareCardProps {
   actionLabel?: string;
   onAction?: (() => Promise<void>) | null;
   actionPending?: boolean;
+  actionDisabled?: boolean;
   secondaryActionLabel?: string;
   onSecondaryAction?: (() => Promise<void>) | null;
   secondaryActionPending?: boolean;
+  secondaryActionDisabled?: boolean;
   notice?: {
     tone: "info" | "success" | "error";
     message: string;
@@ -44,17 +46,21 @@ export function HardwareCard({
   actionLabel,
   onAction,
   actionPending = false,
+  actionDisabled,
   secondaryActionLabel,
   onSecondaryAction,
   secondaryActionPending = false,
+  secondaryActionDisabled,
   notice,
   footer,
   children,
 }: HardwareCardProps) {
   const details = formatDetails(status.details);
-  const actionDisabled = actionPending || status.busy || !status.available;
-  const secondaryActionDisabled =
-    secondaryActionPending || status.busy || !status.available;
+  const primaryActionDisabled =
+    actionDisabled ?? (actionPending || status.busy || !status.available);
+  const resolvedSecondaryActionDisabled =
+    secondaryActionDisabled ??
+    (secondaryActionPending || status.busy || !status.available);
   const hasPrimaryAction = Boolean(actionLabel && onAction);
   const hasSecondaryAction = Boolean(secondaryActionLabel && onSecondaryAction);
 
@@ -117,7 +123,7 @@ export function HardwareCard({
               type="button"
               className="button-primary"
               onClick={() => void onAction?.()}
-              disabled={actionDisabled}
+              disabled={primaryActionDisabled}
             >
               {actionPending ? "Working..." : actionLabel}
             </button>
@@ -127,7 +133,7 @@ export function HardwareCard({
               type="button"
               className="button-secondary"
               onClick={() => void onSecondaryAction?.()}
-              disabled={secondaryActionDisabled}
+              disabled={resolvedSecondaryActionDisabled}
             >
               {secondaryActionPending ? "Working..." : secondaryActionLabel}
             </button>

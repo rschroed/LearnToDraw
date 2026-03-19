@@ -4,6 +4,7 @@ from learn_to_draw_api.adapters.axidraw_client import PyAxiDrawClient
 from learn_to_draw_api.adapters.axidraw_plotter import AxiDrawPlotter
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
+from learn_to_draw_api.adapters.opencv_camera import OpenCVCamera
 from learn_to_draw_api.adapters.unavailable_plotter import UnavailablePlotter
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.models import PlotterCalibration
@@ -86,5 +87,14 @@ def build_plotter_adapter(
     raise ValueError(f"Unsupported plotter driver '{config.plotter_driver}'.")
 
 
-def build_camera_adapter():
-    return MockCamera()
+def build_camera_adapter(config: AppConfig):
+    driver = config.camera_driver.strip().lower()
+    if driver == "mock":
+        return MockCamera()
+    if driver == "opencv":
+        return OpenCVCamera(
+            camera_index=config.opencv_camera_index,
+            warmup_ms=config.camera_warmup_ms,
+            discard_frames=config.camera_discard_frames,
+        )
+    raise ValueError(f"Unsupported camera driver '{config.camera_driver}'.")

@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import * as api from "../src/lib/api";
+import type { HardwareStatus } from "../src/types/hardware";
+import type { HelperStatus } from "../src/types/helper";
 
 const hardwareStatus = {
   plotter: {
@@ -107,6 +110,22 @@ const defaultDevice = {
   source: "config_default" as const,
 };
 
+function makeHelperStatus(
+  overrides: Partial<HelperStatus> = {},
+): HelperStatus {
+  return {
+    state: "stopped",
+    backend_health: "unreachable",
+    mode: "camera",
+    backend_url: "http://127.0.0.1:8000",
+    managed_pid: null,
+    started_at: null,
+    last_error: null,
+    last_exit_code: null,
+    ...overrides,
+  };
+}
+
 type CalibrationFixture = {
   driver: string;
   motion_scale: number;
@@ -166,6 +185,7 @@ type DeviceFixture = {
 };
 
 describe("Hardware dashboard", () => {
+  let currentHardwareStatus: HardwareStatus;
   let latestCapture: null | {
     id: string;
     timestamp: string;
@@ -223,8 +243,18 @@ describe("Hardware dashboard", () => {
   let currentCalibration: CalibrationFixture;
   let currentDevice: DeviceFixture;
   let currentWorkspace: WorkspaceFixture;
+  let backendReachable: boolean;
+  let helperReachable: boolean;
+  let helperStatus: HelperStatus;
+  let helperStartCount: number;
+  let helperRestartCount: number;
+  let helperStatusPollCount: number;
+  let helperTransitionsToRunning: boolean;
+  let helperFailsOnStart: boolean;
+  let backendProxyReturns500: boolean;
 
   beforeEach(() => {
+    currentHardwareStatus = structuredClone(hardwareStatus);
     latestCapture = null;
     latestRun = null;
     recentRuns = [];
@@ -232,6 +262,15 @@ describe("Hardware dashboard", () => {
     currentCalibration = structuredClone(defaultCalibration);
     currentDevice = structuredClone(defaultDevice);
     currentWorkspace = structuredClone(defaultWorkspace);
+    backendReachable = true;
+    helperReachable = false;
+    helperStatus = makeHelperStatus();
+    helperStartCount = 0;
+    helperRestartCount = 0;
+    helperStatusPollCount = 0;
+    helperTransitionsToRunning = true;
+    helperFailsOnStart = false;
+    backendProxyReturns500 = false;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -248,12 +287,92 @@ describe("Hardware dashboard", () => {
           mime_type: "image/svg+xml",
         };
 
+        if (url.startsWith("/local-helper/")) {
+          if (!helperReachable) {
+            throw new TypeError("Failed to fetch");
+          }
+
+          if (url === "/local-helper/status") {
+            helperStatusPollCount += 1;
+            if (
+              helperStatus.state === "starting" &&
+              helperFailsOnStart &&
+              helperStatusPollCount >= 1
+            ) {
+              helperStatus = makeHelperStatus({
+                state: "failed",
+                backend_health: "unreachable",
+                started_at: helperStatus.started_at,
+                last_error: "camera init failed",
+                last_exit_code: 1,
+              });
+            } else if (
+              helperStatus.state === "starting" &&
+              helperTransitionsToRunning &&
+              helperStatusPollCount >= 1
+            ) {
+              backendReachable = true;
+              helperStatus = makeHelperStatus({
+                state: "running",
+                backend_health: "healthy",
+                managed_pid: helperStatus.managed_pid,
+                started_at: helperStatus.started_at,
+              });
+            }
+
+            return new Response(JSON.stringify(helperStatus), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+
+          if (url === "/local-helper/start" && method === "POST") {
+            helperStartCount += 1;
+            helperStatusPollCount = 0;
+            helperStatus = makeHelperStatus({
+              state: "starting",
+              backend_health: "starting",
+              managed_pid: 5001,
+              started_at: "2026-03-15T20:00:00Z",
+            });
+            return new Response(JSON.stringify(helperStatus), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+
+          if (url === "/local-helper/restart" && method === "POST") {
+            helperRestartCount += 1;
+            helperStatusPollCount = 0;
+            helperStatus = makeHelperStatus({
+              state: "starting",
+              backend_health: "starting",
+              managed_pid: 5002,
+              started_at: "2026-03-15T20:00:01Z",
+            });
+            return new Response(JSON.stringify(helperStatus), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+        }
+
+        if (url.startsWith("/api/") && !backendReachable) {
+          if (backendProxyReturns500) {
+            return new Response("", {
+              status: 500,
+              headers: { "Content-Type": "text/plain" },
+            });
+          }
+          throw new TypeError("Failed to fetch");
+        }
+
         if (url === "/api/hardware/status") {
           return new Response(
             JSON.stringify(
               currentDevice.driver === "axidraw"
                 ? axidrawHardwareStatus
-                : hardwareStatus,
+                : currentHardwareStatus,
             ),
             {
               status: 200,
@@ -606,7 +725,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify({
               ok: true,
               message: "Plotter walked home.",
-              status: hardwareStatus.plotter,
+              status: currentHardwareStatus.plotter,
             }),
             {
               status: 200,
@@ -621,7 +740,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify({
               ok: true,
               message: `Plotter test action '${body.action}' completed.`,
-              status: hardwareStatus.plotter,
+              status: currentHardwareStatus.plotter,
             }),
             {
               status: 200,
@@ -644,7 +763,7 @@ describe("Hardware dashboard", () => {
             JSON.stringify({
               ok: true,
               message: "Image captured.",
-              status: hardwareStatus.camera,
+              status: currentHardwareStatus.camera,
               capture: latestCapture,
             }),
             {
@@ -689,6 +808,190 @@ describe("Hardware dashboard", () => {
     expect(screen.getByRole("img", { name: /paper setup preview/i })).toBeInTheDocument();
     expect(screen.getByText(/paper 210 x 297 mm/i)).toBeInTheDocument();
   });
+
+  it("auto-starts the backend through the helper on first load", async () => {
+    backendReachable = false;
+    helperReachable = true;
+    helperStatus = makeHelperStatus({
+      state: "stopped",
+      backend_health: "unreachable",
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /starting local camera backend/i,
+      }),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", {
+          name: /learntodraw local control panel/i,
+        }),
+      ).toBeInTheDocument();
+    }, { timeout: 10000 });
+
+    expect(helperStartCount).toBe(1);
+  }, 12000);
+
+  it("shows a helper-missing state when the helper is unavailable", async () => {
+    backendReachable = false;
+    helperReachable = false;
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /local helper not running/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/open the learntodraw helper to bring localhost control online/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open helper/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("shows a non-blocking helper warning when the backend is up but the helper is missing", async () => {
+    backendReachable = true;
+    helperReachable = false;
+    const openHelperSpy = vi.spyOn(api, "openHelperApp").mockImplementation(() => {});
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      await screen.findByText(
+        /backend is running, but the local helper is not\. dashboard start and restart controls are unavailable until the helper is open\./i,
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /open helper/i }));
+    expect(openHelperSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the helper app and recovers when the helper becomes reachable", async () => {
+    backendReachable = false;
+    helperReachable = false;
+    const openHelperSpy = vi.spyOn(api, "openHelperApp").mockImplementation(() => {
+      helperReachable = true;
+      helperStatus = makeHelperStatus({
+        state: "stopped",
+        backend_health: "unreachable",
+      });
+    });
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /open helper/i,
+      }),
+    );
+
+    expect(openHelperSpy).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(helperStartCount).toBe(1);
+    }, { timeout: 4000 });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("heading", {
+          name: /learntodraw local control panel/i,
+        }),
+      ).toBeInTheDocument();
+    }, { timeout: 6000 });
+  }, 8000);
+
+  it("auto-starts the backend when the dev proxy returns 500 for a missing backend", async () => {
+    backendReachable = false;
+    backendProxyReturns500 = true;
+    helperReachable = true;
+    helperStatus = makeHelperStatus({
+      state: "stopped",
+      backend_health: "unreachable",
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: /booting local hardware control/i }),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(helperStartCount).toBe(1);
+    });
+
+    expect(
+      await screen.findByRole(
+        "heading",
+        { name: /learntodraw local control panel/i },
+        { timeout: 4000 },
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a failed helper state and restart control", async () => {
+    backendReachable = false;
+    helperReachable = true;
+    helperStatus = makeHelperStatus({
+      state: "failed",
+      backend_health: "unreachable",
+      last_error: "camera init failed",
+      last_exit_code: 1,
+      started_at: "2026-03-15T20:00:00Z",
+    });
+    helperTransitionsToRunning = false;
+    helperFailsOnStart = true;
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /camera backend failed to start/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/camera init failed/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /restart backend/i }));
+
+    await waitFor(() => {
+      expect(helperRestartCount).toBe(1);
+    });
+  });
+
+  it("does not auto-start again after a later backend outage", async () => {
+    helperReachable = true;
+    helperStatus = makeHelperStatus({
+      state: "stopped",
+      backend_health: "unreachable",
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    backendReachable = false;
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /camera backend stopped/i,
+      }, { timeout: 10000 }),
+    ).toBeInTheDocument();
+    expect(helperStartCount).toBe(0);
+  }, 12000);
 
   it("shows a disengage motors button for axidraw and runs align mode", async () => {
     vi.restoreAllMocks();
@@ -947,6 +1250,151 @@ describe("Hardware dashboard", () => {
     });
     expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
     expect(screen.getByText(/image\/svg\+xml/i)).toBeInTheDocument();
+  });
+
+  it("renders a jpeg capture from the opencv camera path", async () => {
+    currentHardwareStatus.camera = {
+      ...currentHardwareStatus.camera,
+      driver: "opencv-camera",
+      details: {
+        camera_index: 0,
+        initialization_state: "uninitialized",
+        last_capture_id: null,
+        resolution: null,
+      } as Record<string, unknown>,
+    };
+
+    vi.mocked(globalThis.fetch).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(currentHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: latestCapture }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: latestRun }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs") {
+          return new Response(JSON.stringify({ runs: recentRuns }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/camera/capture" && method === "POST") {
+          latestCapture = {
+            id: "capture-real-001",
+            timestamp: "2026-03-18T17:24:33Z",
+            file_path: "/tmp/capture-real-001.jpg",
+            public_url: "/captures/capture-real-001.jpg",
+            width: 1920,
+            height: 1080,
+            mime_type: "image/jpeg",
+          };
+          currentHardwareStatus.camera = {
+            ...currentHardwareStatus.camera,
+            available: true,
+            connected: true,
+            details: {
+              camera_index: 0,
+              initialization_state: "ready",
+              last_capture_id: "capture-real-001",
+              resolution: "1920x1080",
+            } as Record<string, unknown>,
+          };
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: "Image captured.",
+              status: currentHardwareStatus.camera,
+              capture: latestCapture,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /capture image/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("img", { name: /latest camera capture capture-real-001/i }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
+    expect(screen.getByText(/image\/jpeg/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/opencv-camera/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/1920 x 1080/i)).toBeInTheDocument();
+  });
+
+  it("keeps capture enabled while the opencv camera is uninitialized", async () => {
+    currentHardwareStatus.camera = {
+      ...currentHardwareStatus.camera,
+      available: false,
+      connected: false,
+      driver: "opencv-camera",
+      details: {
+        camera_index: 0,
+        initialization_state: "uninitialized",
+        last_capture_id: null,
+        resolution: null,
+      } as Record<string, unknown>,
+    };
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("button", { name: /capture image/i }),
+    ).toBeEnabled();
   });
 
   it("creates a built-in pattern and completes a plot run", async () => {

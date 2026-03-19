@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
+from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.api import create_app
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.models import (
@@ -124,6 +125,77 @@ def test_capture_and_latest_capture_endpoints(tmp_path):
     capture_payload = capture_response.json()
     assert capture_payload["capture"]["public_url"].startswith("/captures/")
     assert latest_response.json()["capture"]["id"] == capture_payload["capture"]["id"]
+
+
+class StubRealCamera:
+    driver = "opencv-camera"
+
+    def __init__(self) -> None:
+        self._connected = False
+        self._status = DeviceStatus(
+            available=False,
+            connected=False,
+            busy=False,
+            error=None,
+            driver=self.driver,
+            last_updated=datetime.now(timezone.utc),
+            details={
+                "camera_index": 0,
+                "initialization_state": "uninitialized",
+                "last_capture_id": None,
+                "resolution": None,
+            },
+        )
+
+    def connect(self) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def get_status(self) -> DeviceStatus:
+        return self._status.model_copy(update={"connected": self._connected})
+
+    def capture(self) -> CaptureArtifact:
+        self._status = self._status.model_copy(
+            update={
+                "available": True,
+                "connected": True,
+                "details": {
+                    "camera_index": 0,
+                    "initialization_state": "ready",
+                    "last_capture_id": "capture-real-001",
+                    "resolution": "640x480",
+                },
+            }
+        )
+        return CaptureArtifact(
+            capture_id="capture-real-001",
+            timestamp=datetime.now(timezone.utc),
+            filename="capture-real-001.jpg",
+            content=b"jpeg-bytes",
+            media_type="image/jpeg",
+            width=640,
+            height=480,
+        )
+
+
+def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
+    with create_test_client(tmp_path, camera=StubRealCamera()) as client:
+        status_before = client.get("/api/hardware/status")
+        capture_response = client.post("/api/camera/capture")
+        latest_response = client.get("/api/captures/latest")
+
+    assert status_before.status_code == 200
+    assert status_before.json()["camera"]["details"]["initialization_state"] == "uninitialized"
+    assert capture_response.status_code == 200
+    payload = capture_response.json()
+    assert payload["status"]["driver"] == "opencv-camera"
+    assert payload["capture"]["mime_type"] == "image/jpeg"
+    assert payload["capture"]["public_url"].endswith(".jpg")
+    assert payload["capture"]["width"] == 640
+    assert payload["capture"]["height"] == 480
+    assert latest_response.json()["capture"]["id"] == payload["capture"]["id"]
 
 
 def test_plotter_walk_home_endpoint(tmp_path):

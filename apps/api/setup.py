@@ -9,6 +9,7 @@ setup(
     packages=find_packages(where="src"),
     install_requires=[
         "fastapi>=0.115,<1.0",
+        "opencv-python>=4.10,<5.0",
         "python-multipart>=0.0.9,<1.0",
         "uvicorn>=0.30,<1.0",
     ],
