@@ -6,7 +6,7 @@ LearnToDraw is a local-first pen-plotter control app.
 Current architecture:
 - `apps/api`: FastAPI backend, owns all hardware access
 - `apps/web`: React/Vite frontend, localhost control panel only
-- `artifacts/`: local captures, plot assets, and plot run metadata
+- `artifacts/`: local captures, plot assets, plot run metadata, calibration, device settings, and workspace state
 
 Backend is the system of record for:
 - plotter control
@@ -16,6 +16,11 @@ Backend is the system of record for:
 - local artifact persistence
 
 Frontend must never access hardware directly.
+
+Docs intent:
+- `README.md` is the GitHub-facing project entry point and should stay concise.
+- `docs/architecture.md` is the current internal architecture reference.
+- `docs/history.md` is the internal slice-by-slice evolution log.
 
 ## Working Principles
 - Preserve the local-first architecture.
