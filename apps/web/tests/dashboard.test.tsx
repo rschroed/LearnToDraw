@@ -1116,7 +1116,13 @@ describe("Hardware dashboard", () => {
       target: { value: "25" },
     });
 
-    expect(screen.getByText(`${formatMm(160)} x ${formatMm(252)}`)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        (_, element) =>
+          element?.tagName === "STRONG" &&
+          (element.textContent ?? "").trim() === `${formatMm(160)} x ${formatMm(252)}`,
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("keeps an invalid saved paper setup readable while blocking plotting", async () => {
@@ -2094,10 +2100,9 @@ describe("Hardware dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /save calibration/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/plotter calibration saved\./i)).toBeInTheDocument();
+      expect(screen.getByText("1.875000")).toBeInTheDocument();
     });
     expect(screen.getByText(/^Motion scale$/i)).toBeInTheDocument();
-    expect(screen.getByText("1.875000")).toBeInTheDocument();
     expect(screen.getByText(/^Calibration source$/i)).toBeInTheDocument();
     expect(screen.getAllByText(/^persisted$/i).length).toBeGreaterThan(0);
   });

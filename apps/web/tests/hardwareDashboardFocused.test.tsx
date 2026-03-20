@@ -158,8 +158,12 @@ describe("Hardware dashboard focused behaviors", () => {
     fireEvent.change(pageWidthInput, { target: { value: "400" } });
 
     expect(
-      screen.getByText(new RegExp(`${formatMm(360)} x ${formatMm(257)}`, "i")),
-    ).toBeInTheDocument();
+      screen.getAllByText(
+        (_, element) =>
+          element?.tagName === "STRONG" &&
+          (element.textContent ?? "").trim() === `${formatMm(360)} x ${formatMm(257)}`,
+      ).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getByText(/paper size exceeds the plotter's safe bounds of 210 x 297 mm\./i),
     ).toBeInTheDocument();
