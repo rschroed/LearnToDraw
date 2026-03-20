@@ -64,14 +64,17 @@ curl -X POST http://127.0.0.1:8001/start
 curl http://127.0.0.1:8001/status
 ```
 
-When the helper starts the backend, it uses:
+When the helper starts the backend, it always uses:
 
 - `PYTHONPATH=src`
-- `LEARN_TO_DRAW_PLOTTER_DRIVER=mock`
 - `LEARN_TO_DRAW_CAMERA_DRIVER=opencv`
 
-It forwards these optional environment variables from the helper process when present:
+It forwards these optional camera environment variables from the helper process when present:
 
 - `LEARN_TO_DRAW_OPENCV_CAMERA_INDEX`
 - `LEARN_TO_DRAW_CAMERA_WARMUP_MS`
 - `LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES`
+
+The helper is plotter-neutral. It does not configure plotter mode, inject AxiDraw settings,
+or package plotter configuration into the app bundle. Plotter behavior remains owned by the
+backend's normal environment and configuration.

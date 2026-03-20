@@ -62,4 +62,10 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Kept `PlotRun` as the single persisted workflow record and left the global latest-capture flow as convenience-only
 - Extended the plot workflow panel so recent runs can be selected for planned, prepared, and observed inspection without adding alignment or comparison logic
 
+## Helper Hardware-Mode Slice
+
+- Removed helper-owned plotter configuration so the macOS helper is camera-only and plotter-neutral
+- Kept helper startup focused on OpenCV camera ownership while leaving plotter mode to the backend's normal environment and configuration
+- Added helper regression coverage to prevent future silent plotter overrides from creeping back into the helper layer
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).
