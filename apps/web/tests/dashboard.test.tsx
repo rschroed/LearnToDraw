@@ -215,6 +215,12 @@ describe("Hardware dashboard", () => {
           mime_type: string;
         };
         capture: typeof latestCapture;
+        observed_result?: {
+          capture: NonNullable<typeof latestCapture>;
+          camera_driver: string;
+          captured_at: string;
+          duration_ms: number;
+        } | null;
         error: string | null;
         stage_states: Record<
           "prepare" | "plot" | "capture",
@@ -587,6 +593,12 @@ describe("Hardware dashboard", () => {
                 ...latestRun,
                 status: "completed",
                 capture: latestCapture,
+                observed_result: {
+                  capture: latestCapture,
+                  camera_driver: "mock-camera",
+                  captured_at: latestCapture.timestamp,
+                  duration_ms: 1000,
+                },
                 stage_states: {
                   ...latestRun.stage_states,
                   capture: {
@@ -640,6 +652,7 @@ describe("Hardware dashboard", () => {
             updated_at: "2026-03-15T20:04:00Z",
             asset: patternAsset,
             capture: null,
+            observed_result: null,
             error: null,
             stage_states: {
               prepare: {
@@ -711,6 +724,18 @@ describe("Hardware dashboard", () => {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
+        }
+
+        if (url.startsWith("/api/plot-runs/") && method === "GET") {
+          const segments = url.split("/");
+          const runId = segments[segments.length - 1];
+          if (latestRun && latestRun.id === runId) {
+            return new Response(JSON.stringify(latestRun), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response("Not found", { status: 404 });
         }
 
         if (url === "/api/plot-assets/patterns" && method === "POST") {
@@ -1421,7 +1446,7 @@ describe("Hardware dashboard", () => {
     await waitFor(
       () => {
         expect(
-          screen.getByRole("img", { name: /captured output for run run-001/i }),
+          screen.getByRole("img", { name: /observed output for run run-001/i }),
         ).toBeInTheDocument();
       },
       { timeout: 5000 },
@@ -1529,7 +1554,7 @@ describe("Hardware dashboard", () => {
     render(<App />);
 
     expect(await screen.findByText(/math audit: math audit ok/i)).toBeInTheDocument();
-    expect(screen.getByText(/preparation strategy: fit top left/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/preparation strategy: fit top left/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/fit scale: 0.85/i)).toBeInTheDocument();
     expect(
       screen.getByText(/prepared placement: origin 20 × 20 mm · content box 20 20 → 190 105 mm/i),
@@ -2434,6 +2459,276 @@ describe("Hardware dashboard", () => {
       await screen.findByText(/capture was skipped for this diagnostic run\./i),
     ).toBeInTheDocument();
     expect(screen.getByText(/run run-diag.*capture skipped/i)).toBeInTheDocument();
+  });
+
+  it("loads selected run detail from recent history", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const latestAsset = {
+          id: "asset-latest",
+          kind: "built_in_pattern" as const,
+          pattern_id: "test-grid",
+          name: "Latest grid",
+          timestamp: "2026-03-15T20:10:00Z",
+          file_path: "/tmp/asset-latest.svg",
+          public_url: "/plot-assets/asset-latest.svg",
+          mime_type: "image/svg+xml",
+        };
+        const olderAsset = {
+          id: "asset-older",
+          kind: "uploaded_svg" as const,
+          pattern_id: null,
+          name: "Observed sketch",
+          timestamp: "2026-03-15T19:50:00Z",
+          file_path: "/tmp/asset-older.svg",
+          public_url: "/plot-assets/asset-older.svg",
+          mime_type: "image/svg+xml",
+        };
+        const latestRunDetail = {
+          id: "run-latest-001",
+          status: "completed" as const,
+          purpose: "normal" as const,
+          capture_mode: "auto" as const,
+          created_at: "2026-03-15T20:10:00Z",
+          updated_at: "2026-03-15T20:10:10Z",
+          asset: latestAsset,
+          capture: {
+            id: "capture-latest-001",
+            timestamp: "2026-03-15T20:10:10Z",
+            file_path: "/tmp/capture-latest-001.jpg",
+            public_url: "/captures/capture-latest-001.jpg",
+            width: 1280,
+            height: 960,
+            mime_type: "image/jpeg",
+          },
+          observed_result: {
+            capture: {
+              id: "capture-latest-001",
+              timestamp: "2026-03-15T20:10:10Z",
+              file_path: "/tmp/capture-latest-001.jpg",
+              public_url: "/captures/capture-latest-001.jpg",
+              width: 1280,
+              height: 960,
+              mime_type: "image/jpeg",
+            },
+            camera_driver: "opencv-camera",
+            captured_at: "2026-03-15T20:10:10Z",
+            duration_ms: 850,
+          },
+          error: null,
+          stage_states: {
+            prepare: {
+              status: "completed" as const,
+              started_at: "2026-03-15T20:10:00Z",
+              completed_at: "2026-03-15T20:10:01Z",
+              message: "SVG document prepared.",
+            },
+            plot: {
+              status: "completed" as const,
+              started_at: "2026-03-15T20:10:02Z",
+              completed_at: "2026-03-15T20:10:05Z",
+              message: "Plot completed.",
+            },
+            capture: {
+              status: "completed" as const,
+              started_at: "2026-03-15T20:10:06Z",
+              completed_at: "2026-03-15T20:10:10Z",
+              message: "Capture completed.",
+            },
+          },
+          plotter_run_details: {
+            prepared_svg_path: "/tmp/run-latest-001-prepared.svg",
+            preparation: {
+              source_width: 160,
+              source_height: 120,
+              source_units: "mm",
+              prepared_width_mm: 160,
+              prepared_height_mm: 120,
+              page_width_mm: 210,
+              page_height_mm: 297,
+              drawable_width_mm: 170,
+              drawable_height_mm: 257,
+              plotter_bounds_width_mm: 210,
+              plotter_bounds_height_mm: 297,
+              plotter_bounds_source: "config_default",
+              units_inferred: false,
+              workspace_audit: {
+                page_within_plotter_bounds: true,
+                drawable_area_positive: true,
+                drawable_origin_x_mm: 20,
+                drawable_origin_y_mm: 20,
+                remaining_bounds_right_mm: 0,
+                remaining_bounds_bottom_mm: 0,
+              },
+              preparation_audit: {
+                strategy: "fit_top_left",
+                fit_scale: 0.166667,
+                prepared_within_drawable_area: true,
+                overflow_x_mm: 0,
+                overflow_y_mm: 0,
+                placement_origin_x_mm: 20,
+                placement_origin_y_mm: 20,
+                content_min_x_mm: 20,
+                content_min_y_mm: 20,
+                content_max_x_mm: 180,
+                content_max_y_mm: 140,
+                content_width_mm: 160,
+                content_height_mm: 120,
+                prepared_viewbox_min_x: 0,
+                prepared_viewbox_min_y: 0,
+                prepared_viewbox_width: 210,
+                prepared_viewbox_height: 297,
+              },
+            },
+          },
+          camera_run_details: {
+            driver: "opencv-camera",
+          },
+        };
+        const olderRunDetail = {
+          ...latestRunDetail,
+          id: "run-older-001",
+          created_at: "2026-03-15T19:50:00Z",
+          updated_at: "2026-03-15T19:50:12Z",
+          asset: olderAsset,
+          capture: {
+            id: "capture-older-001",
+            timestamp: "2026-03-15T19:50:12Z",
+            file_path: "/tmp/capture-older-001.jpg",
+            public_url: "/captures/capture-older-001.jpg",
+            width: 640,
+            height: 480,
+            mime_type: "image/jpeg",
+          },
+          observed_result: {
+            capture: {
+              id: "capture-older-001",
+              timestamp: "2026-03-15T19:50:12Z",
+              file_path: "/tmp/capture-older-001.jpg",
+              public_url: "/captures/capture-older-001.jpg",
+              width: 640,
+              height: 480,
+              mime_type: "image/jpeg",
+            },
+            camera_driver: "opencv-camera",
+            captured_at: "2026-03-15T19:50:12Z",
+            duration_ms: 640,
+          },
+          plotter_run_details: {
+            ...latestRunDetail.plotter_run_details,
+            prepared_svg_path: "/tmp/run-older-001-prepared.svg",
+          },
+        };
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: latestRunDetail }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              runs: [
+                {
+                  id: latestRunDetail.id,
+                  status: latestRunDetail.status,
+                  purpose: latestRunDetail.purpose,
+                  created_at: latestRunDetail.created_at,
+                  updated_at: latestRunDetail.updated_at,
+                  asset_id: latestAsset.id,
+                  asset_name: latestAsset.name,
+                  asset_kind: latestAsset.kind,
+                  error: null,
+                },
+                {
+                  id: olderRunDetail.id,
+                  status: olderRunDetail.status,
+                  purpose: olderRunDetail.purpose,
+                  created_at: olderRunDetail.created_at,
+                  updated_at: olderRunDetail.updated_at,
+                  asset_id: olderAsset.id,
+                  asset_name: olderAsset.name,
+                  asset_kind: olderAsset.kind,
+                  error: null,
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        if (url === `/api/plot-runs/${olderRunDetail.id}` && method === "GET") {
+          return new Response(JSON.stringify(olderRunDetail), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    await screen.findByText(/planned asset: latest grid/i);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /observed sketch/i }),
+    );
+
+    expect(await screen.findByText(/planned asset: observed sketch/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/prepared svg reference: \/tmp\/run-older-001-prepared\.svg/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/observed result: capture-/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: /observed output for run run-older-001/i }),
+    ).toBeInTheDocument();
   });
 
   it("preserves a manual staged asset across refreshes and flags when latest run differs", async () => {

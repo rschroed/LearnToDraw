@@ -78,6 +78,8 @@ export function PlotWorkflowPanel({
     selectedAsset,
     selectionSource,
     latestRun,
+    inspectedRun,
+    inspectedRunId,
     recentRuns,
     loading,
     refreshing,
@@ -88,6 +90,7 @@ export function PlotWorkflowPanel({
     createBuiltInPattern,
     uploadSvg,
     startRun,
+    inspectRun,
   } = usePlotWorkflow();
   const workspaceInvalidReason =
     plotterWorkspace?.is_valid === false
@@ -105,15 +108,16 @@ export function PlotWorkflowPanel({
     hardwareStatus.plotter.busy ||
     hardwareStatus.camera.busy;
 
-  const latestStatus = latestRun?.status ?? "idle";
+  const displayRun = inspectedRun;
+  const latestStatus = displayRun?.status ?? "idle";
   const latestRunUsesDifferentSource =
     selectionSource === "manual" &&
     selectedAsset !== null &&
     latestRun !== null &&
     latestRun.asset.id !== selectedAsset.id;
   const preparation =
-    latestRun && isRecord(latestRun.plotter_run_details.preparation)
-      ? latestRun.plotter_run_details.preparation
+    displayRun && isRecord(displayRun.plotter_run_details.preparation)
+      ? displayRun.plotter_run_details.preparation
       : null;
   const workspaceAudit = getNestedRecord(preparation, "workspace_audit");
   const preparationAudit = getNestedRecord(preparation, "preparation_audit");
@@ -164,10 +168,10 @@ export function PlotWorkflowPanel({
       ? `${preparationAudit.prepared_viewbox_min_x} ${preparationAudit.prepared_viewbox_min_y} ${preparationAudit.prepared_viewbox_width} ${preparationAudit.prepared_viewbox_height}`
       : null;
   const mathAuditStatus =
-    latestRun?.stage_states.prepare.status === "failed"
-      ? latestRun.stage_states.prepare.message ?? latestRun.error ?? "prepare failed"
+    displayRun?.stage_states.prepare.status === "failed"
+      ? displayRun.stage_states.prepare.message ?? displayRun.error ?? "prepare failed"
       : preparationAudit?.prepared_within_drawable_area === false
-        ? latestRun?.error ?? "prepared output exceeds drawable area"
+        ? displayRun?.error ?? "prepared output exceeds drawable area"
         : preparation
           ? "Math audit ok"
           : null;
@@ -205,6 +209,15 @@ export function PlotWorkflowPanel({
     ].every((value) => typeof value === "number" && Number.isFinite(value))
       ? `${preparationAudit.content_min_x_mm} ${preparationAudit.content_min_y_mm} → ${preparationAudit.content_max_x_mm} ${preparationAudit.content_max_y_mm} mm`
       : null;
+  const preparedSvgPath =
+    displayRun && typeof displayRun.plotter_run_details.prepared_svg_path === "string"
+      ? displayRun.plotter_run_details.prepared_svg_path
+      : null;
+  const observedCapture = displayRun?.observed_result?.capture ?? displayRun?.capture ?? null;
+  const observedDurationMs = displayRun?.observed_result?.duration_ms ?? null;
+  const observedCameraDriver = displayRun?.observed_result?.camera_driver ?? null;
+  const observedResolution =
+    observedCapture ? `${observedCapture.width} × ${observedCapture.height}` : null;
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -406,19 +419,19 @@ export function PlotWorkflowPanel({
         <section className="comparison-panel">
           <header className="workflow-header">
             <div>
-              <h2>Planned vs captured</h2>
+              <h2>Planned, prepared, observed</h2>
               <div className="hardware-meta">
-                Latest run detail with side-by-side artifact comparison.
+                Selected run detail with planned, prepared, and observed artifacts.
               </div>
             </div>
-            {latestRun ? (
+            {displayRun ? (
               <span
                 className={`status-pill status-pill-${getRunStatusTone(
-                  latestRun.status,
+                  displayRun.status,
                 )}`}
               >
                 <span className="status-pill-dot" />
-                {latestRun.status}
+                {displayRun.status}
               </span>
             ) : null}
           </header>
@@ -427,49 +440,85 @@ export function PlotWorkflowPanel({
             <div>
               <h3>Planned output</h3>
               <div className="preview-frame">
-                {latestRun ? (
+                {displayRun ? (
                   <img
-                    src={latestRun.asset.public_url}
-                    alt={`Planned output for ${latestRun.asset.name}`}
+                    src={displayRun.asset.public_url}
+                    alt={`Planned output for ${displayRun.asset.name}`}
                   />
                 ) : (
                   <div className="empty-state">
-                    Your latest run preview will appear here.
+                    Select a run to inspect its planned output.
+                  </div>
+                )}
+              </div>
+              {displayRun ? (
+                <p className="footer-note">
+                  Planned asset: {displayRun.asset.name} · {displayRun.asset.kind.replace(/_/g, " ")}
+                </p>
+              ) : null}
+            </div>
+
+            <div>
+              <h3>Prepared output</h3>
+              <div className="preview-frame">
+                {displayRun ? (
+                  <div className="workflow-sizing-summary">
+                    <p className="footer-note">Prepared size: {preparedSize ?? "unknown"}</p>
+                    <p className="footer-note">
+                      Prepared SVG reference: {preparedSvgPath ?? "unavailable"}
+                    </p>
+                    {preparationStrategy ? (
+                      <p className="footer-note">Preparation strategy: {preparationStrategy}</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    Select a run to inspect its prepared result metadata.
                   </div>
                 )}
               </div>
             </div>
 
             <div>
-              <h3>Captured output</h3>
+              <h3>Observed output</h3>
               <div className="preview-frame">
-                {latestRun?.capture ? (
+                {observedCapture ? (
                   <img
-                    src={latestRun.capture.public_url}
-                    alt={`Captured output for run ${latestRun.id}`}
+                    src={observedCapture.public_url}
+                    alt={`Observed output for run ${displayRun?.id}`}
                   />
                 ) : (
                   <div className="empty-state">
-                    {latestRun?.status === "failed"
-                      ? latestRun.error ?? "Run failed before capture completed."
-                      : latestRun?.capture_mode === "skip"
+                    {displayRun?.status === "failed"
+                      ? displayRun.error ?? "Run failed before capture completed."
+                      : displayRun?.capture_mode === "skip"
                         ? "Capture was skipped for this diagnostic run."
                         : "Capture will appear here once the run reaches the camera stage."}
                   </div>
                 )}
               </div>
+              {displayRun?.observed_result ? (
+                <p className="footer-note">
+                  Observed result: {displayRun.observed_result.capture.id.slice(0, 8)}
+                  {observedCameraDriver ? ` · ${observedCameraDriver}` : ""}
+                  {observedResolution ? ` · ${observedResolution}` : ""}
+                  {typeof observedDurationMs === "number"
+                    ? ` · ${observedDurationMs} ms`
+                    : ""}
+                </p>
+              ) : null}
             </div>
           </div>
 
-          {latestRun ? (
+          {displayRun ? (
             <p className="footer-note">
-              Run {latestRun.id.slice(0, 8)} · {latestRun.purpose}
-              {" · "}asset {latestRun.asset.name}
-              {latestRun.capture
-                ? ` · capture ${latestRun.capture.id.slice(0, 8)}`
-                : latestRun.capture_mode === "skip"
+              Run {displayRun.id.slice(0, 8)} · {displayRun.purpose}
+              {" · "}asset {displayRun.asset.name}
+              {displayRun.observed_result
+                ? ` · observed ${displayRun.observed_result.capture.id.slice(0, 8)}`
+                : displayRun.capture_mode === "skip"
                   ? " · capture skipped"
-                : ""}
+                  : ""}
             </p>
           ) : null}
         </section>
@@ -489,27 +538,34 @@ export function PlotWorkflowPanel({
           <ul className="run-list">
             {recentRuns.map((run) => (
               <li key={run.id} className="run-list-item">
-                <div>
-                  <strong>{run.asset_name}</strong>
-                  <div className="hardware-meta">
-                    {run.asset_kind === "built_in_pattern"
-                      ? "built-in pattern"
-                      : "uploaded svg"}
-                    {` · ${run.purpose}`}
+                <button
+                  type="button"
+                  className="run-list-button"
+                  onClick={() => void inspectRun(run.id)}
+                >
+                  <div>
+                    <strong>{run.asset_name}</strong>
+                    <div className="hardware-meta">
+                      {run.asset_kind === "built_in_pattern"
+                        ? "built-in pattern"
+                        : "uploaded svg"}
+                      {` · ${run.purpose}`}
+                      {inspectedRunId === run.id ? " · selected" : ""}
+                    </div>
                   </div>
-                </div>
-                <div className="run-list-meta">
-                  <span
-                    className={`status-pill status-pill-${getRunStatusTone(
-                      run.status,
-                    )}`}
-                  >
-                    <span className="status-pill-dot" />
-                    {run.status}
-                  </span>
-                  <span>{run.id.slice(0, 8)}</span>
-                  <span>{new Date(run.created_at).toLocaleString()}</span>
-                </div>
+                  <div className="run-list-meta">
+                    <span
+                      className={`status-pill status-pill-${getRunStatusTone(
+                        run.status,
+                      )}`}
+                    >
+                      <span className="status-pill-dot" />
+                      {run.status}
+                    </span>
+                    <span>{run.id.slice(0, 8)}</span>
+                    <span>{new Date(run.created_at).toLocaleString()}</span>
+                  </div>
+                </button>
               </li>
             ))}
           </ul>

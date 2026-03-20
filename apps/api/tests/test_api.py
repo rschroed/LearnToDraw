@@ -560,6 +560,8 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
 
     assert completed["status"] == "completed"
     assert completed["capture"]["public_url"].startswith("/captures/")
+    assert completed["observed_result"]["capture"]["id"] == completed["capture"]["id"]
+    assert completed["observed_result"]["camera_driver"] == "mock-camera"
     assert completed["plotter_run_details"]["prepared_svg_path"].endswith("-prepared.svg")
     assert completed["plotter_run_details"]["preparation"]["source_units"] == "mm"
     assert completed["plotter_run_details"]["calibration"]["driver_calibration"]["native_res_factor"] == 1016.0
@@ -598,6 +600,7 @@ def test_diagnostic_plot_run_skips_capture(tmp_path):
     assert completed["status"] == "completed"
     assert completed["purpose"] == "diagnostic"
     assert completed["capture"] is None
+    assert completed["observed_result"] is None
     assert completed["stage_states"]["capture"]["message"] == "Capture skipped for diagnostic run."
     assert (
         completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"]
@@ -623,6 +626,7 @@ def test_normal_preparation_accepts_unitless_upload(tmp_path):
 
     assert completed["status"] == "completed"
     assert completed["plotter_run_details"]["preparation"]["units_inferred"] is True
+    assert completed["observed_result"]["capture"]["id"] == completed["capture"]["id"]
     assert completed["plotter_run_details"]["preparation"]["prepared_width_mm"] == 170.0
     assert completed["plotter_run_details"]["preparation"]["workspace_audit"]["drawable_origin_x_mm"] == 20.0
     assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"

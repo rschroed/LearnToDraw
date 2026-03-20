@@ -78,7 +78,7 @@ The app currently supports a single backend-owned plotting workflow with a few n
 
 - `status`: the frontend polls backend hardware status and availability
 - `captures`: the backend can trigger and persist camera captures, then serve the latest result
-- `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, and optional capture stages
+- `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, and optional capture stages; normal runs can persist a run-scoped observed result after capture
 - `diagnostics`: fixed built-in pen and pattern tests stay separate from normal plotting semantics
 - `workspace`: page size and margins are persisted and validated against the current drawable area
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides

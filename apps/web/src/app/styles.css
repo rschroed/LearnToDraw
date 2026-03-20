@@ -702,7 +702,7 @@ button {
 .selection-grid,
 .comparison-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
 }
 
@@ -783,6 +783,11 @@ button {
 }
 
 .run-list-item {
+  list-style: none;
+}
+
+.run-list-button {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   gap: 18px;
@@ -791,6 +796,19 @@ button {
   border-radius: 18px;
   background: var(--paper);
   border: 1px solid rgba(111, 78, 55, 0.12);
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.run-list-button:hover {
+  border-color: rgba(111, 78, 55, 0.22);
+}
+
+.run-list-button:focus-visible {
+  outline: 2px solid rgba(32, 74, 107, 0.35);
+  outline-offset: 2px;
 }
 
 .run-list-meta {
@@ -842,7 +860,7 @@ button {
     padding: 20px 14px 32px;
   }
 
-  .run-list-item {
+  .run-list-button {
     align-items: start;
     flex-direction: column;
   }

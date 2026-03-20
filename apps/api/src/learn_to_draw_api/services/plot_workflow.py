@@ -30,6 +30,7 @@ from learn_to_draw_api.models import (
     PlotStageState,
     PlotterDeviceSettings,
     PlotterWorkspace,
+    ObservedResultRecord,
 )
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.plotter_calibration import PlotterCalibrationService
@@ -339,6 +340,12 @@ class PlotWorkflowService:
                 capture_completed = datetime.now(timezone.utc)
                 capture_metadata = self._capture_store.save(capture_artifact)
                 run.capture = capture_metadata
+                run.observed_result = ObservedResultRecord(
+                    capture=capture_metadata,
+                    camera_driver=self._camera.driver,
+                    captured_at=capture_metadata.timestamp,
+                    duration_ms=_duration_ms(capture_started, capture_completed),
+                )
                 run.camera_run_details = {
                     "driver": self._camera.driver,
                     "capture_id": capture_metadata.id,

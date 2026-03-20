@@ -59,6 +59,13 @@ class CaptureMetadata(BaseModel):
     mime_type: str
 
 
+class ObservedResultRecord(BaseModel):
+    capture: CaptureMetadata
+    camera_driver: str
+    captured_at: datetime
+    duration_ms: int
+
+
 class PlotDocument(BaseModel):
     asset_id: str
     name: str
@@ -195,6 +202,7 @@ class PlotRun(BaseModel):
     updated_at: datetime
     asset: PlotAsset
     capture: Optional[CaptureMetadata] = None
+    observed_result: Optional[ObservedResultRecord] = None
     error: Optional[str] = None
     stage_states: dict[str, PlotStageState] = Field(default_factory=dict)
     plotter_run_details: dict[str, Any] = Field(default_factory=dict)
