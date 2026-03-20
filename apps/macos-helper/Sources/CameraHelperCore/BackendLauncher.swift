@@ -157,7 +157,6 @@ public struct HelperRuntimeConfiguration: Sendable {
         let backendURL = URL(string: "http://\(backendHost):\(backendPort)")!
         var launchEnvironment = environment
         launchEnvironment["PYTHONPATH"] = "src"
-        launchEnvironment["LEARN_TO_DRAW_PLOTTER_DRIVER"] = "mock"
         launchEnvironment["LEARN_TO_DRAW_CAMERA_DRIVER"] = "opencv"
 
         let forwardedKeys = [
