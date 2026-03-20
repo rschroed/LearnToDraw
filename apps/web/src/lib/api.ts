@@ -266,6 +266,10 @@ export function fetchPlotRuns() {
   return requestJson<PlotRunListResponse>("/api/plot-runs");
 }
 
+export function fetchPlotRun(runId: string) {
+  return requestJson<PlotRun>(`/api/plot-runs/${runId}`);
+}
+
 export function fetchHelperStatus() {
   return requestJson<HelperStatus>("/local-helper/status");
 }

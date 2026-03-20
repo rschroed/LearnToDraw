@@ -134,6 +134,10 @@ def test_plot_workflow_service_completes_pattern_run(tmp_path):
 
     assert completed.status == "completed"
     assert completed.capture is not None
+    assert completed.observed_result is not None
+    assert completed.observed_result.capture.id == completed.capture.id
+    assert completed.observed_result.camera_driver == "mock-camera"
+    assert completed.observed_result.duration_ms >= 0
     assert completed.stage_states["plot"].status == "completed"
     assert completed.stage_states["capture"].status == "completed"
     assert completed.plotter_run_details["document_id"] == asset.id
@@ -174,6 +178,7 @@ def test_plot_workflow_service_fails_before_capture_on_plot_error(tmp_path):
 
     assert failed.status == "failed"
     assert failed.capture is None
+    assert failed.observed_result is None
     assert failed.stage_states["plot"].status == "failed"
     assert failed.stage_states["capture"].status == "pending"
 
@@ -191,6 +196,7 @@ def test_plot_workflow_service_fails_after_plot_on_camera_error(tmp_path):
     failed = _wait_for_terminal_run(service, run.id)
 
     assert failed.status == "failed"
+    assert failed.observed_result is None
     assert failed.stage_states["plot"].status == "completed"
     assert failed.stage_states["capture"].status == "failed"
     assert failed.error == "Mock camera failed to capture."
@@ -208,6 +214,7 @@ def test_plot_workflow_service_skips_capture_for_diagnostic_run(tmp_path):
     assert completed.status == "completed"
     assert completed.purpose == "diagnostic"
     assert completed.capture is None
+    assert completed.observed_result is None
     assert completed.stage_states["capture"].status == "completed"
     assert completed.camera_run_details["capture_mode"] == "skip"
 
@@ -223,8 +230,11 @@ def test_plot_workflow_service_persists_real_camera_capture(tmp_path):
 
     assert completed.status == "completed"
     assert completed.capture is not None
+    assert completed.observed_result is not None
     assert completed.capture.mime_type == "image/jpeg"
     assert completed.capture.public_url.endswith(".jpg")
+    assert completed.observed_result.capture.mime_type == "image/jpeg"
+    assert completed.observed_result.camera_driver == "opencv-camera"
     assert completed.camera_run_details["driver"] == "opencv-camera"
     assert completed.camera_run_details["resolution"] == "640x480"
 

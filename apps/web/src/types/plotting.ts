@@ -33,6 +33,20 @@ export interface PlotRun {
     height: number;
     mime_type: string;
   } | null;
+  observed_result?: {
+    capture: {
+      id: string;
+      timestamp: string;
+      file_path: string;
+      public_url: string;
+      width: number;
+      height: number;
+      mime_type: string;
+    };
+    camera_driver: string;
+    captured_at: string;
+    duration_ms: number;
+  } | null;
   error: string | null;
   stage_states: Record<"prepare" | "plot" | "capture", PlotStageState>;
   plotter_run_details: Record<string, unknown>;

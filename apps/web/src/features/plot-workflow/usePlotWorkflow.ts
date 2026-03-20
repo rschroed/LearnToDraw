@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   createPatternAsset,
   createPlotRun,
+  fetchPlotRun,
   fetchLatestPlotRun,
   fetchPlotRuns,
   uploadPlotAsset,
@@ -23,6 +24,8 @@ export function usePlotWorkflow() {
   const [selectedAsset, setSelectedAsset] = useState<PlotAsset | null>(null);
   const [selectionSource, setSelectionSource] = useState<SelectionSource>(null);
   const [latestRun, setLatestRun] = useState<PlotRun | null>(null);
+  const [inspectedRun, setInspectedRun] = useState<PlotRun | null>(null);
+  const [inspectedRunId, setInspectedRunId] = useState<string | null>(null);
   const [recentRuns, setRecentRuns] = useState<PlotRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,6 +57,15 @@ export function usePlotWorkflow() {
         return;
       }
       setLatestRun(latest.run);
+      if (inspectedRunId !== null && latest.run?.id !== inspectedRunId) {
+        const selectedRun = await fetchPlotRun(inspectedRunId);
+        if (!mountedRef.current) {
+          return;
+        }
+        setInspectedRun(selectedRun);
+      } else {
+        setInspectedRun(latest.run);
+      }
       setRecentRuns(runs.runs);
       if (selectionSourceRef.current !== "manual") {
         updateSelection(latest.run?.asset ?? null, latest.run?.asset ? "run-derived" : null);
@@ -146,6 +158,8 @@ export function usePlotWorkflow() {
         return;
       }
       setLatestRun(run);
+      setInspectedRun(run);
+      setInspectedRunId(run.id);
       updateSelection(run.asset, "run-derived");
       await refresh({ silent: true });
       setNotice({ tone: "success", message: "Plot run started." });
@@ -190,6 +204,8 @@ export function usePlotWorkflow() {
     selectedAsset,
     selectionSource,
     latestRun,
+    inspectedRun,
+    inspectedRunId,
     recentRuns,
     loading,
     refreshing,
@@ -201,5 +217,30 @@ export function usePlotWorkflow() {
     createBuiltInPattern,
     uploadSvg,
     startRun,
+    inspectRun: async (runId: string) => {
+      setRefreshing(true);
+      try {
+        const run = await fetchPlotRun(runId);
+        if (!mountedRef.current) {
+          return;
+        }
+        setInspectedRun(run);
+        setInspectedRunId(runId);
+        setError(null);
+      } catch (refreshError) {
+        if (!mountedRef.current) {
+          return;
+        }
+        setError(
+          refreshError instanceof Error
+            ? refreshError.message
+            : "Failed to load plot run detail.",
+        );
+      } finally {
+        if (mountedRef.current) {
+          setRefreshing(false);
+        }
+      }
+    },
   };
 }
