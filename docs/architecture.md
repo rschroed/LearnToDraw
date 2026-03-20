@@ -46,6 +46,7 @@ The repository now includes a macOS-first helper proof under `apps/macos-helper`
 - packaged helper bundles embed the current repo root so they can launch reliably from Finder or `/Applications`
 - the helper registers `learntodraw-helper://open` so the dashboard can prompt macOS to open it when missing
 - reliable URL-scheme launch depends on macOS LaunchServices recognizing a stable installed bundle, with `/Applications/LearnToDrawCameraHelper.app` as the recommended location
+- `apps/macos-helper/scripts/install-app.sh` is the supported local install/update path for placing the helper in `/Applications`
 - all hardware access still stays in the backend on `127.0.0.1:8000`
 - the web app can use the helper only for startup, retry, and failure state while keeping backend APIs unchanged
 
