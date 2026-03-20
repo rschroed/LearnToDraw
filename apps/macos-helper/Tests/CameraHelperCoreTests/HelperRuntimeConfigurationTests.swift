@@ -21,6 +21,13 @@ final class HelperRuntimeConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration.launchConfiguration.backendURL.absoluteString, "http://127.0.0.1:8000")
         XCTAssertEqual(configuration.helperHost, "127.0.0.1")
         XCTAssertEqual(configuration.helperPort, 8001)
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_CAMERA_DRIVER"],
+            "opencv"
+        )
+        XCTAssertNil(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_PLOTTER_DRIVER"]
+        )
     }
 
     func testFallsBackToRepoDiscoveryForSwiftRunExecution() throws {
@@ -44,6 +51,13 @@ final class HelperRuntimeConfigurationTests: XCTestCase {
         )
         XCTAssertEqual(configuration.helperHost, "127.0.0.1")
         XCTAssertEqual(configuration.helperPort, 8001)
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_CAMERA_DRIVER"],
+            "opencv"
+        )
+        XCTAssertNil(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_PLOTTER_DRIVER"]
+        )
     }
 
     func testInvalidPackagedRepoRootFailsClearly() throws {
@@ -61,6 +75,68 @@ final class HelperRuntimeConfigurationTests: XCTestCase {
             let message = (error as NSError).localizedDescription
             XCTAssertTrue(message.contains("invalid LearnToDraw repository root"))
         }
+    }
+
+    func testHelperPreservesUnrelatedEnvironmentWithoutInjectingPlotterConfig() throws {
+        let fixture = try makeFixture()
+        defer { try? fixture.cleanup() }
+
+        let configuration = try HelperRuntimeConfiguration.live(
+            resourceDirectoryURL: fixture.resourcesDirectory,
+            fileManager: .default,
+            environment: [
+                "LEARN_TO_DRAW_PLOTTER_DRIVER": "axidraw",
+                "UNRELATED_ENV": "keep-me",
+            ],
+            executablePath: "/tmp/not-used/LearnToDrawCameraHelper"
+        )
+
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_CAMERA_DRIVER"],
+            "opencv"
+        )
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["UNRELATED_ENV"],
+            "keep-me"
+        )
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_PLOTTER_DRIVER"],
+            "axidraw"
+        )
+    }
+
+    func testHelperForwardsCameraSettingsOnly() throws {
+        let fixture = try makeFixture()
+        defer { try? fixture.cleanup() }
+
+        let configuration = try HelperRuntimeConfiguration.live(
+            resourceDirectoryURL: fixture.resourcesDirectory,
+            fileManager: .default,
+            environment: [
+                "LEARN_TO_DRAW_OPENCV_CAMERA_INDEX": "2",
+                "LEARN_TO_DRAW_CAMERA_WARMUP_MS": "500",
+                "LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES": "4",
+                "LEARN_TO_DRAW_AXIDRAW_MODEL": "1",
+            ],
+            executablePath: "/tmp/not-used/LearnToDrawCameraHelper"
+        )
+
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_OPENCV_CAMERA_INDEX"],
+            "2"
+        )
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_CAMERA_WARMUP_MS"],
+            "500"
+        )
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES"],
+            "4"
+        )
+        XCTAssertEqual(
+            configuration.launchConfiguration.environment["LEARN_TO_DRAW_AXIDRAW_MODEL"],
+            "1"
+        )
     }
 
     private func makeFixture(

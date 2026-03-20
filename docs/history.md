@@ -56,4 +56,10 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added a dashboard `Open helper` action backed by the `learntodraw-helper://open` custom URL scheme for helper-missing recovery
 - Added a dedicated helper install/update script for `/Applications/LearnToDrawCameraHelper.app` to reduce ad hoc packaging and launch confusion
 
+## Helper Hardware-Mode Slice
+
+- Removed helper-owned plotter configuration so the macOS helper is camera-only and plotter-neutral
+- Kept helper startup focused on OpenCV camera ownership while leaving plotter mode to the backend's normal environment and configuration
+- Added helper regression coverage to prevent future silent plotter overrides from creeping back into the helper layer
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).
