@@ -129,6 +129,9 @@ Needs explicit discussion first:
 - Do not commit generated frontend build output or TypeScript build-info files.
 - Prefer small commits at slice boundaries, especially before hardware-facing changes.
 - If a task starts from `main`, create a short-lived `codex/` branch before making edits unless the user explicitly asks to work directly on `main`.
+- Keep one branch scoped to one reviewable slice of work.
+- Delete local and remote branches promptly after merge.
+- Do not leave `backup`, `pre-rebase`, or similarly named recovery branches behind as normal workflow output.
 
 ## Remote Workflow
 - Primary remote is GitHub.
@@ -136,3 +139,4 @@ Needs explicit discussion first:
 - Before pushing hardware-related changes, make sure relevant tests pass or state clearly what was not verified.
 - Prefer short-lived branches for risky adapter or hardware-control changes.
 - Use `codex/` as the branch prefix for agent-created branches.
+- Prefer squash merges so `main` reflects intentional slice boundaries.
