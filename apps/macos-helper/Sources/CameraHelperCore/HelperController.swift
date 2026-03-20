@@ -7,6 +7,8 @@ public actor HelperController {
     private let healthChecker: HealthChecking
     private let pollIntervalNanoseconds: UInt64
     private let mode = "camera"
+    private let helperInstanceID: String
+    private let helperLaunchedAt: Date
 
     private var state: HelperState = .stopped
     private var backendHealth: BackendHealth = .unreachable
@@ -21,11 +23,15 @@ public actor HelperController {
         launchConfiguration: BackendLaunchConfiguration,
         launcher: BackendProcessLaunching,
         healthChecker: HealthChecking,
+        helperInstanceID: String = UUID().uuidString,
+        helperLaunchedAt: Date = Date(),
         pollIntervalNanoseconds: UInt64 = 250_000_000
     ) {
         self.launchConfiguration = launchConfiguration
         self.launcher = launcher
         self.healthChecker = healthChecker
+        self.helperInstanceID = helperInstanceID
+        self.helperLaunchedAt = helperLaunchedAt
         self.pollIntervalNanoseconds = pollIntervalNanoseconds
     }
 
@@ -35,6 +41,7 @@ public actor HelperController {
 
     public func start() async -> HelperStatus {
         if state == .starting || state == .running {
+            HelperLogger.log(instanceID: helperInstanceID, message: "start requested while already \(state.rawValue)")
             return currentStatus()
         }
 
@@ -42,10 +49,12 @@ public actor HelperController {
             state = .failed
             backendHealth = .healthy
             lastError = "Backend port 8000 is already healthy outside helper control."
+            HelperLogger.log(instanceID: helperInstanceID, message: "backend already healthy outside helper control")
             return currentStatus()
         }
 
         do {
+            HelperLogger.log(instanceID: helperInstanceID, message: "launching backend")
             let process = try launcher.launchBackend(configuration: launchConfiguration)
             stopRequested = false
             managedProcess = process
@@ -71,11 +80,13 @@ public actor HelperController {
             state = .failed
             backendHealth = .unreachable
             lastError = error.localizedDescription
+            HelperLogger.log(instanceID: helperInstanceID, message: "backend launch failed: \(error.localizedDescription)")
             return currentStatus()
         }
     }
 
     public func stop() async -> HelperStatus {
+        HelperLogger.log(instanceID: helperInstanceID, message: "stop requested")
         startupTask?.cancel()
         startupTask = nil
         stopRequested = true
@@ -84,6 +95,7 @@ public actor HelperController {
             state = .stopped
             backendHealth = .unreachable
             lastError = nil
+            HelperLogger.log(instanceID: helperInstanceID, message: "stop requested with no managed backend")
             return currentStatus()
         }
 
@@ -93,10 +105,12 @@ public actor HelperController {
         state = .stopped
         backendHealth = .unreachable
         lastError = nil
+        HelperLogger.log(instanceID: helperInstanceID, message: "backend stopped")
         return currentStatus()
     }
 
     public func restart() async -> HelperStatus {
+        HelperLogger.log(instanceID: helperInstanceID, message: "restart requested")
         _ = await stop()
         return await start()
     }
@@ -111,6 +125,7 @@ public actor HelperController {
                 if state == .starting && managedProcess?.processIdentifier == expectedPID {
                     state = .running
                     backendHealth = .healthy
+                    HelperLogger.log(instanceID: helperInstanceID, message: "backend became healthy pid=\(expectedPID)")
                 }
                 return
             }
@@ -153,6 +168,10 @@ public actor HelperController {
         managedProcess = nil
         lastExitCode = exit.exitCode
         backendHealth = .unreachable
+        HelperLogger.log(
+            instanceID: helperInstanceID,
+            message: "backend exited code=\(exit.exitCode) stderr=\(exit.stderrTail ?? "none")"
+        )
 
         if stopRequested {
             state = .stopped
@@ -165,6 +184,8 @@ public actor HelperController {
 
     private func currentStatus() -> HelperStatus {
         HelperStatus(
+            helperInstanceID: helperInstanceID,
+            helperLaunchedAt: helperLaunchedAt,
             state: state,
             backendHealth: backendHealth,
             mode: mode,

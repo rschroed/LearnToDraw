@@ -166,6 +166,8 @@ def test_opencv_camera_reports_unavailable_when_open_fails_on_capture(monkeypatc
     assert status.details["initialization_state"] == "unavailable"
     assert status.details["last_open_result"] == "failed"
     assert status.details["last_backend_name"] is None
+    assert status.details["last_read_result"] == "not_attempted"
+    assert status.details["resolution"] is None
     assert "VideoCapture(0) did not open" in status.details["last_open_message"]
     assert "permission was denied" in status.error
 
@@ -185,9 +187,13 @@ def test_opencv_camera_raises_when_frame_read_fails(monkeypatch):
     status = camera.get_status()
     assert status.details["last_open_result"] == "opened"
     assert status.details["last_read_result"] == "failed"
+    assert status.details["last_open_message"] == "VideoCapture(0) opened successfully."
+    assert status.details["resolution"] is None
+    assert status.available is False
+    assert status.connected is False
 
 
-def test_opencv_camera_raises_when_jpeg_encode_fails(monkeypatch):
+def test_opencv_camera_raises_when_jpeg_encode_fails_but_remains_retryable(monkeypatch):
     fake_capture = FakeVideoCapture()
     fake_cv2 = SimpleNamespace(
         VideoCapture=lambda index: fake_capture,
@@ -198,6 +204,15 @@ def test_opencv_camera_raises_when_jpeg_encode_fails(monkeypatch):
 
     with pytest.raises(HardwareOperationError, match="failed to encode a JPEG"):
         camera.capture()
+
+    status = camera.get_status()
+    assert status.available is True
+    assert status.connected is True
+    assert status.details["initialization_state"] == "ready"
+    assert status.details["last_open_result"] == "opened"
+    assert status.details["last_read_result"] == "succeeded"
+    assert status.details["resolution"] == "640x480"
+    assert status.error == "OpenCV camera failed to encode a JPEG capture."
 
 
 def test_opencv_camera_disconnect_releases_device(monkeypatch):

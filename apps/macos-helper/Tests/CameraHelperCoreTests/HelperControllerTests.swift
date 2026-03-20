@@ -75,6 +75,25 @@ final class HelperControllerTests: XCTestCase {
         XCTAssertEqual(launcher.launchCount, 1)
     }
 
+    func testRepeatedStartWhileHealthyReturnsExistingRunningStatus() async {
+        let launcher = MockLauncher()
+        let healthChecker = MockHealthChecker(results: [false, true])
+        let controller = makeController(
+            launcher: launcher,
+            healthChecker: healthChecker,
+            pollIntervalNanoseconds: 1_000_000
+        )
+
+        _ = await controller.start()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let status = await controller.start()
+
+        XCTAssertEqual(status.state, .running)
+        XCTAssertEqual(status.backendHealth, .healthy)
+        XCTAssertEqual(status.managedPID, 4242)
+        XCTAssertEqual(launcher.launchCount, 1)
+    }
+
     func testStopReturnsToStoppedAndStopsManagedProcess() async {
         let launcher = MockLauncher()
         let controller = makeController(
@@ -146,9 +165,27 @@ final class HelperControllerTests: XCTestCase {
         XCTAssertTrue(launcher.launchedProcesses[0].stopCalled)
     }
 
+    func testStatusIncludesStableHelperInstanceIdentity() async {
+        let launchDate = Date(timeIntervalSince1970: 1_710_000_000)
+        let controller = makeController(
+            helperInstanceID: "helper-instance-test",
+            helperLaunchedAt: launchDate
+        )
+
+        let first = await controller.status()
+        let second = await controller.status()
+
+        XCTAssertEqual(first.helperInstanceID, "helper-instance-test")
+        XCTAssertEqual(first.helperLaunchedAt, launchDate)
+        XCTAssertEqual(second.helperInstanceID, "helper-instance-test")
+        XCTAssertEqual(second.helperLaunchedAt, launchDate)
+    }
+
     private func makeController(
         launcher: MockLauncher = MockLauncher(),
         healthChecker: MockHealthChecker = MockHealthChecker(results: []),
+        helperInstanceID: String = "test-helper-instance",
+        helperLaunchedAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
         pollIntervalNanoseconds: UInt64 = 1_000_000
     ) -> HelperController {
         HelperController(
@@ -161,6 +198,8 @@ final class HelperControllerTests: XCTestCase {
             ),
             launcher: launcher,
             healthChecker: healthChecker,
+            helperInstanceID: helperInstanceID,
+            helperLaunchedAt: helperLaunchedAt,
             pollIntervalNanoseconds: pollIntervalNanoseconds
         )
     }

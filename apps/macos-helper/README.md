@@ -57,6 +57,9 @@ The helper exposes:
 - `POST /stop`
 - `POST /restart`
 
+The helper is intended to run as a single app instance. Reopening the app or custom URL scheme
+should reuse the existing helper process rather than leaving multiple menu-bar helpers active.
+
 Example:
 
 ```sh
@@ -78,3 +81,14 @@ It forwards these optional camera environment variables from the helper process 
 The helper is plotter-neutral. It does not configure plotter mode, inject AxiDraw settings,
 or package plotter configuration into the app bundle. Plotter behavior remains owned by the
 backend's normal environment and configuration.
+
+For a repeatable real-camera smoke pass with the helper-managed backend:
+
+1. Launch the helper with the desired plotter environment and any optional `LEARN_TO_DRAW_OPENCV_CAMERA_INDEX` override already exported.
+2. Confirm `GET /status` reports the helper as reachable and `POST /start` moves it to `running`.
+3. Verify the backend on `127.0.0.1:8000` is healthy and inspect `/api/hardware/status` for the camera details.
+4. Trigger one `POST /api/camera/capture` and confirm `/api/captures/latest` returns the new JPEG metadata.
+5. Check the helper `instance_id` / `helper_instance_id` and `helper_launched_at` fields in `/status` while repeating opens to confirm you are still talking to the same helper process.
+
+This helper flow keeps camera index selection env-driven. If the default index is wrong, relaunch
+the helper with a different `LEARN_TO_DRAW_OPENCV_CAMERA_INDEX` value rather than adding runtime UI controls.

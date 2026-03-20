@@ -69,6 +69,38 @@ export LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES=2
 
 On macOS, the first real capture may trigger a camera permission prompt. A denied permission or missing device will surface through the backend camera status and capture endpoint.
 
+For helper-managed real camera smoke testing on the current hardware:
+
+```bash
+cd apps/macos-helper
+LEARN_TO_DRAW_PLOTTER_DRIVER=axidraw LEARN_TO_DRAW_AXIDRAW_MODEL=1 swift run LearnToDrawCameraHelper
+```
+
+In another shell:
+
+```bash
+curl http://127.0.0.1:8001/status
+curl -X POST http://127.0.0.1:8001/start
+curl http://127.0.0.1:8000/api/health
+curl http://127.0.0.1:8000/api/hardware/status
+curl -X POST http://127.0.0.1:8000/api/camera/capture
+curl http://127.0.0.1:8000/api/captures/latest
+```
+
+If camera index `0` fails, stop the helper-managed backend, relaunch the helper with an
+explicit camera index, and retry until one standalone capture succeeds:
+
+```bash
+export LEARN_TO_DRAW_OPENCV_CAMERA_INDEX=1
+```
+
+This smoke path is intentionally scoped to one real manual capture. It does not require a
+full plot run with capture.
+
+The helper is intended to run as a single app instance. During development, `/status` also
+includes a helper instance id and helper launch timestamp so repeated opens make it obvious
+whether you are still talking to the same helper process.
+
 ## Mock Vs Real Hardware
 
 For mock-backed local development:

@@ -2,6 +2,8 @@ export type HelperState = "stopped" | "starting" | "running" | "failed";
 export type HelperBackendHealth = "unreachable" | "starting" | "healthy";
 
 export interface HelperStatus {
+  helper_instance_id?: string;
+  helper_launched_at?: string;
   state: HelperState;
   backend_health: HelperBackendHealth;
   mode: string;

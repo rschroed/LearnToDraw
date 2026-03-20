@@ -14,6 +14,8 @@ public enum BackendHealth: String, Codable, Equatable, Sendable {
 }
 
 public struct HelperStatus: Equatable, Sendable {
+    public let helperInstanceID: String
+    public let helperLaunchedAt: Date
     public let state: HelperState
     public let backendHealth: BackendHealth
     public let mode: String
@@ -24,6 +26,8 @@ public struct HelperStatus: Equatable, Sendable {
     public let lastExitCode: Int32?
 
     public init(
+        helperInstanceID: String,
+        helperLaunchedAt: Date,
         state: HelperState,
         backendHealth: BackendHealth,
         mode: String,
@@ -33,6 +37,8 @@ public struct HelperStatus: Equatable, Sendable {
         lastError: String?,
         lastExitCode: Int32?
     ) {
+        self.helperInstanceID = helperInstanceID
+        self.helperLaunchedAt = helperLaunchedAt
         self.state = state
         self.backendHealth = backendHealth
         self.mode = mode
@@ -44,6 +50,8 @@ public struct HelperStatus: Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case helperInstanceID = "helper_instance_id"
+        case helperLaunchedAt = "helper_launched_at"
         case state
         case backendHealth = "backend_health"
         case mode
@@ -58,6 +66,8 @@ public struct HelperStatus: Equatable, Sendable {
 extension HelperStatus: Encodable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(helperInstanceID, forKey: .helperInstanceID)
+        try container.encode(helperLaunchedAt, forKey: .helperLaunchedAt)
         try container.encode(state, forKey: .state)
         try container.encode(backendHealth, forKey: .backendHealth)
         try container.encode(mode, forKey: .mode)

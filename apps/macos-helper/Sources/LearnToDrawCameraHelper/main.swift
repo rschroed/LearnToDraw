@@ -1,11 +1,14 @@
 import AppKit
 import CameraHelperCore
+import Darwin
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var helperServer: LocalHTTPServer?
     private var statusItem: NSStatusItem?
     private let controller: HelperController
     private let runtimeConfiguration: HelperRuntimeConfiguration
+    private let helperInstanceID: String
+    private let singleInstanceCoordinator: HelperSingleInstanceCoordinator
 
     override init() {
         let runtimeConfiguration: HelperRuntimeConfiguration
@@ -16,15 +19,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         self.runtimeConfiguration = runtimeConfiguration
+        self.helperInstanceID = UUID().uuidString
+        self.singleInstanceCoordinator = HelperSingleInstanceCoordinator(
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "com.learntodraw.CameraHelper"
+        )
         self.controller = HelperController(
             launchConfiguration: runtimeConfiguration.launchConfiguration,
             launcher: FoundationBackendProcessLauncher(),
-            healthChecker: URLSessionHealthChecker()
+            healthChecker: URLSessionHealthChecker(),
+            helperInstanceID: helperInstanceID
         )
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if handOffToExistingInstanceIfNeeded(reason: "launch") {
+            return
+        }
         installStatusItem()
         ensureHelperServerStarted()
     }
@@ -35,7 +46,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if handOffToExistingInstanceIfNeeded(reason: "url-open") {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
         ensureHelperServerStarted()
+    }
+
+    private func handOffToExistingInstanceIfNeeded(reason: String) -> Bool {
+        let currentPID = Int32(ProcessInfo.processInfo.processIdentifier)
+        let shouldExit: Bool
+        do {
+            shouldExit = try singleInstanceCoordinator.handOffToExistingInstanceIfNeeded(
+                currentProcessIdentifier: currentPID
+            )
+        } catch {
+            HelperLogger.log(
+                instanceID: helperInstanceID,
+                message: "failed to evaluate single-instance handoff during \(reason): \(error.localizedDescription)"
+            )
+            return false
+        }
+
+        guard shouldExit else {
+            return false
+        }
+
+        HelperLogger.log(
+            instanceID: helperInstanceID,
+            message: "detected existing helper instance during \(reason); handing off and exiting"
+        )
+        fflush(stderr)
+        exit(EXIT_SUCCESS)
     }
 
     private func ensureHelperServerStarted() {
@@ -45,13 +88,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let server = LocalHTTPServer(
             controller: controller,
+            helperInstanceID: helperInstanceID,
             host: runtimeConfiguration.helperHost,
             port: runtimeConfiguration.helperPort
         )
         do {
             try server.start()
             helperServer = server
+            HelperLogger.log(instanceID: helperInstanceID, message: "helper app ready")
         } catch {
+            HelperLogger.log(instanceID: helperInstanceID, message: "helper app failed to start: \(error.localizedDescription)")
             let alert = NSAlert()
             alert.messageText = "LearnToDraw helper failed to start"
             alert.informativeText = error.localizedDescription

@@ -93,17 +93,19 @@ class OpenCVCamera:
             raise HardwareBusyError("Camera is busy.")
         self._busy = True
         self._error = None
+        self._last_read_result = "not_attempted"
+        self._last_resolution = None
         self._touch()
         try:
             newly_opened = self._ensure_open()
             if newly_opened:
                 self._warm_up_camera()
             frame = self._read_frame()
-            encoded = self._encode_frame(frame)
             height, width = self._frame_dimensions(frame)
+            self._last_resolution = f"{width}x{height}"
+            encoded = self._encode_frame(frame)
             capture_id = uuid4().hex
             self._last_capture_id = capture_id
-            self._last_resolution = f"{width}x{height}"
             self._touch()
             return CaptureArtifact(
                 capture_id=capture_id,
@@ -154,6 +156,7 @@ class OpenCVCamera:
         self._state = "ready"
         self._last_open_result = "opened"
         self._last_open_message = f"VideoCapture({self._camera_index}) opened successfully."
+        self._last_read_result = "not_attempted"
         self._last_backend_name = self._capture_backend_name(capture)
         self._error = None
         self._touch()
@@ -185,6 +188,9 @@ class OpenCVCamera:
         ok, encoded = cv2.imencode(".jpg", frame)
         if not ok:
             self._error = "OpenCV camera failed to encode a JPEG capture."
+            self._available = True
+            self._connected = self._capture is not None
+            self._state = "ready" if self._capture is not None else "unavailable"
             self._touch()
             raise HardwareOperationError(self._error)
         return encoded.tobytes()

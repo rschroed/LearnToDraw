@@ -3,6 +3,7 @@ import Network
 
 public final class LocalHTTPServer {
     private let controller: HelperController
+    private let helperInstanceID: String
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
     private let queue = DispatchQueue(label: "learn-to-draw.camera-helper.http")
@@ -11,10 +12,12 @@ public final class LocalHTTPServer {
 
     public init(
         controller: HelperController,
+        helperInstanceID: String,
         host: String = "127.0.0.1",
         port: UInt16 = 8001
     ) {
         self.controller = controller
+        self.helperInstanceID = helperInstanceID
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: port) ?? 8001
         let encoder = JSONEncoder()
@@ -33,16 +36,24 @@ public final class LocalHTTPServer {
         }
         listener.stateUpdateHandler = { state in
             if case .failed(let error) = state {
-                fputs("Helper HTTP listener failed: \(error)\n", stderr)
+                HelperLogger.log(
+                    instanceID: self.helperInstanceID,
+                    message: "helper HTTP listener failed: \(error)"
+                )
             }
         }
         listener.start(queue: queue)
         self.listener = listener
+        HelperLogger.log(
+            instanceID: helperInstanceID,
+            message: "helper HTTP listener started on \(host):\(port)"
+        )
     }
 
     public func stop() {
         listener?.cancel()
         listener = nil
+        HelperLogger.log(instanceID: helperInstanceID, message: "helper HTTP listener stopped")
     }
 
     private func handle(connection: NWConnection) {
