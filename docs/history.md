@@ -54,5 +54,6 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Fixed helper restart to wait for owned backend shutdown before relaunching, avoiding false "outside helper control" failures during post-permission retries
 - Made packaged helper bundles movable by embedding the repo root in a generated app resource config instead of deriving it from the bundle path
 - Added a dashboard `Open helper` action backed by the `learntodraw-helper://open` custom URL scheme for helper-missing recovery
+- Added a dedicated helper install/update script for `/Applications/LearnToDrawCameraHelper.app` to reduce ad hoc packaging and launch confusion
 
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

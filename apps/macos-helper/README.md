@@ -18,7 +18,7 @@ From `apps/macos-helper`:
 swift run LearnToDrawCameraHelper
 ```
 
-To package a real `.app` bundle for macOS permission testing:
+To package a real `.app` bundle without installing it:
 
 ```sh
 swift build
@@ -33,8 +33,13 @@ same checkout.
 Recommended stable install location:
 
 ```sh
-./scripts/package-app.sh /Applications/LearnToDrawCameraHelper.app
-open /Applications/LearnToDrawCameraHelper.app
+./scripts/install-app.sh --open
+```
+
+If `/Applications` requires elevated privileges on your machine:
+
+```sh
+sudo ./scripts/install-app.sh --open
 ```
 
 The custom URL scheme `learntodraw-helper://open` only works when macOS LaunchServices
