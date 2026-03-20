@@ -102,7 +102,6 @@ class PlotterDeviceSettingsService:
                 "Provide both width_mm and height_mm, or clear both values."
             )
 
-        current_record = self._store.load()
         nominal_bounds, nominal_bounds_source, model_info = self._resolve_axidraw_nominal_bounds()
         manual_override = (
             None

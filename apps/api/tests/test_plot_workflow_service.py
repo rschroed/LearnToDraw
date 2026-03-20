@@ -6,7 +6,6 @@ from pathlib import Path
 from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
-from learn_to_draw_api.adapters.axidraw_plotter import AxiDrawPlotter
 from learn_to_draw_api.models import (
     PatternAssetCreateRequest,
     PlotterCalibrationRequest,

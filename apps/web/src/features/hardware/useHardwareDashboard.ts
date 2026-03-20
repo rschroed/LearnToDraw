@@ -4,213 +4,39 @@ import {
   captureImage,
   createPatternAsset,
   createPlotRun,
-  fetchHardwareStatus,
-  fetchHelperStatus,
-  fetchLatestCapture,
-  fetchPlotterCalibration,
-  fetchPlotterDevice,
-  setPlotterSafeBounds,
-  fetchPlotterWorkspace,
   isNetworkRequestError,
-  openHelperApp,
   restartHelperBackend,
-  startHelperBackend,
-  walkPlotterHome,
   runPlotterTestAction,
   setPlotterCalibration,
   setPlotterPenHeights,
+  setPlotterSafeBounds,
   setPlotterWorkspace,
+  startHelperBackend,
+  walkPlotterHome,
 } from "../../lib/api";
-import type { HelperStatus } from "../../types/helper";
+import { useHardwareActionRunner } from "./useHardwareActionRunner";
 import type {
-  CaptureMetadata,
-  HardwareStatus,
-  PlotterCalibration,
-  PlotterDeviceSettings,
-  PlotterWorkspace,
-} from "../../types/hardware";
+  DiagnosticPatternId,
+  PlotterDiagnosticAction,
+} from "./hardwareDashboardTypes";
+import { useHardwareSnapshotState } from "./useHardwareSnapshotState";
+import { useHelperBackendControl } from "./useHelperBackendControl";
+
 
 const POLL_INTERVAL_MS = 2500;
-const HELPER_RECONNECT_WINDOW_MS = 15000;
 
-type PlotterDiagnosticAction = "raise_pen" | "lower_pen" | "cycle_pen" | "align";
-type DiagnosticPatternId = "tiny-square" | "dash-row" | "double-box";
-type ActionName =
-  | "plotter-walk-home"
-  | "plotter-calibration"
-  | "plotter-safe-bounds"
-  | "plotter-workspace"
-  | "plotter-pen-heights"
-  | "camera-capture"
-  | `plotter-test:${PlotterDiagnosticAction}`
-  | `plotter-pattern:${DiagnosticPatternId}`
-  | null;
-type ActionTone = "info" | "success" | "error";
-type HelperActionName = "start" | "restart" | null;
-type HelperConnectionState = "unknown" | "reachable" | "missing";
 
 export function useHardwareDashboard() {
-  const [hardwareStatus, setHardwareStatus] = useState<HardwareStatus | null>(null);
-  const [plotterCalibration, setPlotterCalibrationState] =
-    useState<PlotterCalibration | null>(null);
-  const [plotterDevice, setPlotterDeviceState] =
-    useState<PlotterDeviceSettings | null>(null);
-  const [plotterWorkspace, setPlotterWorkspaceState] =
-    useState<PlotterWorkspace | null>(null);
-  const [latestCapture, setLatestCapture] = useState<CaptureMetadata | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [actionName, setActionName] = useState<ActionName>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [actionFeedback, setActionFeedback] = useState<{
-    action: Exclude<ActionName, null>;
-    message: string;
-    tone: ActionTone;
-  } | null>(null);
-  const [helperStatus, setHelperStatus] = useState<HelperStatus | null>(null);
-  const [helperConnectionState, setHelperConnectionState] =
-    useState<HelperConnectionState>("unknown");
-  const [helperActionName, setHelperActionName] =
-    useState<HelperActionName>(null);
   const mountedRef = useRef(true);
-  const initialAutoStartAttemptedRef = useRef(false);
-  const helperReconnectUntilRef = useRef(0);
-  const helperReconnectTimerRef = useRef<number | null>(null);
-
-  function clearHardwareState() {
-    setHardwareStatus(null);
-    setPlotterCalibrationState(null);
-    setPlotterDeviceState(null);
-    setPlotterWorkspaceState(null);
-    setLatestCapture(null);
-  }
-
-  function applyHardwareSnapshot(snapshot: {
-    status: HardwareStatus;
-    calibration: PlotterCalibration;
-    device: PlotterDeviceSettings;
-    workspace: PlotterWorkspace;
-    latest: { capture: CaptureMetadata | null };
-  }) {
-    setHardwareStatus(snapshot.status);
-    setPlotterCalibrationState(snapshot.calibration);
-    setPlotterDeviceState(snapshot.device);
-    setPlotterWorkspaceState(snapshot.workspace);
-    setLatestCapture(snapshot.latest.capture);
-    setError(null);
-    setHelperStatus(null);
-  }
-
-  async function syncHelperConnection() {
-    try {
-      const nextHelperStatus = await fetchHelperStatus();
-      if (!mountedRef.current) {
-        return;
-      }
-      setHelperConnectionState("reachable");
-      setHelperStatus(nextHelperStatus);
-    } catch (helperError) {
-      if (!mountedRef.current) {
-        return;
-      }
-      if (isNetworkRequestError(helperError)) {
-        setHelperConnectionState("missing");
-        setHelperStatus(null);
-        return;
-      }
-      setHelperConnectionState("unknown");
-    }
-  }
-
-  async function fetchHardwareSnapshot() {
-    const [status, calibration, device, workspace, latest] = await Promise.all([
-      fetchHardwareStatus(),
-      fetchPlotterCalibration(),
-      fetchPlotterDevice(),
-      fetchPlotterWorkspace(),
-      fetchLatestCapture(),
-    ]);
-    return { status, calibration, device, workspace, latest };
-  }
-
-  async function reconcileBackendUnavailable({
-    allowInitialAutoStart,
-  }: {
-    allowInitialAutoStart: boolean;
-  }) {
-    clearHardwareState();
-    const allowReconnectAutoStart = Date.now() < helperReconnectUntilRef.current;
-    try {
-      const nextHelperStatus = await fetchHelperStatus();
-      if (!mountedRef.current) {
-        return;
-      }
-      setHelperConnectionState("reachable");
-      setHelperStatus(nextHelperStatus);
-      setError(null);
-
-      if (
-        (
-          (allowInitialAutoStart && !initialAutoStartAttemptedRef.current) ||
-          allowReconnectAutoStart
-        ) &&
-        nextHelperStatus.state === "stopped"
-      ) {
-        if (allowInitialAutoStart) {
-          initialAutoStartAttemptedRef.current = true;
-        }
-        helperReconnectUntilRef.current = 0;
-        const startedHelperStatus = await startHelperBackend();
-        if (!mountedRef.current) {
-          return;
-        }
-        setHelperStatus(startedHelperStatus);
-        setHelperConnectionState("reachable");
-        return;
-      }
-
-      if (
-        nextHelperStatus.state === "running" &&
-        nextHelperStatus.backend_health === "healthy"
-      ) {
-        helperReconnectUntilRef.current = 0;
-        try {
-          const snapshot = await fetchHardwareSnapshot();
-          if (!mountedRef.current) {
-            return;
-          }
-          applyHardwareSnapshot(snapshot);
-          return;
-        } catch (retryError) {
-          if (!mountedRef.current) {
-            return;
-          }
-          if (!isNetworkRequestError(retryError)) {
-            setError(
-              retryError instanceof Error
-                ? retryError.message
-                : "Failed to refresh hardware state.",
-            );
-          }
-        }
-      }
-    } catch (helperError) {
-      if (!mountedRef.current) {
-        return;
-      }
-      if (isNetworkRequestError(helperError)) {
-        setHelperConnectionState("missing");
-        setHelperStatus(null);
-        setError(null);
-        return;
-      }
-      setError(
-        helperError instanceof Error
-          ? helperError.message
-          : "Failed to refresh helper state.",
-      );
-    }
-  }
+  const [error, setError] = useState<string | null>(null);
+  const snapshotState = useHardwareSnapshotState();
+  const helperControl = useHelperBackendControl({
+    mountedRef,
+    clearHardwareState: snapshotState.clearHardwareState,
+    applyHardwareSnapshot: snapshotState.applyHardwareSnapshot,
+    fetchHardwareSnapshot: snapshotState.fetchHardwareSnapshot,
+    setError,
+  });
 
   async function refresh({
     silent = false,
@@ -220,24 +46,25 @@ export function useHardwareDashboard() {
     allowInitialAutoStart?: boolean;
   } = {}) {
     if (!silent) {
-      setRefreshing(true);
+      snapshotState.setRefreshing(true);
     }
 
     try {
-      const snapshot = await fetchHardwareSnapshot();
+      const snapshot = await snapshotState.fetchHardwareSnapshot();
       if (!mountedRef.current) {
         return;
       }
-      applyHardwareSnapshot(snapshot);
-      void syncHelperConnection();
+      snapshotState.applyHardwareSnapshot(snapshot);
+      setError(null);
+      void helperControl.syncHelperConnection();
     } catch (refreshError) {
       if (!mountedRef.current) {
         return;
       }
       if (isNetworkRequestError(refreshError)) {
-        await reconcileBackendUnavailable({ allowInitialAutoStart });
+        await helperControl.reconcileBackendUnavailable({ allowInitialAutoStart });
       } else {
-        clearHardwareState();
+        snapshotState.clearHardwareState();
         setError(
           refreshError instanceof Error
             ? refreshError.message
@@ -248,102 +75,15 @@ export function useHardwareDashboard() {
       if (!mountedRef.current) {
         return;
       }
-      setLoading(false);
-      setRefreshing(false);
+      snapshotState.setLoading(false);
+      snapshotState.setRefreshing(false);
     }
   }
 
-  async function runAction(
-    name: Exclude<ActionName, null>,
-    action: () => Promise<unknown>,
-    messages: {
-      pending: string;
-      success: string;
-    },
-  ) {
-    try {
-      setActionName(name);
-      setError(null);
-      setActionFeedback({
-        action: name,
-        message: messages.pending,
-        tone: "info",
-      });
-      await action();
-      await refresh({ silent: true });
-      setActionFeedback({
-        action: name,
-        message: messages.success,
-        tone: "success",
-      });
-    } catch (actionError) {
-      const message =
-        actionError instanceof Error ? actionError.message : "Action failed.";
-      setError(message);
-      setActionFeedback({
-        action: name,
-        message,
-        tone: "error",
-      });
-    } finally {
-      setActionName(null);
-    }
-  }
-
-  async function runHelperAction(
-    name: Exclude<HelperActionName, null>,
-    action: () => Promise<HelperStatus>,
-  ) {
-    try {
-      setHelperActionName(name);
-      setError(null);
-      clearHardwareState();
-      const nextHelperStatus = await action();
-      if (!mountedRef.current) {
-        return;
-      }
-      setHelperConnectionState("reachable");
-      setHelperStatus(nextHelperStatus);
-      await refresh({ silent: true });
-    } catch (helperError) {
-      if (!mountedRef.current) {
-        return;
-      }
-      clearHardwareState();
-      if (isNetworkRequestError(helperError)) {
-        setHelperConnectionState("missing");
-        setHelperStatus(null);
-        return;
-      }
-      setError(
-        helperError instanceof Error
-          ? helperError.message
-          : "Failed to control the local helper.",
-      );
-    } finally {
-      if (!mountedRef.current) {
-        return;
-      }
-      setHelperActionName(null);
-    }
-  }
-
-  function openHelper() {
-    helperReconnectUntilRef.current = Date.now() + HELPER_RECONNECT_WINDOW_MS;
-    setError(null);
-    openHelperApp();
-
-    if (helperReconnectTimerRef.current !== null) {
-      window.clearTimeout(helperReconnectTimerRef.current);
-    }
-
-    helperReconnectTimerRef.current = window.setTimeout(() => {
-      if (!mountedRef.current) {
-        return;
-      }
-      void refresh({ silent: true });
-    }, 750);
-  }
+  const actionRunner = useHardwareActionRunner({
+    refresh,
+    setError,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -355,43 +95,54 @@ export function useHardwareDashboard() {
 
     return () => {
       mountedRef.current = false;
-      if (helperReconnectTimerRef.current !== null) {
-        window.clearTimeout(helperReconnectTimerRef.current);
-      }
       window.clearInterval(poller);
     };
   }, []);
 
   return {
-    hardwareStatus,
-    plotterCalibration,
-    plotterDevice,
-    plotterWorkspace,
-    latestCapture,
-    loading,
-    refreshing,
-    actionName,
-    actionFeedback,
+    hardwareStatus: snapshotState.hardwareStatus,
+    plotterCalibration: snapshotState.plotterCalibration,
+    plotterDevice: snapshotState.plotterDevice,
+    plotterWorkspace: snapshotState.plotterWorkspace,
+    latestCapture: snapshotState.latestCapture,
+    loading: snapshotState.loading,
+    refreshing: snapshotState.refreshing,
+    actionName: actionRunner.actionName,
+    actionFeedback: actionRunner.actionFeedback,
     error,
-    helperStatus,
-    helperConnectionState,
-    helperActionName,
+    helperStatus: helperControl.helperStatus,
+    helperConnectionState: helperControl.helperConnectionState,
+    helperActionName: helperControl.helperActionName,
     refresh,
-    openHelper,
-    startBackend: () => runHelperAction("start", startHelperBackend),
-    restartBackend: () => runHelperAction("restart", restartHelperBackend),
+    openHelper: () => helperControl.openHelper(() => refresh({ silent: true })),
+    startBackend: () =>
+      helperControl.runHelperAction(
+        "start",
+        startHelperBackend,
+        () => refresh({ silent: true }),
+      ),
+    restartBackend: () =>
+      helperControl.runHelperAction(
+        "restart",
+        restartHelperBackend,
+        () => refresh({ silent: true }),
+      ),
     walkHome: () =>
-      runAction("plotter-walk-home", walkPlotterHome, {
+      actionRunner.runAction("plotter-walk-home", walkPlotterHome, {
         pending: "Walking plotter home...",
         success: "Plotter walked home.",
       }),
     runPlotterTestAction: (action: PlotterDiagnosticAction) =>
-      runAction(`plotter-test:${action}`, () => runPlotterTestAction(action), {
-        pending: `Running ${action.replace("_", " ")}...`,
-        success: `${action.replace("_", " ")} completed.`,
-      }),
+      actionRunner.runAction(
+        `plotter-test:${action}`,
+        () => runPlotterTestAction(action),
+        {
+          pending: `Running ${action.replace("_", " ")}...`,
+          success: `${action.replace("_", " ")} completed.`,
+        },
+      ),
     runDiagnosticPattern: async (patternId: DiagnosticPatternId) =>
-      runAction(
+      actionRunner.runAction(
         `plotter-pattern:${patternId}`,
         async () => {
           const asset = await createPatternAsset(patternId);
@@ -406,7 +157,7 @@ export function useHardwareDashboard() {
         },
       ),
     setPlotterPenHeights: (penPosUp: number, penPosDown: number) =>
-      runAction(
+      actionRunner.runAction(
         "plotter-pen-heights",
         () => setPlotterPenHeights(penPosUp, penPosDown),
         {
@@ -415,12 +166,12 @@ export function useHardwareDashboard() {
         },
       ),
     setPlotterCalibration: (nativeResFactor: number) =>
-      runAction(
+      actionRunner.runAction(
         "plotter-calibration",
         async () => {
           const response = await setPlotterCalibration(nativeResFactor);
           if (mountedRef.current) {
-            setPlotterCalibrationState(response.calibration);
+            snapshotState.setPlotterCalibrationState(response.calibration);
           }
         },
         {
@@ -432,12 +183,12 @@ export function useHardwareDashboard() {
       width_mm: number | null;
       height_mm: number | null;
     }) =>
-      runAction(
+      actionRunner.runAction(
         "plotter-safe-bounds",
         async () => {
           const response = await setPlotterSafeBounds(safeBounds);
           if (mountedRef.current) {
-            setPlotterDeviceState(response.device);
+            snapshotState.setPlotterDeviceState(response.device);
           }
         },
         {
@@ -459,12 +210,12 @@ export function useHardwareDashboard() {
       margin_right_mm: number;
       margin_bottom_mm: number;
     }) =>
-      runAction(
+      actionRunner.runAction(
         "plotter-workspace",
         async () => {
           const response = await setPlotterWorkspace(workspace);
           if (mountedRef.current) {
-            setPlotterWorkspaceState(response.workspace);
+            snapshotState.setPlotterWorkspaceState(response.workspace);
           }
         },
         {
@@ -473,7 +224,7 @@ export function useHardwareDashboard() {
         },
       ),
     capture: () =>
-      runAction("camera-capture", captureImage, {
+      actionRunner.runAction("camera-capture", captureImage, {
         pending: "Capturing image...",
         success: "Image captured.",
       }),

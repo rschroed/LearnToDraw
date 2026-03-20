@@ -2,7 +2,7 @@ PYTHON ?= python3
 API_DIR := apps/api
 WEB_DIR := apps/web
 
-.PHONY: api-install api-dev api-dev-mock api-dev-camera api-dev-axidraw api-test web-install web-dev web-test
+.PHONY: api-install api-dev api-dev-mock api-dev-camera api-dev-axidraw api-test api-lint web-install web-dev web-test web-lint web-build check
 
 api-install:
 	cd $(API_DIR) && $(PYTHON) -m pip install ".[dev]"
@@ -22,6 +22,9 @@ api-dev-axidraw:
 api-test:
 	cd $(API_DIR) && PYTHONPATH=src $(PYTHON) -m pytest
 
+api-lint:
+	cd $(API_DIR) && $(PYTHON) -m ruff check src tests
+
 web-install:
 	cd $(WEB_DIR) && npm install
 
@@ -30,3 +33,11 @@ web-dev:
 
 web-test:
 	cd $(WEB_DIR) && npm run test
+
+web-lint:
+	cd $(WEB_DIR) && npm run lint
+
+web-build:
+	cd $(WEB_DIR) && npm run build
+
+check: api-test api-lint web-test web-lint web-build
