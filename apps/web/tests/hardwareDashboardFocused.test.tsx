@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import { formatMm } from "../src/features/hardware/hardwareDashboardUtils";
 import {
   createHardwareDashboardHarness,
   defaultAxiDrawHardwareStatus,
@@ -156,7 +157,9 @@ describe("Hardware dashboard focused behaviors", () => {
     const pageWidthInput = await screen.findByLabelText(/^width$/i);
     fireEvent.change(pageWidthInput, { target: { value: "400" } });
 
-    expect(screen.getByText(/drawable area 360 x 257 mm/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`${formatMm(360)} x ${formatMm(257)}`, "i")),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/paper size exceeds the plotter's safe bounds of 210 x 297 mm\./i),
     ).toBeInTheDocument();

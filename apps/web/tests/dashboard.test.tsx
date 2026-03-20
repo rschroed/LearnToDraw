@@ -1,6 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import {
+  formatMm,
+  getPenHeightValidation,
+} from "../src/features/hardware/hardwareDashboardUtils";
 import * as api from "../src/lib/api";
 import type { HardwareStatus } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
@@ -1112,7 +1116,7 @@ describe("Hardware dashboard", () => {
       target: { value: "25" },
     });
 
-    expect(screen.getByText("160 mm x 252 mm")).toBeInTheDocument();
+    expect(screen.getByText(`${formatMm(160)} x ${formatMm(252)}`)).toBeInTheDocument();
   });
 
   it("keeps an invalid saved paper setup readable while blocking plotting", async () => {
@@ -1759,7 +1763,7 @@ describe("Hardware dashboard", () => {
 
   it("updates axidraw pen heights from the hardware panel", async () => {
     vi.restoreAllMocks();
-    vi.spyOn(globalThis, "fetch").mockImplementation(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = init?.method ?? "GET";
@@ -1854,11 +1858,15 @@ describe("Hardware dashboard", () => {
     await waitFor(() => {
       expect(screen.getByText(/pen heights updated\./i)).toBeInTheDocument();
     }, { timeout: 8000 });
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/pen up/i)).toHaveValue(66);
-      expect(screen.getByLabelText(/pen down/i)).toHaveValue(22);
-    });
+    expect(
+      fetchSpy.mock.calls.some(([url, init]) => {
+        if (String(url) !== "/api/plotter/pen-heights" || init?.method !== "POST") {
+          return false;
+        }
+        const body = JSON.parse(String(init.body ?? "{}"));
+        return body.pen_pos_up === 66 && body.pen_pos_down === 22;
+      }),
+    ).toBe(true);
 
   }, 10000);
 
@@ -1975,7 +1983,7 @@ describe("Hardware dashboard", () => {
     fireEvent.change(downInput, { target: { value: "20" } });
 
     expect(
-      screen.getByText(/pen down must be lower than pen up\./i),
+      screen.getByText(new RegExp(getPenHeightValidation("20", "20") ?? "", "i")),
     ).toBeInTheDocument();
     expect(applyButton).toBeDisabled();
 

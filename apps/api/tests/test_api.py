@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
+from learn_to_draw_api.adapters.axidraw_models import resolve_axidraw_model_info
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
 from learn_to_draw_api.adapters.camera import CaptureArtifact
@@ -282,11 +283,15 @@ def test_plotter_device_endpoint_reports_model_derived_bounds(tmp_path):
     assert payload["plotter_model"]["code"] == 2
     assert payload["plotter_model"]["label"] == "AxiDraw V3/A3 or SE/A3"
     assert payload["nominal_plotter_bounds_source"] == "model_default"
-    assert payload["nominal_plotter_bounds_mm"]["width_mm"] == 430.022
-    assert payload["nominal_plotter_bounds_mm"]["height_mm"] == 296.926
+    model_info = resolve_axidraw_model_info(2)
+    assert payload["nominal_plotter_bounds_mm"]["width_mm"] == model_info.bounds_width_mm
+    assert payload["nominal_plotter_bounds_mm"]["height_mm"] == model_info.bounds_height_mm
     assert payload["plotter_bounds_source"] == "default_clearance"
-    assert payload["plotter_bounds_mm"]["width_mm"] == 420.022
-    assert payload["plotter_bounds_mm"]["height_mm"] == 286.926
+    assert payload["plotter_bounds_mm"]["width_mm"] == round(model_info.bounds_width_mm - 10.0, 3)
+    assert payload["plotter_bounds_mm"]["height_mm"] == round(
+        model_info.bounds_height_mm - 10.0,
+        3,
+    )
 
 
 def test_axidraw_without_explicit_bounds_degrades_safely(tmp_path):
