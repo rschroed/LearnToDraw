@@ -1,6 +1,6 @@
 # LearnToDraw Vision
 
-> If a change does not help compare **planned vs observed**, it is likely not core to the system.
+> If a change does not help the system interpret what happened on the page, it is likely not core to the system.
 
 ## What This Is
 
@@ -19,7 +19,7 @@ Intent -> Plan -> Plot -> Observe -> Compare -> Adjust
 - **Plan**: how the system prepares that drawing
 - **Plot**: the physical execution
 - **Observe**: what actually happened (camera capture)
-- **Compare**: understand what happened in the physical result, using the plan as context (not as a strict target for replication)
+- **Compare**: interpret what happened in the physical result, using the plan as context rather than as a strict target for replication
 - **Adjust**: future corrections (alignment, strategy, etc.)
 
 ## Core Primitive: PlotRun
@@ -99,17 +99,17 @@ Current milestone:
 
 - establish **run-scoped observed results**
 - reliably capture what happened during a run
-- make planned vs observed visible for inspection
+- make planned, prepared, and observed state visible for interpretation
 
 This enables the next step:
 
-- comparison and alignment
+- aligned observation and analysis
 
 ## Direction (Not Yet Implemented)
 
 Future capabilities build on the same loop:
 
-- alignment between planned and observed output
+- aligned observed-result analysis for interpretation and future iteration
 - drift detection and correction
 - multi-pass drawing (iterative refinement)
 - system-specific learning (machine, pen, surface)
