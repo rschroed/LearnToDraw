@@ -1116,13 +1116,11 @@ describe("Hardware dashboard", () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getAllByText(
-          (_, element) =>
-            element?.classList.contains("workspace-preview-summary-value") === true &&
-            (element.textContent ?? "").trim() === `${formatMm(160)} x ${formatMm(252)}`,
-        ).length,
-      ).toBeGreaterThan(0);
+      const drawableSummary = document.querySelector(".workspace-preview-summary-value");
+      expect(drawableSummary).not.toBeNull();
+      expect(drawableSummary).toHaveTextContent(
+        new RegExp(`^${formatMm(160)} x ${formatMm(252)}$`),
+      );
     });
   });
 
