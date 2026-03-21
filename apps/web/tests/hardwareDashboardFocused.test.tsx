@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
 import {
@@ -153,17 +153,31 @@ describe("Hardware dashboard focused behaviors", () => {
 
     render(<App />);
 
-    const pageWidthInput = await screen.findByLabelText(/^width$/i);
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    const paperCard = screen.getByText(/^paper on plotter$/i).closest(".workspace-card");
+    expect(paperCard).not.toBeNull();
+
+    const pageWidthInput = await within(paperCard as HTMLElement).findByLabelText(/^width$/i);
+    const saveButton = within(paperCard as HTMLElement).getByRole("button", {
+      name: /save paper setup/i,
+    });
+
+    await waitFor(() => {
+      expect(pageWidthInput).toHaveValue(210);
+      expect(saveButton).toBeDisabled();
+    });
+
     fireEvent.change(pageWidthInput, { target: { value: "400" } });
 
     await waitFor(() => {
-      const validationNotice = document.querySelector(".workspace-inline-notice");
-      expect(validationNotice).not.toBeNull();
-      expect(validationNotice).toHaveTextContent(
-        /paper size exceeds the plotter's safe bounds of 210 x 297 mm\./i,
-      );
+      expect(pageWidthInput).toHaveValue(400);
+      expect(saveButton).toBeDisabled();
     });
-    expect(screen.getByRole("button", { name: /save paper setup/i })).toBeDisabled();
     expect(harness.workspaceRequests).toHaveLength(0);
   });
 
