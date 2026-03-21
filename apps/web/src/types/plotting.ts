@@ -24,6 +24,11 @@ export interface PlotRun {
   created_at: string;
   updated_at: string;
   asset: PlotAsset;
+  prepared_artifact: {
+    file_path: string;
+    public_url: string;
+    mime_type: string;
+  } | null;
   capture: {
     id: string;
     timestamp: string;

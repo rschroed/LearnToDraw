@@ -137,14 +137,18 @@ def test_plot_workflow_service_completes_pattern_run(tmp_path):
     assert completed.observed_result.capture.id == completed.capture.id
     assert completed.observed_result.camera_driver == "mock-camera"
     assert completed.observed_result.duration_ms >= 0
+    assert completed.prepared_artifact is not None
+    assert completed.prepared_artifact.public_url.endswith(f"/{completed.id}-prepared.svg")
+    assert completed.prepared_artifact.mime_type == "image/svg+xml"
     assert completed.stage_states["plot"].status == "completed"
     assert completed.stage_states["capture"].status == "completed"
     assert completed.plotter_run_details["document_id"] == asset.id
     assert completed.plotter_run_details["calibration"]["driver_calibration"]["native_res_factor"] == 1016.0
     assert completed.plotter_run_details["device"]["plotter_bounds_source"] == "config_default"
     assert completed.plotter_run_details["workspace"]["page_size_mm"]["width_mm"] == 210.0
-    prepared_svg_path = Path(completed.plotter_run_details["prepared_svg_path"])
+    prepared_svg_path = Path(completed.prepared_artifact.file_path)
     assert prepared_svg_path.exists()
+    assert completed.plotter_run_details["prepared_svg_path"] == completed.prepared_artifact.file_path
     prepared_svg_text = prepared_svg_path.read_text(encoding="utf-8")
     assert prepared_svg_text != Path(asset.file_path).read_text(encoding="utf-8")
     assert "<g transform=" in prepared_svg_text

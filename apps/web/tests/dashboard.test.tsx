@@ -217,6 +217,11 @@ describe("Hardware dashboard", () => {
           public_url: string;
           mime_type: string;
         };
+        prepared_artifact: {
+          file_path: string;
+          public_url: string;
+          mime_type: string;
+        } | null;
         capture: typeof latestCapture;
         observed_result?: {
           capture: NonNullable<typeof latestCapture>;
@@ -651,12 +656,17 @@ describe("Hardware dashboard", () => {
             status: "pending",
             purpose: "normal",
             capture_mode: "auto",
-            created_at: "2026-03-15T20:04:00Z",
-            updated_at: "2026-03-15T20:04:00Z",
-            asset: patternAsset,
-            capture: null,
-            observed_result: null,
-            error: null,
+          created_at: "2026-03-15T20:04:00Z",
+          updated_at: "2026-03-15T20:04:00Z",
+          asset: patternAsset,
+          prepared_artifact: {
+            file_path: "/tmp/run-001-prepared.svg",
+            public_url: "/plot-run-artifacts/run-001-prepared.svg",
+            mime_type: "image/svg+xml",
+          },
+          capture: null,
+          observed_result: null,
+          error: null,
             stage_states: {
               prepare: {
                 status: "in_progress",
@@ -1464,6 +1474,9 @@ describe("Hardware dashboard", () => {
     await waitFor(
       () => {
         expect(
+          screen.getByRole("img", { name: /prepared output for run run-001/i }),
+        ).toBeInTheDocument();
+        expect(
           screen.getByRole("img", { name: /observed output for run run-001/i }),
         ).toBeInTheDocument();
       },
@@ -1498,6 +1511,7 @@ describe("Hardware dashboard", () => {
         public_url: "/plot-assets/unitless-upload.svg",
         mime_type: "image/svg+xml",
       },
+      prepared_artifact: null,
       capture: null,
       error: null,
       stage_states: {
@@ -2656,6 +2670,11 @@ describe("Hardware dashboard", () => {
           created_at: "2026-03-15T20:10:00Z",
           updated_at: "2026-03-15T20:10:10Z",
           asset: latestAsset,
+          prepared_artifact: {
+            file_path: "/tmp/run-latest-001-prepared.svg",
+            public_url: "/plot-run-artifacts/run-latest-001-prepared.svg",
+            mime_type: "image/svg+xml",
+          },
           capture: {
             id: "capture-latest-001",
             timestamp: "2026-03-15T20:10:10Z",
@@ -2755,6 +2774,11 @@ describe("Hardware dashboard", () => {
           created_at: "2026-03-15T19:50:00Z",
           updated_at: "2026-03-15T19:50:12Z",
           asset: olderAsset,
+          prepared_artifact: {
+            file_path: "/tmp/run-older-001-prepared.svg",
+            public_url: "/plot-run-artifacts/run-older-001-prepared.svg",
+            mime_type: "image/svg+xml",
+          },
           capture: {
             id: "capture-older-001",
             timestamp: "2026-03-15T19:50:12Z",
@@ -2882,7 +2906,7 @@ describe("Hardware dashboard", () => {
 
     expect(await screen.findByText(/planned asset: observed sketch/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/prepared svg reference: \/tmp\/run-older-001-prepared\.svg/i),
+      screen.getByRole("img", { name: /prepared output for run run-older-001/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/observed result: capture-/i),

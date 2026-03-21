@@ -567,7 +567,13 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
     assert completed["capture"]["public_url"].startswith("/captures/")
     assert completed["observed_result"]["capture"]["id"] == completed["capture"]["id"]
     assert completed["observed_result"]["camera_driver"] == "mock-camera"
+    assert completed["prepared_artifact"]["public_url"].startswith("/plot-run-artifacts/")
+    assert completed["prepared_artifact"]["mime_type"] == "image/svg+xml"
     assert completed["plotter_run_details"]["prepared_svg_path"].endswith("-prepared.svg")
+    prepared_artifact_response = client.get(completed["prepared_artifact"]["public_url"])
+    assert prepared_artifact_response.status_code == 200
+    assert prepared_artifact_response.headers["content-type"].startswith("image/svg+xml")
+    assert "<svg" in prepared_artifact_response.text
     assert completed["plotter_run_details"]["preparation"]["source_units"] == "mm"
     assert completed["plotter_run_details"]["calibration"]["driver_calibration"]["native_res_factor"] == 1016.0
     assert completed["plotter_run_details"]["preparation"]["page_width_mm"] == 210.0

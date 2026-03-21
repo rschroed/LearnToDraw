@@ -66,6 +66,12 @@ class ObservedResultRecord(BaseModel):
     duration_ms: int
 
 
+class PreparedArtifactRecord(BaseModel):
+    file_path: str
+    public_url: str
+    mime_type: str = "image/svg+xml"
+
+
 class PlotDocument(BaseModel):
     asset_id: str
     name: str
@@ -201,6 +207,7 @@ class PlotRun(BaseModel):
     created_at: datetime
     updated_at: datetime
     asset: PlotAsset
+    prepared_artifact: Optional[PreparedArtifactRecord] = None
     capture: Optional[CaptureMetadata] = None
     observed_result: Optional[ObservedResultRecord] = None
     error: Optional[str] = None

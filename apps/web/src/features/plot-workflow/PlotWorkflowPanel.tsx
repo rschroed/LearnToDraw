@@ -18,6 +18,20 @@ interface PlotWorkflowPanelProps {
   plotterWorkspace: PlotterWorkspace | null;
 }
 
+function resolvePreparedArtifactUrl(publicUrl: string) {
+  if (/^https?:\/\//.test(publicUrl)) {
+    return publicUrl;
+  }
+  if (typeof window === "undefined") {
+    return publicUrl;
+  }
+  const { protocol, hostname, port } = window.location;
+  if ((hostname === "127.0.0.1" || hostname === "localhost") && port !== "8000") {
+    return `${protocol}//${hostname}:8000${publicUrl}`;
+  }
+  return publicUrl;
+}
+
 export function PlotWorkflowPanel({
   hardwareStatus,
   plotterWorkspace,
@@ -161,6 +175,7 @@ export function PlotWorkflowPanel({
     displayRun && typeof displayRun.plotter_run_details.prepared_svg_path === "string"
       ? displayRun.plotter_run_details.prepared_svg_path
       : null;
+  const preparedArtifact = displayRun?.prepared_artifact ?? null;
   const observedCapture = displayRun?.observed_result?.capture ?? displayRun?.capture ?? null;
   const observedDurationMs = displayRun?.observed_result?.duration_ms ?? null;
   const observedCameraDriver = displayRun?.observed_result?.camera_driver ?? null;
@@ -409,15 +424,14 @@ export function PlotWorkflowPanel({
             <div>
               <h3>Prepared output</h3>
               <div className="preview-frame">
-                {displayRun ? (
-                  <div className="workflow-sizing-summary">
-                    <p className="footer-note">Prepared size: {preparedSize ?? "unknown"}</p>
-                    <p className="footer-note">
-                      Prepared SVG reference: {preparedSvgPath ?? "unavailable"}
-                    </p>
-                    {preparationStrategy ? (
-                      <p className="footer-note">Preparation strategy: {preparationStrategy}</p>
-                    ) : null}
+                {preparedArtifact ? (
+                  <img
+                    src={resolvePreparedArtifactUrl(preparedArtifact.public_url)}
+                    alt={`Prepared output for run ${displayRun?.id}`}
+                  />
+                ) : displayRun ? (
+                  <div className="empty-state">
+                    Prepared output preview is unavailable for this run.
                   </div>
                 ) : (
                   <div className="empty-state">
@@ -425,6 +439,23 @@ export function PlotWorkflowPanel({
                   </div>
                 )}
               </div>
+              {displayRun ? (
+                <div className="workflow-sizing-summary">
+                  <p className="footer-note">Prepared size: {preparedSize ?? "unknown"}</p>
+                  {preparedArtifact ? (
+                    <p className="footer-note">
+                      Prepared artifact: {preparedArtifact.mime_type}
+                    </p>
+                  ) : (
+                    <p className="footer-note">
+                      Prepared SVG reference: {preparedSvgPath ?? "unavailable"}
+                    </p>
+                  )}
+                  {preparationStrategy ? (
+                    <p className="footer-note">Preparation strategy: {preparationStrategy}</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div>

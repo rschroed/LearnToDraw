@@ -3,16 +3,27 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Lock
 from typing import Optional
+from urllib.parse import quote
 
-from learn_to_draw_api.models import AppNotFoundError, PlotRun, PlotRunListResponse, PlotRunSummary
+from learn_to_draw_api.models import (
+    AppNotFoundError,
+    PlotRun,
+    PlotRunListResponse,
+    PlotRunSummary,
+    PreparedArtifactRecord,
+)
 
 
 ACTIVE_RUN_STATUSES = {"pending", "plotting", "capturing"}
 
 
 class PlotRunStore:
-    def __init__(self, runs_dir: Path) -> None:
+    def __init__(self, runs_dir: Path, artifacts_url_prefix: str = "/plot-run-artifacts") -> None:
         self._runs_dir = runs_dir
+        normalized_prefix = artifacts_url_prefix.strip() or "/plot-run-artifacts"
+        if not normalized_prefix.startswith("/"):
+            normalized_prefix = f"/{normalized_prefix}"
+        self._artifacts_url_prefix = normalized_prefix.rstrip("/") or "/plot-run-artifacts"
         self._runs_dir.mkdir(parents=True, exist_ok=True)
         self._cache: dict[str, PlotRun] = {}
         self._lock = Lock()
@@ -24,11 +35,14 @@ class PlotRunStore:
             self._cache[run.id] = run
         return run
 
-    def save_prepared_svg(self, run_id: str, svg_text: str) -> Path:
+    def save_prepared_svg(self, run_id: str, svg_text: str) -> PreparedArtifactRecord:
         with self._lock:
             prepared_path = self._runs_dir / f"{run_id}-prepared.svg"
             prepared_path.write_text(svg_text, encoding="utf-8")
-        return prepared_path
+        return PreparedArtifactRecord(
+            file_path=str(prepared_path),
+            public_url=f"{self._artifacts_url_prefix}/{quote(prepared_path.name)}",
+        )
 
     def get(self, run_id: str) -> PlotRun:
         cached = self._cache.get(run_id)
