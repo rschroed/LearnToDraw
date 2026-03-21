@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
 import {
@@ -1108,10 +1108,19 @@ describe("Hardware dashboard", () => {
   it("updates the drawable area summary while paper setup is being edited", async () => {
     render(<App />);
 
-    fireEvent.change(await screen.findByLabelText(/^width$/i), {
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    const paperCard = screen.getByText(/^paper on plotter$/i).closest(".workspace-card");
+    expect(paperCard).not.toBeNull();
+
+    fireEvent.change(await within(paperCard as HTMLElement).findByLabelText(/^width$/i), {
       target: { value: "200" },
     });
-    fireEvent.change(screen.getByLabelText(/^top$/i), {
+    fireEvent.change(within(paperCard as HTMLElement).getByLabelText(/^top$/i), {
       target: { value: "25" },
     });
 
