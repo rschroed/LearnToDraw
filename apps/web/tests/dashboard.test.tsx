@@ -1999,7 +1999,9 @@ describe("Hardware dashboard", () => {
     fireEvent.change(upInput, { target: { value: "20" } });
     fireEvent.change(downInput, { target: { value: "20" } });
 
-    expect(screen.getAllByText(/pen down must be lower than pen up\./i).length).toBeGreaterThan(0);
+    const penHeightNotice = document.querySelector(".inline-notice-error");
+    expect(penHeightNotice).not.toBeNull();
+    expect(penHeightNotice).toHaveTextContent(/pen down must be lower than pen up\./i);
     expect(applyButton).toBeDisabled();
 
     fireEvent.change(upInput, { target: { value: "101" } });
@@ -2109,11 +2111,15 @@ describe("Hardware dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /save calibration/i }));
 
     await waitFor(() => {
-      expect(screen.getAllByText(/^persisted$/i).length).toBeGreaterThan(0);
+      const calibrationRow = Array.from(document.querySelectorAll("li")).find((item) =>
+        (item.textContent ?? "").includes("Calibration source"),
+      );
+      expect(calibrationRow).not.toBeNull();
+      expect(calibrationRow).toHaveTextContent(/calibration source/i);
+      expect(calibrationRow).toHaveTextContent(/persisted/i);
     });
     expect(screen.getByText(/^Motion scale$/i)).toBeInTheDocument();
     expect(screen.getByText(/^Calibration source$/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/^persisted$/i).length).toBeGreaterThan(0);
   });
 
   it("saves session paper setup from the hardware panel", async () => {
