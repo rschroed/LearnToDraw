@@ -75,4 +75,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Linked repo workflow guidance and the PR template back to the same planning, verification, and risk language
 - Added a project-specific local Codex skill and a narrow PR-readiness automation plan to reduce execution drift before returning to feature work
 
+## Prepared Output Preview Slice
+
+- Added a backend-served prepared-artifact URL for plot runs instead of leaving prepared SVGs as disk-path-only metadata
+- Extended plot-run records so the dashboard can render the prepared SVG as a first-class artifact
+- Replaced the prepared-output path-only panel view with an actual preview in the existing planned/prepared/observed comparison flow
+- Added regression coverage for both the new plot-run artifact URL and the updated dashboard preview behavior
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

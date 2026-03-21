@@ -42,6 +42,7 @@ class AppConfig:
     camera_warmup_ms: int = 150
     camera_discard_frames: int = 2
     plot_assets_url_prefix: str = "/plot-assets"
+    plot_run_artifacts_url_prefix: str = "/plot-run-artifacts"
     cors_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -133,6 +134,10 @@ class AppConfig:
             "LEARN_TO_DRAW_PLOT_ASSETS_URL_PREFIX",
             "/plot-assets",
         )
+        plot_run_artifacts_url_prefix = os.getenv(
+            "LEARN_TO_DRAW_PLOT_RUN_ARTIFACTS_URL_PREFIX",
+            "/plot-run-artifacts",
+        )
         return cls(
             captures_dir=captures_dir,
             plot_assets_dir=plot_assets_dir,
@@ -168,6 +173,7 @@ class AppConfig:
             camera_warmup_ms=camera_warmup_ms,
             camera_discard_frames=camera_discard_frames,
             plot_assets_url_prefix=plot_assets_url_prefix,
+            plot_run_artifacts_url_prefix=plot_run_artifacts_url_prefix,
         )
 
     def ensure_directories(self) -> None:
@@ -187,6 +193,13 @@ class AppConfig:
         return self._normalize_url_prefix(
             self.plot_assets_url_prefix,
             "/plot-assets",
+        )
+
+    @property
+    def normalized_plot_run_artifacts_url_prefix(self) -> str:
+        return self._normalize_url_prefix(
+            self.plot_run_artifacts_url_prefix,
+            "/plot-run-artifacts",
         )
 
     def _normalize_url_prefix(self, prefix: str, fallback: str) -> str:

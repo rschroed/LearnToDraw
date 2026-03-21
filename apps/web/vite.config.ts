@@ -10,6 +10,7 @@ export default defineConfig({
       "/api": "http://127.0.0.1:8000",
       "/captures": "http://127.0.0.1:8000",
       "/plot-assets": "http://127.0.0.1:8000",
+      "/plot-run-artifacts": "http://127.0.0.1:8000",
       "/local-helper": {
         target: "http://127.0.0.1:8001",
         rewrite: (path) => path.replace(/^\/local-helper/, ""),

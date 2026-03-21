@@ -62,7 +62,8 @@ class PlotRunExecutor:
                 workspace=workspace,
                 device_settings=device_settings,
             )
-            prepared_svg_path = self._run_store.save_prepared_svg(run.id, document.svg_text)
+            prepared_artifact = self._run_store.save_prepared_svg(run.id, document.svg_text)
+            run.prepared_artifact = prepared_artifact
             run = self._set_stage_state(
                 run,
                 stage="prepare",
@@ -84,7 +85,7 @@ class PlotRunExecutor:
             run.plotter_run_details = {
                 "driver": self._plotter.driver,
                 "document_id": plot_result.document_id,
-                "prepared_svg_path": str(prepared_svg_path),
+                "prepared_svg_path": prepared_artifact.file_path,
                 "preparation": preparation.model_dump(mode="json"),
                 "calibration": effective_calibration.model_dump(mode="json"),
                 "device": device_settings.model_dump(mode="json"),

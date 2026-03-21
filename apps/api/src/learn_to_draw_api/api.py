@@ -72,7 +72,10 @@ def create_app(
         assets_dir=app_config.plot_assets_dir,
         assets_url_prefix=app_config.normalized_plot_assets_url_prefix,
     )
-    plot_run_store = PlotRunStore(runs_dir=app_config.plot_runs_dir)
+    plot_run_store = PlotRunStore(
+        runs_dir=app_config.plot_runs_dir,
+        artifacts_url_prefix=app_config.normalized_plot_run_artifacts_url_prefix,
+    )
     hardware_service = HardwareService(
         plotter=plotter_adapter,
         camera=camera_adapter,
@@ -122,6 +125,11 @@ def create_app(
         app_config.normalized_plot_assets_url_prefix,
         StaticFiles(directory=app_config.plot_assets_dir),
         name="plot-assets",
+    )
+    app.mount(
+        app_config.normalized_plot_run_artifacts_url_prefix,
+        StaticFiles(directory=app_config.plot_runs_dir),
+        name="plot-run-artifacts",
     )
 
     return app
