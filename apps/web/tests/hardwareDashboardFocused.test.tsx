@@ -158,14 +158,10 @@ describe("Hardware dashboard focused behaviors", () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText(
-          (_, element) =>
-            element?.classList.contains("inline-notice-error") === true &&
-            (element.textContent ?? "").includes(
-              "Paper size exceeds the plotter's safe bounds of 210 x 297 mm.",
-            ),
-        ).length,
-      ).toBeGreaterThan(0);
+        screen.getByText(/paper size exceeds the plotter's safe bounds of 210 x 297 mm\./i, {
+          selector: ".workspace-inline-notice",
+        }),
+      ).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: /save paper setup/i })).toBeDisabled();
     expect(harness.workspaceRequests).toHaveLength(0);
