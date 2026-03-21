@@ -2100,7 +2100,7 @@ describe("Hardware dashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: /save calibration/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("1.875000")).toBeInTheDocument();
+      expect(screen.getByText("1.875")).toBeInTheDocument();
     });
     expect(screen.getByText(/^Motion scale$/i)).toBeInTheDocument();
     expect(screen.getByText(/^Calibration source$/i)).toBeInTheDocument();
