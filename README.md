@@ -117,5 +117,6 @@ npm run build
 ## Further Docs
 
 - [Architecture](docs/architecture.md): current system structure and boundaries
+- [Workflow](docs/workflow.md): branch, PR, and cleanup rules for keeping the repo tidy
 - [Project history](docs/history.md): internal slice-by-slice evolution notes
 - [Manual test assets](docs/manual-test-assets): SVGs used for plot sizing and bounds checks

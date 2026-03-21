@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from learn_to_draw_api.adapters.axidraw_models import resolve_axidraw_model_info
 from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
 from learn_to_draw_api.adapters.camera import CaptureArtifact
@@ -214,11 +215,12 @@ def test_device_settings_service_uses_explicit_axidraw_model_bounds(tmp_path):
     assert settings.plotter_model is not None
     assert settings.plotter_model.code == 1
     assert settings.nominal_plotter_bounds_source == "model_default"
-    assert settings.nominal_plotter_bounds_mm.width_mm == 299.974
-    assert settings.nominal_plotter_bounds_mm.height_mm == 217.932
+    model_info = resolve_axidraw_model_info(1)
+    assert settings.nominal_plotter_bounds_mm.width_mm == model_info.bounds_width_mm
+    assert settings.nominal_plotter_bounds_mm.height_mm == model_info.bounds_height_mm
     assert settings.plotter_bounds_source == "default_clearance"
-    assert settings.plotter_bounds_mm.width_mm == 289.974
-    assert settings.plotter_bounds_mm.height_mm == 207.932
+    assert settings.plotter_bounds_mm.width_mm == round(model_info.bounds_width_mm - 10.0, 3)
+    assert settings.plotter_bounds_mm.height_mm == round(model_info.bounds_height_mm - 10.0, 3)
 
 
 def test_device_settings_service_uses_explicit_axidraw_bounds_override(tmp_path):

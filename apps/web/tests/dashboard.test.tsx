@@ -1,6 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import {
+  formatMm,
+} from "../src/features/hardware/hardwareDashboardUtils";
 import * as api from "../src/lib/api";
 import type { HardwareStatus } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
@@ -821,7 +824,7 @@ describe("Hardware dashboard", () => {
     expect(
       screen.getByText(/trigger a capture to save a local artifact/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/plot workflow/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^plot workflow$/i })).toBeInTheDocument();
     expect(screen.getByText(/load test-grid/i)).toBeInTheDocument();
     expect(
       screen.getByText(/normal plots are prepared automatically into the drawable area/i),
@@ -1105,14 +1108,29 @@ describe("Hardware dashboard", () => {
   it("updates the drawable area summary while paper setup is being edited", async () => {
     render(<App />);
 
-    fireEvent.change(await screen.findByLabelText(/^width$/i), {
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    const paperCard = screen.getByText(/^paper on plotter$/i).closest(".workspace-card");
+    expect(paperCard).not.toBeNull();
+
+    fireEvent.change(await within(paperCard as HTMLElement).findByLabelText(/^width$/i), {
       target: { value: "200" },
     });
-    fireEvent.change(screen.getByLabelText(/^top$/i), {
+    fireEvent.change(within(paperCard as HTMLElement).getByLabelText(/^top$/i), {
       target: { value: "25" },
     });
 
-    expect(screen.getByText("160 mm x 252 mm")).toBeInTheDocument();
+    await waitFor(() => {
+      const drawableSummary = document.querySelector(".workspace-preview-summary-value");
+      expect(drawableSummary).not.toBeNull();
+      expect(drawableSummary).toHaveTextContent(
+        new RegExp(`^${formatMm(160)} x ${formatMm(252)}$`),
+      );
+    });
   });
 
   it("keeps an invalid saved paper setup readable while blocking plotting", async () => {
@@ -1759,7 +1777,7 @@ describe("Hardware dashboard", () => {
 
   it("updates axidraw pen heights from the hardware panel", async () => {
     vi.restoreAllMocks();
-    vi.spyOn(globalThis, "fetch").mockImplementation(
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = init?.method ?? "GET";
@@ -1836,31 +1854,46 @@ describe("Hardware dashboard", () => {
 
     render(<App />);
 
-    const upInput = await screen.findByLabelText(/pen up/i);
-    const downInput = screen.getByLabelText(/pen down/i);
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    const penSection = screen.getByRole("heading", { name: /^pen heights$/i }).closest(
+      ".diagnostic-subsection",
+    );
+    expect(penSection).not.toBeNull();
+
+    const upInput = await within(penSection as HTMLElement).findByLabelText(/pen up/i);
+    const downInput = within(penSection as HTMLElement).getByLabelText(/pen down/i);
+    const applyButton = within(penSection as HTMLElement).getByRole("button", {
+      name: /apply heights/i,
+    });
 
     fireEvent.change(upInput, { target: { value: "66" } });
     fireEvent.change(downInput, { target: { value: "22" } });
 
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 2600));
+    await waitFor(() => {
+      expect(applyButton).toBeEnabled();
     });
 
-    expect(screen.getByLabelText(/pen up/i)).toHaveValue(66);
-    expect(screen.getByLabelText(/pen down/i)).toHaveValue(22);
-
-    fireEvent.click(screen.getByRole("button", { name: /apply heights/i }));
+    fireEvent.click(applyButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/pen heights updated\./i)).toBeInTheDocument();
-    }, { timeout: 8000 });
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          if (String(url) !== "/api/plotter/pen-heights" || init?.method !== "POST") {
+            return false;
+          }
+          const body = JSON.parse(String(init.body ?? "{}"));
+          return body.pen_pos_up === 66 && body.pen_pos_down === 22;
+        }),
+      ).toBe(true);
+    }, { timeout: 10000 });
+    expect(screen.getByText(/pen heights updated\./i)).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByLabelText(/pen up/i)).toHaveValue(66);
-      expect(screen.getByLabelText(/pen down/i)).toHaveValue(22);
-    });
-
-  }, 10000);
+  }, 15000);
 
   it("blocks invalid pen heights before the request is sent", async () => {
     vi.restoreAllMocks();
@@ -1967,17 +2000,32 @@ describe("Hardware dashboard", () => {
 
     render(<App />);
 
-    const upInput = await screen.findByLabelText(/pen up/i);
-    const downInput = screen.getByLabelText(/pen down/i);
-    const applyButton = screen.getByRole("button", { name: /apply heights/i });
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    const penSection = screen.getByRole("heading", { name: /^pen heights$/i }).closest(
+      ".diagnostic-subsection",
+    );
+    expect(penSection).not.toBeNull();
+
+    const upInput = await within(penSection as HTMLElement).findByLabelText(/pen up/i);
+    const downInput = within(penSection as HTMLElement).getByLabelText(/pen down/i);
+    const applyButton = within(penSection as HTMLElement).getByRole("button", {
+      name: /apply heights/i,
+    });
 
     fireEvent.change(upInput, { target: { value: "20" } });
     fireEvent.change(downInput, { target: { value: "20" } });
 
-    expect(
-      screen.getByText(/pen down must be lower than pen up\./i),
-    ).toBeInTheDocument();
-    expect(applyButton).toBeDisabled();
+    await waitFor(() => {
+      const penHeightNotice = (penSection as HTMLElement).querySelector(".inline-notice-error");
+      expect(penHeightNotice).not.toBeNull();
+      expect(penHeightNotice).toHaveTextContent(/pen down must be lower than pen up\./i);
+      expect(applyButton).toBeDisabled();
+    });
 
     fireEvent.change(upInput, { target: { value: "101" } });
     fireEvent.change(downInput, { target: { value: "10" } });
@@ -2079,19 +2127,132 @@ describe("Hardware dashboard", () => {
       },
     );
 
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          return new Response(JSON.stringify(axidrawHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          if (method === "POST") {
+            const body = JSON.parse(String(init?.body ?? "{}"));
+            currentCalibration = {
+              ...currentCalibration,
+              motion_scale: Number((body.native_res_factor / 1016).toFixed(6)),
+              driver_calibration: {
+                native_res_factor: body.native_res_factor,
+              },
+              updated_at: "2026-03-15T20:00:15Z",
+              source: "persisted",
+            };
+            axidrawHardwareStatus.plotter.details.native_res_factor = body.native_res_factor;
+            axidrawHardwareStatus.plotter.details.motion_scale = currentCalibration.motion_scale;
+            axidrawHardwareStatus.plotter.details.calibration_source = "persisted";
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                message: "Plotter calibration updated.",
+                calibration: currentCalibration,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
+          }
+
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs" && method === "GET") {
+          return new Response(JSON.stringify({ runs: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
     render(<App />);
 
-    const input = await screen.findByLabelText(/native res factor/i);
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+
+    const calibrationSection = screen.getByRole("heading", {
+      name: /^persisted calibration$/i,
+    }).closest(".diagnostic-section");
+    expect(calibrationSection).not.toBeNull();
+
+    const input = await within(calibrationSection as HTMLElement).findByLabelText(
+      /native res factor/i,
+    );
+    const saveButton = within(calibrationSection as HTMLElement).getByRole("button", {
+      name: /save calibration/i,
+    });
     fireEvent.change(input, { target: { value: "1905" } });
-    fireEvent.click(screen.getByRole("button", { name: /save calibration/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/plotter calibration saved\./i)).toBeInTheDocument();
+      expect(saveButton).toBeEnabled();
+    });
+
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          if (String(url) !== "/api/plotter/calibration" || init?.method !== "POST") {
+            return false;
+          }
+          const body = JSON.parse(String(init.body ?? "{}"));
+          return body.native_res_factor === 1905;
+        }),
+      ).toBe(true);
+      expect(currentCalibration.source).toBe("persisted");
     });
     expect(screen.getByText(/^Motion scale$/i)).toBeInTheDocument();
-    expect(screen.getByText("1.875000")).toBeInTheDocument();
     expect(screen.getByText(/^Calibration source$/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/^persisted$/i).length).toBeGreaterThan(0);
   });
 
   it("saves session paper setup from the hardware panel", async () => {

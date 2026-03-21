@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import learn_to_draw_api.adapters.axidraw_client as axidraw_client_module
 from learn_to_draw_api.adapters.axidraw_client import PyAxiDrawClient, PyAxiDrawClientError
 from learn_to_draw_api.adapters.axidraw_plotter import AxiDrawPlotter
 from learn_to_draw_api.adapters.factory import build_plotter_adapter
@@ -107,7 +108,24 @@ def module_loader_with(instances: list[object]):
     return loader
 
 
-def test_pyaxidraw_client_uses_documented_plot_context_and_pen_options():
+@pytest.fixture
+def fake_vendor_axidraw_conf(tmp_path, monkeypatch):
+    config_path = tmp_path / "axidraw_conf.py"
+    config_path.write_text("native_res_factor = 1016.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        axidraw_client_module,
+        "_read_vendor_default_native_res_factor",
+        lambda: 1016.0,
+    )
+    monkeypatch.setattr(
+        axidraw_client_module,
+        "_read_vendor_default_config_path",
+        lambda: config_path,
+    )
+    return config_path
+
+
+def test_pyaxidraw_client_uses_documented_plot_context_and_pen_options(fake_vendor_axidraw_conf):
     probe_instance = FakeDocumentedAxiDraw()
     origin_instance = FakeDocumentedAxiDraw()
     action_instance = FakeDocumentedAxiDraw()
@@ -160,7 +178,7 @@ def test_pyaxidraw_client_uses_documented_plot_context_and_pen_options():
     assert execution.api_surface == "documented_pyaxidraw"
 
 
-def test_pyaxidraw_client_uses_generated_native_res_override(tmp_path):
+def test_pyaxidraw_client_uses_generated_native_res_override(fake_vendor_axidraw_conf):
     plot_instance = FakeDocumentedAxiDraw()
     client = PyAxiDrawClient(
         module_loader=module_loader_with([plot_instance]),
