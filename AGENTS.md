@@ -83,6 +83,8 @@ Write a narrow implementation plan before editing when work:
 - changes plot-run or artifact models
 - depends on undocumented or version-sensitive hardware behavior
 
+For Codex-driven work, use `docs/agent-workflow.md` as the execution playbook for the pre-edit plan format, the per-slice delivery loop, and the default verification expectations.
+
 ## Testing Expectations
 Before finishing substantial work:
 - backend: `make api-test`
