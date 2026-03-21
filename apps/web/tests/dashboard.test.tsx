@@ -1115,13 +1115,15 @@ describe("Hardware dashboard", () => {
       target: { value: "25" },
     });
 
-    expect(
-      screen.getAllByText(
-        (_, element) =>
-          element?.tagName === "STRONG" &&
-          (element.textContent ?? "").trim() === `${formatMm(160)} x ${formatMm(252)}`,
-      ).length,
-    ).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(
+          (_, element) =>
+            element?.classList.contains("workspace-preview-summary-value") === true &&
+            (element.textContent ?? "").trim() === `${formatMm(160)} x ${formatMm(252)}`,
+        ).length,
+      ).toBeGreaterThan(0);
+    });
   });
 
   it("keeps an invalid saved paper setup readable while blocking plotting", async () => {
@@ -1855,20 +1857,26 @@ describe("Hardware dashboard", () => {
       await new Promise((resolve) => window.setTimeout(resolve, 2600));
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /apply heights/i }));
+    const applyButton = screen.getByRole("button", { name: /apply heights/i });
 
     await waitFor(() => {
-      expect(screen.getByText(/pen heights updated\./i)).toBeInTheDocument();
+      expect(applyButton).toBeEnabled();
+    });
+
+    fireEvent.click(applyButton);
+
+    await waitFor(() => {
+      expect(
+        fetchSpy.mock.calls.some(([url, init]) => {
+          if (String(url) !== "/api/plotter/pen-heights" || init?.method !== "POST") {
+            return false;
+          }
+          const body = JSON.parse(String(init.body ?? "{}"));
+          return body.pen_pos_up === 66 && body.pen_pos_down === 22;
+        }),
+      ).toBe(true);
     }, { timeout: 8000 });
-    expect(
-      fetchSpy.mock.calls.some(([url, init]) => {
-        if (String(url) !== "/api/plotter/pen-heights" || init?.method !== "POST") {
-          return false;
-        }
-        const body = JSON.parse(String(init.body ?? "{}"));
-        return body.pen_pos_up === 66 && body.pen_pos_down === 22;
-      }),
-    ).toBe(true);
+    expect(screen.getByText(/pen heights updated\./i)).toBeInTheDocument();
 
   }, 10000);
 

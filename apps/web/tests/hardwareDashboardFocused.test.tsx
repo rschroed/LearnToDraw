@@ -156,10 +156,17 @@ describe("Hardware dashboard focused behaviors", () => {
     const pageWidthInput = await screen.findByLabelText(/^width$/i);
     fireEvent.change(pageWidthInput, { target: { value: "400" } });
 
-    expect(
-      screen.getAllByText(/paper size exceeds the plotter's safe bounds of 210 x 297 mm\./i)
-        .length,
-    ).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(
+          (_, element) =>
+            element?.classList.contains("inline-notice-error") === true &&
+            (element.textContent ?? "").includes(
+              "Paper size exceeds the plotter's safe bounds of 210 x 297 mm.",
+            ),
+        ).length,
+      ).toBeGreaterThan(0);
+    });
     expect(screen.getByRole("button", { name: /save paper setup/i })).toBeDisabled();
     expect(harness.workspaceRequests).toHaveLength(0);
   });
