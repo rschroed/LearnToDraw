@@ -68,4 +68,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Kept helper startup focused on OpenCV camera ownership while leaving plotter mode to the backend's normal environment and configuration
 - Added helper regression coverage to prevent future silent plotter overrides from creeping back into the helper layer
 
+## Bounded Agent Workflow Slice
+
+- Added an internal `docs/agent-workflow.md` playbook for Codex-driven feature delivery
+- Standardized a short pre-edit plan for every implementation slice, with expanded plans for riskier work
+- Linked repo workflow guidance and the PR template back to the same planning, verification, and risk language
+- Added a project-specific local Codex skill and a narrow PR-readiness automation plan to reduce execution drift before returning to feature work
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

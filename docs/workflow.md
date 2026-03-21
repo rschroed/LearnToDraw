@@ -2,6 +2,8 @@
 
 This repo should optimize for a stable `main`, short-lived branches, and small reviewable slices.
 
+For Codex-driven planning and execution details, use [agent-workflow.md](agent-workflow.md). This document stays focused on branch, PR, and cleanup hygiene.
+
 ## Core Rules
 
 - `main` stays releasable and should only move through reviewed pull requests.
@@ -39,6 +41,7 @@ git checkout -b codex/<short-topic>
 ## Pull Request Expectations
 
 - Explain the user-facing or architectural impact briefly.
+- Reflect the slice plan briefly in the PR summary when relevant.
 - Call out hardware-related assumptions or version-sensitive behavior explicitly.
 - State which checks were run and which were not.
 - Keep the PR narrow enough that it can be reviewed in one pass.
