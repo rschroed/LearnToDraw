@@ -129,20 +129,41 @@ def test_capture_and_latest_capture_endpoints(tmp_path):
 
 
 class StubRealCamera:
-    driver = "opencv-camera"
+    driver = "camerabridge"
 
     def __init__(self) -> None:
         self._connected = False
+        self._selected_device_id = "camera-1"
         self._status = DeviceStatus(
-            available=False,
+            available=True,
             connected=False,
             busy=False,
             error=None,
             driver=self.driver,
             last_updated=datetime.now(timezone.utc),
             details={
-                "camera_index": 0,
-                "initialization_state": "uninitialized",
+                "base_url": "http://127.0.0.1:8731",
+                "token_path": "/tmp/auth-token",
+                "token_readable": True,
+                "service_available": True,
+                "permission_status": "authorized",
+                "permission_message": None,
+                "permission_next_step_kind": None,
+                "session_state": "stopped",
+                "session_owner_id": None,
+                "active_device_id": None,
+                "devices": [
+                    {
+                        "id": "camera-1",
+                        "name": "Built-in Camera",
+                        "position": "front",
+                    }
+                ],
+                "device_count": 1,
+                "persisted_selected_device_id": "camera-1",
+                "effective_selected_device_id": "camera-1",
+                "selection_required": False,
+                "readiness_state": "ready",
                 "last_capture_id": None,
                 "resolution": None,
             },
@@ -157,14 +178,28 @@ class StubRealCamera:
     def get_status(self) -> DeviceStatus:
         return self._status.model_copy(update={"connected": self._connected})
 
+    def set_selected_device(self, device_id: str | None) -> DeviceStatus:
+        self._selected_device_id = device_id
+        self._status = self._status.model_copy(
+            update={
+                "details": {
+                    **self._status.details,
+                    "persisted_selected_device_id": device_id,
+                    "effective_selected_device_id": device_id,
+                    "selection_required": device_id is None,
+                    "readiness_state": "ready" if device_id is not None else "needs_device_selection",
+                }
+            }
+        )
+        return self.get_status()
+
     def capture(self) -> CaptureArtifact:
         self._status = self._status.model_copy(
             update={
                 "available": True,
                 "connected": True,
                 "details": {
-                    "camera_index": 0,
-                    "initialization_state": "ready",
+                    **self._status.details,
                     "last_capture_id": "capture-real-001",
                     "resolution": "640x480",
                 },
@@ -188,15 +223,27 @@ def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
         latest_response = client.get("/api/captures/latest")
 
     assert status_before.status_code == 200
-    assert status_before.json()["camera"]["details"]["initialization_state"] == "uninitialized"
+    assert status_before.json()["camera"]["details"]["readiness_state"] == "ready"
     assert capture_response.status_code == 200
     payload = capture_response.json()
-    assert payload["status"]["driver"] == "opencv-camera"
+    assert payload["status"]["driver"] == "camerabridge"
     assert payload["capture"]["mime_type"] == "image/jpeg"
     assert payload["capture"]["public_url"].endswith(".jpg")
     assert payload["capture"]["width"] == 640
     assert payload["capture"]["height"] == 480
     assert latest_response.json()["capture"]["id"] == payload["capture"]["id"]
+
+
+def test_camera_device_endpoint_updates_selected_device(tmp_path):
+    with create_test_client(tmp_path, camera=StubRealCamera()) as client:
+        response = client.post("/api/camera/device", json={"device_id": "camera-1"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["message"] == "Camera device preference updated."
+    assert payload["status"]["driver"] == "camerabridge"
+    assert payload["status"]["details"]["persisted_selected_device_id"] == "camera-1"
+    assert payload["status"]["details"]["effective_selected_device_id"] == "camera-1"
 
 
 def test_plotter_walk_home_endpoint(tmp_path):

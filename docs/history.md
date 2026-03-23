@@ -82,4 +82,13 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Replaced the prepared-output path-only panel view with an actual preview in the existing planned/prepared/observed comparison flow
 - Added regression coverage for both the new plot-run artifact URL and the updated dashboard preview behavior
 
+## CameraBridge Integration Slice
+
+- Replaced the supported real-camera path with a backend-owned CameraBridge adapter pinned to the published `v0.1.x` localhost API surface
+- Kept capture persistence backend-owned by importing CameraBridge JPEG captures into LearnToDraw's normal `artifacts/captures` store
+- Added explicit CameraBridge readiness modeling for service availability, permission guidance, device selection, and external-session conflicts
+- Persisted the selected CameraBridge device under `artifacts/device_settings` and added a narrow backend endpoint for updating that preference
+- Removed helper-driven startup and OpenCV-specific real-camera UX from the active dashboard path in favor of manual CameraBridge guidance
+- Left `apps/macos-helper` in the repo as legacy/non-active code for now instead of treating it as a current architecture dependency
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

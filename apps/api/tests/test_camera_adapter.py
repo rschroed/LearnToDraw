@@ -1,51 +1,29 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import json
 
+import cv2
+import numpy as np
 import pytest
 
+from learn_to_draw_api.adapters.camerabridge_camera import CameraBridgeCamera
+from learn_to_draw_api.adapters.camerabridge_client import (
+    CameraBridgeCapturedPhoto,
+    CameraBridgeClientError,
+    CameraBridgeConnectionError,
+    CameraBridgeDevice,
+    CameraBridgePermissionResult,
+    CameraBridgeSessionSnapshot,
+)
 from learn_to_draw_api.adapters.factory import build_camera_adapter
 from learn_to_draw_api.adapters.mock_camera import MockCamera
-from learn_to_draw_api.adapters.opencv_camera import OpenCVCamera
-import learn_to_draw_api.adapters.opencv_camera as opencv_camera_module
+import learn_to_draw_api.adapters.camerabridge_camera as camerabridge_camera_module
 from learn_to_draw_api.config import AppConfig
-from learn_to_draw_api.models import HardwareOperationError, HardwareUnavailableError
-
-
-class FakeFrame:
-    shape = (480, 640, 3)
-
-
-class FakeBuffer:
-    def __init__(self, value: bytes) -> None:
-        self._value = value
-
-    def tobytes(self) -> bytes:
-        return self._value
-
-
-class FakeVideoCapture:
-    def __init__(self, *, opened: bool = True, frames=None, backend_name: str = "AVFOUNDATION") -> None:
-        self._opened = opened
-        self._frames = list(frames or [(True, FakeFrame())])
-        self._backend_name = backend_name
-        self.release_called = False
-        self.read_calls = 0
-
-    def isOpened(self) -> bool:
-        return self._opened
-
-    def read(self):
-        self.read_calls += 1
-        if self._frames:
-            return self._frames.pop(0)
-        return True, FakeFrame()
-
-    def release(self) -> None:
-        self.release_called = True
-
-    def getBackendName(self) -> str:
-        return self._backend_name
+from learn_to_draw_api.models import HardwareBusyError, HardwareUnavailableError
+from learn_to_draw_api.services.camera_device_settings import (
+    CameraDeviceSettingsService,
+    CameraDeviceSettingsStore,
+)
 
 
 def _config(tmp_path, **overrides):
@@ -60,168 +38,532 @@ def _config(tmp_path, **overrides):
     )
 
 
+def _camera_settings_service(tmp_path):
+    return CameraDeviceSettingsService(
+        store=CameraDeviceSettingsStore(tmp_path / "device-settings")
+    )
+
+
+def _write_token(tmp_path, token: str = "test-token"):
+    token_path = tmp_path / "auth-token"
+    token_path.write_text(token, encoding="utf-8")
+    return token_path
+
+
+def _write_runtime_configuration(tmp_path, *, host: str = "127.0.0.1", port: int = 8731):
+    runtime_configuration_path = tmp_path / "runtime-configuration.json"
+    runtime_configuration_path.write_text(
+        json.dumps({"host": host, "port": port}),
+        encoding="utf-8",
+    )
+    return runtime_configuration_path
+
+
+def _fake_client_factory(state):
+    class FakeCameraBridgeClient:
+        def __init__(self, *, base_url: str, token: str | None = None, timeout_s: float = 2.0):
+            state["constructed"] = {
+                "base_url": base_url,
+                "token": token,
+                "timeout_s": timeout_s,
+            }
+
+        def health(self):
+            value = state.get("health", "ok")
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def permission_status(self):
+            value = state.get("permission_status", "authorized")
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def request_permission(self):
+            value = state.get(
+                "permission_result",
+                CameraBridgePermissionResult(
+                    status="authorized",
+                    prompted=False,
+                    message=None,
+                    next_step_kind=None,
+                ),
+            )
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def devices(self):
+            value = state.get("devices", [])
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def session(self):
+            value = state.get(
+                "session",
+                CameraBridgeSessionSnapshot(
+                    state="stopped",
+                    active_device_id=None,
+                    owner_id=None,
+                    last_error=None,
+                ),
+            )
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def select_device(self, *, device_id: str, owner_id: str | None):
+            state.setdefault("calls", []).append(("select_device", device_id, owner_id))
+            value = state.get(
+                "select_device_result",
+                CameraBridgeSessionSnapshot(
+                    state="stopped",
+                    active_device_id=device_id,
+                    owner_id=owner_id,
+                    last_error=None,
+                ),
+            )
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def start_session(self, *, owner_id: str):
+            state.setdefault("calls", []).append(("start_session", owner_id))
+            value = state.get(
+                "start_session_result",
+                CameraBridgeSessionSnapshot(
+                    state="running",
+                    active_device_id="camera-1",
+                    owner_id=owner_id,
+                    last_error=None,
+                ),
+            )
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def stop_session(self, *, owner_id: str):
+            state.setdefault("calls", []).append(("stop_session", owner_id))
+            value = state.get(
+                "stop_session_result",
+                CameraBridgeSessionSnapshot(
+                    state="stopped",
+                    active_device_id="camera-1",
+                    owner_id=None,
+                    last_error=None,
+                ),
+            )
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def capture_photo(self, *, owner_id: str):
+            state.setdefault("calls", []).append(("capture_photo", owner_id))
+            value = state["capture_photo_result"]
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+    return FakeCameraBridgeClient
+
+
+def _jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
+    image = np.full((height, width, 3), 245, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    return encoded.tobytes()
+
+
 def test_build_camera_adapter_defaults_to_mock(tmp_path):
-    adapter = build_camera_adapter(_config(tmp_path))
+    adapter = build_camera_adapter(
+        _config(tmp_path),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
 
     assert isinstance(adapter, MockCamera)
 
 
-def test_build_camera_adapter_supports_opencv(tmp_path):
+def test_build_camera_adapter_supports_camerabridge(tmp_path):
     adapter = build_camera_adapter(
         _config(
             tmp_path,
-            camera_driver="opencv",
-            opencv_camera_index=3,
-            camera_warmup_ms=25,
-            camera_discard_frames=1,
-        )
+            camera_driver="camerabridge",
+            camerabridge_base_url="http://127.0.0.1:8731",
+            camerabridge_token_path=_write_token(tmp_path),
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
     )
 
-    assert isinstance(adapter, OpenCVCamera)
-    assert adapter.get_status().details["camera_index"] == 3
+    assert isinstance(adapter, CameraBridgeCamera)
 
 
 def test_build_camera_adapter_rejects_unknown_driver(tmp_path):
     with pytest.raises(ValueError, match="Unsupported camera driver"):
-        build_camera_adapter(_config(tmp_path, camera_driver="unknown"))
+        build_camera_adapter(
+            _config(tmp_path, camera_driver="opencv"),
+            camera_settings_service=_camera_settings_service(tmp_path),
+        )
 
 
-def test_opencv_camera_reports_uninitialized_status():
-    camera = OpenCVCamera()
-
-    status = camera.get_status()
-
-    assert status.available is False
-    assert status.connected is False
-    assert status.error is None
-    assert status.details["initialization_state"] == "uninitialized"
-    assert status.details["resolution"] is None
-    assert status.details["last_open_result"] == "not_attempted"
-    assert status.details["last_read_result"] == "not_attempted"
-    assert status.details["last_backend_name"] is None
-
-
-def test_opencv_camera_capture_is_lazy_and_records_actual_frame_dimensions(monkeypatch):
-    fake_capture = FakeVideoCapture(frames=[(True, FakeFrame()), (True, FakeFrame()), (True, FakeFrame())])
-    fake_cv2 = SimpleNamespace(
-        VideoCapture=lambda index: fake_capture,
-        imencode=lambda ext, frame: (True, FakeBuffer(b"jpeg-bytes")),
+def test_camerabridge_status_uses_env_base_url_before_runtime_configuration(
+    tmp_path,
+    monkeypatch,
+):
+    token_path = _write_token(tmp_path)
+    runtime_configuration_path = _write_runtime_configuration(
+        tmp_path,
+        host="127.0.0.1",
+        port=9000,
     )
-    monkeypatch.setattr(opencv_camera_module, "cv2", fake_cv2)
-    camera = OpenCVCamera(camera_index=2, warmup_ms=0, discard_frames=2)
-
-    artifact = camera.capture()
-    status = camera.get_status()
-
-    assert artifact.filename.endswith(".jpg")
-    assert artifact.media_type == "image/jpeg"
-    assert artifact.content == b"jpeg-bytes"
-    assert artifact.width == 640
-    assert artifact.height == 480
-    assert fake_capture.read_calls == 3
-    assert status.available is True
-    assert status.connected is True
-    assert status.details["initialization_state"] == "ready"
-    assert status.details["camera_index"] == 2
-    assert status.details["resolution"] == "640x480"
-    assert status.details["last_capture_id"] == artifact.capture_id
-    assert status.details["last_open_result"] == "opened"
-    assert status.details["last_read_result"] == "succeeded"
-    assert status.details["last_backend_name"] == "AVFOUNDATION"
-
-
-def test_opencv_camera_connect_keeps_lazy_uninitialized_state(monkeypatch):
-    fake_capture = FakeVideoCapture()
-    fake_cv2 = SimpleNamespace(
-        VideoCapture=lambda index: fake_capture,
-        imencode=lambda ext, frame: (True, FakeBuffer(b"jpeg-bytes")),
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CAMERABRIDGE_RUNTIME_CONFIGURATION_PATH",
+        runtime_configuration_path,
     )
-    monkeypatch.setattr(opencv_camera_module, "cv2", fake_cv2)
-    camera = OpenCVCamera(warmup_ms=0, discard_frames=0)
-
+    state = {
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front")
+        ]
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_base_url="http://127.0.0.1:8731",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
     camera.connect()
 
     status = camera.get_status()
-    assert status.available is False
-    assert status.connected is False
-    assert status.details["initialization_state"] == "uninitialized"
-    assert fake_capture.read_calls == 0
 
-
-def test_opencv_camera_reports_unavailable_when_open_fails_on_capture(monkeypatch):
-    fake_capture = FakeVideoCapture(opened=False)
-    fake_cv2 = SimpleNamespace(
-        VideoCapture=lambda index: fake_capture,
-        imencode=lambda ext, frame: (True, FakeBuffer(b"jpeg-bytes")),
-    )
-    monkeypatch.setattr(opencv_camera_module, "cv2", fake_cv2)
-    camera = OpenCVCamera(warmup_ms=0, discard_frames=0)
-
-    with pytest.raises(HardwareUnavailableError, match="permission was denied"):
-        camera.capture()
-
-    status = camera.get_status()
-    assert status.available is False
-    assert status.connected is False
-    assert status.details["initialization_state"] == "unavailable"
-    assert status.details["last_open_result"] == "failed"
-    assert status.details["last_backend_name"] is None
-    assert "VideoCapture(0) did not open" in status.details["last_open_message"]
-    assert "permission was denied" in status.error
-
-
-def test_opencv_camera_raises_when_frame_read_fails(monkeypatch):
-    fake_capture = FakeVideoCapture(frames=[(False, None)])
-    fake_cv2 = SimpleNamespace(
-        VideoCapture=lambda index: fake_capture,
-        imencode=lambda ext, frame: (True, FakeBuffer(b"jpeg-bytes")),
-    )
-    monkeypatch.setattr(opencv_camera_module, "cv2", fake_cv2)
-    camera = OpenCVCamera(warmup_ms=0, discard_frames=0)
-
-    with pytest.raises(HardwareOperationError, match="failed to read a frame"):
-        camera.capture()
-
-    status = camera.get_status()
-    assert status.details["last_open_result"] == "opened"
-    assert status.details["last_read_result"] == "failed"
-
-
-def test_opencv_camera_raises_when_jpeg_encode_fails(monkeypatch):
-    fake_capture = FakeVideoCapture()
-    fake_cv2 = SimpleNamespace(
-        VideoCapture=lambda index: fake_capture,
-        imencode=lambda ext, frame: (False, None),
-    )
-    monkeypatch.setattr(opencv_camera_module, "cv2", fake_cv2)
-    camera = OpenCVCamera(warmup_ms=0, discard_frames=0)
-
-    with pytest.raises(HardwareOperationError, match="failed to encode a JPEG"):
-        camera.capture()
-
-
-def test_opencv_camera_disconnect_releases_device(monkeypatch):
-    fake_capture = FakeVideoCapture()
-    fake_cv2 = SimpleNamespace(
-        VideoCapture=lambda index: fake_capture,
-        imencode=lambda ext, frame: (True, FakeBuffer(b"jpeg-bytes")),
-    )
-    monkeypatch.setattr(opencv_camera_module, "cv2", fake_cv2)
-    camera = OpenCVCamera(warmup_ms=0, discard_frames=0)
-    camera.capture()
-
-    camera.disconnect()
-
-    assert fake_capture.release_called is True
-    status = camera.get_status()
     assert status.available is True
-    assert status.connected is False
-    assert status.details["initialization_state"] == "ready"
+    assert state["constructed"]["base_url"] == "http://127.0.0.1:8731"
 
 
-def test_opencv_camera_requires_opencv_installation(monkeypatch):
-    monkeypatch.setattr(opencv_camera_module, "cv2", None)
-    camera = OpenCVCamera()
+def test_camerabridge_status_surfaces_invalid_runtime_configuration(
+    tmp_path,
+    monkeypatch,
+):
+    token_path = _write_token(tmp_path)
+    runtime_configuration_path = tmp_path / "runtime-configuration.json"
+    runtime_configuration_path.write_text("{invalid", encoding="utf-8")
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CAMERABRIDGE_RUNTIME_CONFIGURATION_PATH",
+        runtime_configuration_path,
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
 
-    with pytest.raises(HardwareUnavailableError, match="OpenCV support is not installed"):
-        camera.connect()
+    status = camera.get_status()
+
+    assert status.available is False
+    assert status.error is not None
+    assert "runtime configuration is invalid" in status.error
+
+
+def test_camerabridge_status_reports_needs_device_selection_for_multiple_devices(
+    tmp_path,
+    monkeypatch,
+):
+    token_path = _write_token(tmp_path)
+    state = {
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front"),
+            CameraBridgeDevice(id="camera-2", name="Desk Camera", position="external"),
+        ]
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    status = camera.get_status()
+
+    assert status.available is False
+    assert status.error is None
+    assert status.details["readiness_state"] == "needs_device_selection"
+    assert status.details["selection_required"] is True
+    assert status.details["effective_selected_device_id"] is None
+
+
+def test_camerabridge_status_uses_persisted_device_selection(tmp_path, monkeypatch):
+    token_path = _write_token(tmp_path)
+    settings_service = _camera_settings_service(tmp_path)
+    settings_service.save_selected_device("camera-2")
+    state = {
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front"),
+            CameraBridgeDevice(id="camera-2", name="Desk Camera", position="external"),
+        ]
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=settings_service,
+    )
+    camera.connect()
+
+    status = camera.get_status()
+
+    assert status.available is True
+    assert status.details["effective_selected_device_id"] == "camera-2"
+    assert status.details["selection_required"] is False
+
+
+def test_camerabridge_status_surfaces_missing_token(tmp_path, monkeypatch):
+    state = {
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front")
+        ]
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CAMERABRIDGE_DEFAULT_TOKEN_PATH",
+        tmp_path / "missing-auth-token",
+    )
+    camera = CameraBridgeCamera(
+        config=_config(tmp_path, camera_driver="camerabridge"),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    status = camera.get_status()
+
+    assert status.available is False
+    assert status.error is not None
+    assert "auth token is missing" in status.error
+    assert status.details["token_readable"] is False
+
+
+def test_camerabridge_status_maps_permission_guidance_without_error(
+    tmp_path,
+    monkeypatch,
+):
+    token_path = _write_token(tmp_path)
+    state = {
+        "permission_status": "not_determined",
+        "permission_result": CameraBridgePermissionResult(
+            status="not_determined",
+            prompted=False,
+            message="Open CameraBridgeApp to request camera access.",
+            next_step_kind="open_camera_bridge_app",
+        ),
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front")
+        ],
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    status = camera.get_status()
+
+    assert status.available is False
+    assert status.error is None
+    assert status.details["readiness_state"] == "needs_permission"
+    assert status.details["permission_message"] == "Open CameraBridgeApp to request camera access."
+    assert status.details["permission_next_step_kind"] == "open_camera_bridge_app"
+
+
+def test_camerabridge_capture_restarts_same_owner_session_and_imports_capture(
+    tmp_path,
+    monkeypatch,
+):
+    token_path = _write_token(tmp_path)
+    capture_path = tmp_path / "capture-real-001.jpg"
+    capture_path.write_bytes(_jpeg_bytes())
+    state = {
+        "session": CameraBridgeSessionSnapshot(
+            state="running",
+            active_device_id="camera-1",
+            owner_id="learntodraw-api",
+            last_error=None,
+        ),
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front")
+        ],
+        "capture_photo_result": CameraBridgeCapturedPhoto(
+            local_path=str(capture_path),
+            captured_at="2026-03-22T20:15:00Z",
+            device_id="camera-1",
+        ),
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    artifact = camera.capture()
+
+    assert artifact.filename == "capture-real-001.jpg"
+    assert artifact.media_type == "image/jpeg"
+    assert artifact.width == 640
+    assert artifact.height == 480
+    assert state["calls"] == [
+        ("stop_session", "learntodraw-api"),
+        ("select_device", "camera-1", "learntodraw-api"),
+        ("start_session", "learntodraw-api"),
+        ("capture_photo", "learntodraw-api"),
+        ("stop_session", "learntodraw-api"),
+    ]
+
+
+def test_camerabridge_capture_rejects_external_owner_session(tmp_path, monkeypatch):
+    token_path = _write_token(tmp_path)
+    state = {
+        "session": CameraBridgeSessionSnapshot(
+            state="running",
+            active_device_id="camera-1",
+            owner_id="other-client",
+            last_error=None,
+        ),
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front")
+        ],
+        "capture_photo_result": CameraBridgeCapturedPhoto(
+            local_path="/tmp/unused.jpg",
+            captured_at="2026-03-22T20:15:00Z",
+            device_id="camera-1",
+        ),
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    with pytest.raises(HardwareBusyError, match="another local client owns"):
+        camera.capture()
+
+
+def test_camerabridge_capture_maps_invalid_state_to_unavailable(tmp_path, monkeypatch):
+    token_path = _write_token(tmp_path)
+    state = {
+        "devices": [
+            CameraBridgeDevice(id="camera-1", name="Built-in Camera", position="front")
+        ],
+        "capture_photo_result": CameraBridgeCapturedPhoto(
+            local_path="/tmp/unused.jpg",
+            captured_at="2026-03-22T20:15:00Z",
+            device_id="camera-1",
+        ),
+        "start_session_result": CameraBridgeClientError(
+            status_code=409,
+            code="invalid_state",
+            message="Camera permission is denied",
+        ),
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    with pytest.raises(HardwareUnavailableError, match="Camera permission is denied"):
+        camera.capture()
+
+
+def test_camerabridge_capture_maps_connection_failure_to_unavailable(
+    tmp_path,
+    monkeypatch,
+):
+    token_path = _write_token(tmp_path)
+    state = {
+        "health": CameraBridgeConnectionError("unreachable"),
+    }
+    monkeypatch.setattr(
+        camerabridge_camera_module,
+        "CameraBridgeClient",
+        _fake_client_factory(state),
+    )
+    camera = CameraBridgeCamera(
+        config=_config(
+            tmp_path,
+            camera_driver="camerabridge",
+            camerabridge_token_path=token_path,
+        ),
+        camera_settings_service=_camera_settings_service(tmp_path),
+    )
+    camera.connect()
+
+    with pytest.raises(HardwareUnavailableError, match="CameraBridge is unavailable"):
+        camera.capture()

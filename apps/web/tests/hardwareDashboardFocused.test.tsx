@@ -4,10 +4,11 @@ import { App } from "../src/app/App";
 import {
   createHardwareDashboardHarness,
   defaultAxiDrawHardwareStatus,
+  defaultCameraBridgeDetails,
+  defaultCameraBridgeHardwareStatus,
   defaultDevice,
   defaultWorkspace,
   installHardwareDashboardFetchMock,
-  makeHelperStatus,
 } from "./hardwareDashboardTestUtils";
 
 describe("Hardware dashboard focused behaviors", () => {
@@ -15,14 +16,9 @@ describe("Hardware dashboard focused behaviors", () => {
     vi.restoreAllMocks();
   });
 
-  it("auto-starts the backend through the helper on first load", async () => {
+  it("shows a backend-unavailable state when the api is unreachable on first load", async () => {
     const harness = createHardwareDashboardHarness({
       backendReachable: false,
-      helperReachable: true,
-      helperStatus: makeHelperStatus({
-        state: "stopped",
-        backend_health: "unreachable",
-      }),
     });
     installHardwareDashboardFetchMock(harness);
 
@@ -30,68 +26,34 @@ describe("Hardware dashboard focused behaviors", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: /starting local camera backend/i,
-      }),
-    ).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("heading", {
-          name: /learntodraw local control panel/i,
-        }),
-      ).toBeInTheDocument();
-    }, { timeout: 10000 });
-
-    expect(harness.helperStartCount).toBe(1);
-  }, 12000);
-
-  it("shows a helper-missing startup state when the helper is unavailable", async () => {
-    const harness = createHardwareDashboardHarness({
-      backendReachable: false,
-      helperReachable: false,
-    });
-    installHardwareDashboardFetchMock(harness);
-
-    render(<App />);
-
-    expect(
-      await screen.findByRole("heading", {
-        name: /local helper not running/i,
+        name: /local backend unavailable/i,
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/open the learntodraw helper to bring localhost control online/i),
+      screen.getByText(/start the learntodraw api locally and retry/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open helper/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("keeps capture enabled and shows actionable diagnostics after an opencv failure", async () => {
+  it("shows CameraBridge service guidance and disables capture while the service is offline", async () => {
     const harness = createHardwareDashboardHarness({
       currentHardwareStatus: {
         ...structuredClone(defaultAxiDrawHardwareStatus),
         camera: {
+          ...structuredClone(defaultCameraBridgeHardwareStatus.camera),
           available: false,
           connected: false,
-          busy: false,
-          error: "OpenCV camera index 2 is unavailable or permission was denied.",
-          driver: "opencv-camera",
-          last_updated: "2026-03-15T20:00:00Z",
           details: {
-            camera_index: 2,
-            initialization_state: "unavailable",
-            last_capture_id: null,
-            resolution: null,
-            last_action: "idle",
-            last_open_result: "failed",
-            last_open_message:
-              "VideoCapture(2) did not open. macOS camera access may still be denied, the selected index may be wrong, or the device may be busy.",
-            last_read_result: "not_attempted",
-            last_backend_name: null,
+            ...structuredClone(defaultCameraBridgeDetails),
+            service_available: false,
+            readiness_state: "needs_service",
+            effective_selected_device_id: null,
+            active_device_id: null,
+            devices: [],
+            device_count: 0,
           },
         },
       },
-      cameraCaptureError: "OpenCV camera index 2 is unavailable or permission was denied.",
     });
     installHardwareDashboardFetchMock(harness);
 
@@ -99,38 +61,100 @@ describe("Hardware dashboard focused behaviors", () => {
 
     expect(
       await screen.findByRole("button", { name: /capture image/i }),
-    ).toBeEnabled();
+    ).toBeDisabled();
     expect(
-      screen.getByText(/opencv could not open the selected camera\. camera index 2\./i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/check macos camera permission.*learn_to_draw_opencv_camera_index/i),
+      screen.getByText(/start camerabridge service/i),
     ).toBeInTheDocument();
   });
 
-  it("refreshes the latest capture preview after a successful real camera capture", async () => {
+  it("shows guided CameraBridge permission messaging when permission is undecided", async () => {
     const harness = createHardwareDashboardHarness({
       currentHardwareStatus: {
         ...structuredClone(defaultAxiDrawHardwareStatus),
         camera: {
+          ...structuredClone(defaultCameraBridgeHardwareStatus.camera),
           available: false,
-          connected: false,
-          busy: false,
-          error: null,
-          driver: "opencv-camera",
-          last_updated: "2026-03-15T20:00:00Z",
           details: {
-            camera_index: 0,
-            initialization_state: "uninitialized",
-            last_capture_id: null,
-            resolution: null,
-            last_action: "idle",
-            last_open_result: "not_attempted",
-            last_open_message: null,
-            last_read_result: "not_attempted",
-            last_backend_name: null,
+            ...structuredClone(defaultCameraBridgeDetails),
+            permission_status: "not_determined",
+            permission_message: "Open CameraBridgeApp to request camera access.",
+            permission_next_step_kind: "open_camera_bridge_app",
+            readiness_state: "needs_permission",
           },
         },
+      },
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    expect(
+      await screen.findAllByText(/open camerabridgeapp to request camera access/i),
+    ).toHaveLength(2);
+    expect(
+      screen.getByRole("button", { name: /capture image/i }),
+    ).toBeDisabled();
+  });
+
+  it("persists CameraBridge device selection through the backend and enables capture", async () => {
+    const harness = createHardwareDashboardHarness({
+      currentHardwareStatus: {
+        ...structuredClone(defaultAxiDrawHardwareStatus),
+        camera: {
+          ...structuredClone(defaultCameraBridgeHardwareStatus.camera),
+          available: false,
+          details: {
+            ...structuredClone(defaultCameraBridgeDetails),
+            devices: [
+              {
+                id: "camera-1",
+                name: "Built-in Camera",
+                position: "front",
+              },
+              {
+                id: "camera-2",
+                name: "Desk Camera",
+                position: "external",
+              },
+            ],
+            device_count: 2,
+            active_device_id: null,
+            effective_selected_device_id: null,
+            persisted_selected_device_id: null,
+            selection_required: true,
+            readiness_state: "needs_device_selection",
+          },
+        },
+      },
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    const select = await screen.findByLabelText(/choose a device/i);
+    const captureButton = screen.getByRole("button", { name: /capture image/i });
+    expect(captureButton).toBeDisabled();
+
+    fireEvent.change(select, { target: { value: "camera-2" } });
+    await waitFor(() => {
+      expect(select).toHaveValue("camera-2");
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save camera/i }));
+
+    expect(await screen.findByText(/camera selection saved\./i)).toBeInTheDocument();
+    expect(harness.cameraDeviceRequests).toEqual(["camera-2"]);
+
+    await waitFor(() => {
+      expect(captureButton).toBeEnabled();
+    });
+    expect(screen.getByText(/selected device: desk camera\./i)).toBeInTheDocument();
+  });
+
+  it("refreshes the latest capture preview after a successful CameraBridge capture", async () => {
+    const harness = createHardwareDashboardHarness({
+      currentHardwareStatus: {
+        ...structuredClone(defaultAxiDrawHardwareStatus),
+        camera: structuredClone(defaultCameraBridgeHardwareStatus.camera),
       },
     });
     installHardwareDashboardFetchMock(harness);

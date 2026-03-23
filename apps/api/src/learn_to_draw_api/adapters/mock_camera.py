@@ -11,6 +11,7 @@ from learn_to_draw_api.models import (
     HardwareBusyError,
     HardwareOperationError,
     HardwareUnavailableError,
+    InvalidArtifactError,
 )
 
 
@@ -64,6 +65,11 @@ class MockCamera:
                 "last_capture_id": self._last_capture_id,
                 "last_action": "idle" if not self._busy else "capturing",
             },
+        )
+
+    def set_selected_device(self, device_id: str | None) -> DeviceStatus:
+        raise InvalidArtifactError(
+            f"Camera device selection is not supported for driver '{self.driver}'."
         )
 
     def capture(self) -> CaptureArtifact:

@@ -14,6 +14,10 @@ from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.errors import register_exception_handlers
 from learn_to_draw_api.routes import build_api_router
 from learn_to_draw_api.services.captures import CaptureStore
+from learn_to_draw_api.services.camera_device_settings import (
+    CameraDeviceSettingsService,
+    CameraDeviceSettingsStore,
+)
 from learn_to_draw_api.services.hardware import HardwareService
 from learn_to_draw_api.services.plot_workflow import (
     PlotAssetStore,
@@ -52,6 +56,8 @@ def create_app(
         store=device_settings_store,
         config=app_config,
     )
+    camera_settings_store = CameraDeviceSettingsStore(app_config.device_settings_dir)
+    camera_settings_service = CameraDeviceSettingsService(store=camera_settings_store)
     workspace_store = PlotterWorkspaceStore(app_config.workspace_dir)
     workspace_service = PlotterWorkspaceService(
         store=workspace_store,
@@ -62,7 +68,10 @@ def create_app(
         app_config,
         calibration=calibration_service.current(),
     )
-    camera_adapter = camera or build_camera_adapter(app_config)
+    camera_adapter = camera or build_camera_adapter(
+        app_config,
+        camera_settings_service=camera_settings_service,
+    )
 
     capture_store = CaptureStore(
         captures_dir=app_config.captures_dir,
@@ -107,6 +116,7 @@ def create_app(
     app.state.plot_workflow_service = plot_workflow_service
     app.state.plotter_calibration_service = calibration_service
     app.state.plotter_device_settings_service = device_settings_service
+    app.state.camera_device_settings_service = camera_settings_service
     app.state.plotter_workspace_service = workspace_service
     app.add_middleware(
         CORSMiddleware,

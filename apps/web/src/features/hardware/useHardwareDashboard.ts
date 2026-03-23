@@ -4,14 +4,12 @@ import {
   captureImage,
   createPatternAsset,
   createPlotRun,
-  isNetworkRequestError,
-  restartHelperBackend,
   runPlotterTestAction,
+  setCameraDevice,
   setPlotterCalibration,
   setPlotterPenHeights,
   setPlotterSafeBounds,
   setPlotterWorkspace,
-  startHelperBackend,
   walkPlotterHome,
 } from "../../lib/api";
 import { useHardwareActionRunner } from "./useHardwareActionRunner";
@@ -20,7 +18,6 @@ import type {
   PlotterDiagnosticAction,
 } from "./hardwareDashboardTypes";
 import { useHardwareSnapshotState } from "./useHardwareSnapshotState";
-import { useHelperBackendControl } from "./useHelperBackendControl";
 
 
 const POLL_INTERVAL_MS = 2500;
@@ -30,20 +27,11 @@ export function useHardwareDashboard() {
   const mountedRef = useRef(true);
   const [error, setError] = useState<string | null>(null);
   const snapshotState = useHardwareSnapshotState();
-  const helperControl = useHelperBackendControl({
-    mountedRef,
-    clearHardwareState: snapshotState.clearHardwareState,
-    applyHardwareSnapshot: snapshotState.applyHardwareSnapshot,
-    fetchHardwareSnapshot: snapshotState.fetchHardwareSnapshot,
-    setError,
-  });
 
   async function refresh({
     silent = false,
-    allowInitialAutoStart = false,
   }: {
     silent?: boolean;
-    allowInitialAutoStart?: boolean;
   } = {}) {
     if (!silent) {
       snapshotState.setRefreshing(true);
@@ -56,21 +44,16 @@ export function useHardwareDashboard() {
       }
       snapshotState.applyHardwareSnapshot(snapshot);
       setError(null);
-      void helperControl.syncHelperConnection();
     } catch (refreshError) {
       if (!mountedRef.current) {
         return;
       }
-      if (isNetworkRequestError(refreshError)) {
-        await helperControl.reconcileBackendUnavailable({ allowInitialAutoStart });
-      } else {
-        snapshotState.clearHardwareState();
-        setError(
-          refreshError instanceof Error
-            ? refreshError.message
-            : "Failed to refresh hardware state.",
-        );
-      }
+      snapshotState.clearHardwareState();
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : "Failed to refresh hardware state.",
+      );
     } finally {
       if (!mountedRef.current) {
         return;
@@ -87,7 +70,7 @@ export function useHardwareDashboard() {
 
   useEffect(() => {
     mountedRef.current = true;
-    void refresh({ allowInitialAutoStart: true });
+    void refresh();
 
     const poller = window.setInterval(() => {
       void refresh({ silent: true });
@@ -110,23 +93,7 @@ export function useHardwareDashboard() {
     actionName: actionRunner.actionName,
     actionFeedback: actionRunner.actionFeedback,
     error,
-    helperStatus: helperControl.helperStatus,
-    helperConnectionState: helperControl.helperConnectionState,
-    helperActionName: helperControl.helperActionName,
     refresh,
-    openHelper: () => helperControl.openHelper(() => refresh({ silent: true })),
-    startBackend: () =>
-      helperControl.runHelperAction(
-        "start",
-        startHelperBackend,
-        () => refresh({ silent: true }),
-      ),
-    restartBackend: () =>
-      helperControl.runHelperAction(
-        "restart",
-        restartHelperBackend,
-        () => refresh({ silent: true }),
-      ),
     walkHome: () =>
       actionRunner.runAction("plotter-walk-home", walkPlotterHome, {
         pending: "Walking plotter home...",
@@ -227,6 +194,17 @@ export function useHardwareDashboard() {
       actionRunner.runAction("camera-capture", captureImage, {
         pending: "Capturing image...",
         success: "Image captured.",
+      }),
+    setCameraDevice: (deviceId: string | null) =>
+      actionRunner.runAction("camera-device", () => setCameraDevice(deviceId), {
+        pending:
+          deviceId === null
+            ? "Clearing camera selection..."
+            : "Saving camera selection...",
+        success:
+          deviceId === null
+            ? "Camera selection cleared."
+            : "Camera selection saved.",
       }),
   };
 }

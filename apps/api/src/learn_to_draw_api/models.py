@@ -264,6 +264,10 @@ class CameraCaptureResponse(CommandResponse):
     capture: CaptureMetadata
 
 
+class CameraCommandResponse(CommandResponse):
+    status: DeviceStatus
+
+
 class LatestPlotRunResponse(BaseModel):
     run: Optional[PlotRun] = None
 
@@ -289,6 +293,10 @@ class PlotterTestActionRequest(BaseModel):
 class PlotterPenHeightsRequest(BaseModel):
     pen_pos_up: int = Field(ge=0, le=100)
     pen_pos_down: int = Field(ge=0, le=100)
+
+
+class CameraDeviceSelectionRequest(BaseModel):
+    device_id: Optional[str] = None
 
 
 class PlotterCalibration(BaseModel):
@@ -327,6 +335,11 @@ class PlotterDeviceSettingsRecord(BaseModel):
     source: PlotterDeviceSettingsSource
     updated_at: datetime
     manual_safe_bounds_override_mm: Optional[SizeMm] = None
+
+
+class CameraDeviceSettingsRecord(BaseModel):
+    selected_device_id: Optional[str] = None
+    updated_at: datetime
 
 
 class PlotterWorkspace(BaseModel):

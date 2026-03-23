@@ -1,4 +1,5 @@
 import type {
+  CameraCommandResponse,
   CameraCaptureResponse,
   HardwareStatus,
   LatestCaptureResponse,
@@ -216,6 +217,18 @@ export function setPlotterWorkspace(workspace: {
 export function captureImage() {
   return requestJson<CameraCaptureResponse>("/api/camera/capture", {
     method: "POST",
+  });
+}
+
+export function setCameraDevice(deviceId: string | null) {
+  return requestJson<CameraCommandResponse>("/api/camera/device", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      device_id: deviceId,
+    }),
   });
 }
 

@@ -35,6 +35,47 @@ export const defaultHardwareStatus: HardwareStatus = {
   },
 };
 
+export const defaultCameraBridgeDetails = {
+  base_url: "http://127.0.0.1:8731",
+  token_path: "/tmp/camerabridge/auth-token",
+  token_readable: true,
+  service_available: true,
+  permission_status: "authorized",
+  permission_message: null,
+  permission_next_step_kind: null,
+  session_state: "stopped",
+  session_owner_id: null,
+  active_device_id: "camera-1",
+  devices: [
+    {
+      id: "camera-1",
+      name: "Built-in Camera",
+      position: "front",
+    },
+  ],
+  device_count: 1,
+  persisted_selected_device_id: null,
+  effective_selected_device_id: "camera-1",
+  selection_required: false,
+  readiness_state: "ready",
+  last_capture_id: null,
+  resolution: null,
+  configuration_error: null,
+} satisfies Record<string, unknown>;
+
+export const defaultCameraBridgeHardwareStatus: HardwareStatus = {
+  ...defaultHardwareStatus,
+  camera: {
+    available: true,
+    connected: true,
+    busy: false,
+    error: null,
+    driver: "camerabridge",
+    last_updated: "2026-03-15T20:00:00Z",
+    details: { ...defaultCameraBridgeDetails },
+  },
+};
+
 export const defaultAxiDrawHardwareStatus: HardwareStatus = {
   ...defaultHardwareStatus,
   plotter: {
@@ -148,6 +189,7 @@ export interface HardwareDashboardHarness {
   cameraCaptureError: string | null;
   cameraCaptureStatusCode: number;
   cameraCaptureAttempts: number;
+  cameraDeviceRequests: Array<string | null>;
   plotterTestActions: string[];
   safeBoundsRequests: Array<{
     width_mm: number | null;
@@ -217,6 +259,7 @@ export function createHardwareDashboardHarness(
     cameraCaptureError: null,
     cameraCaptureStatusCode: 503,
     cameraCaptureAttempts: 0,
+    cameraDeviceRequests: [],
     plotterTestActions: [],
     safeBoundsRequests: [],
     workspaceRequests: [],
@@ -345,13 +388,26 @@ export function installHardwareDashboardFetchMock(
             last_updated: "2026-03-15T20:05:00Z",
             details: {
               ...harness.currentHardwareStatus.camera.details,
-              initialization_state: "ready",
+              readiness_state: "ready",
+              selection_required: false,
+              service_available: true,
+              permission_status: "authorized",
+              effective_selected_device_id:
+                typeof harness.currentHardwareStatus.camera.details
+                  .effective_selected_device_id === "string"
+                  ? harness.currentHardwareStatus.camera.details
+                    .effective_selected_device_id
+                  : (Array.isArray(harness.currentHardwareStatus.camera.details.devices)
+                    ? harness.currentHardwareStatus.camera.details.devices
+                    : []
+                  ).find(
+                    (
+                      device,
+                    ): device is { id?: string } =>
+                      typeof device === "object" && device !== null,
+                  )?.id ?? null,
               last_capture_id: harness.latestCapture.id,
               resolution: "1920x1080",
-              last_open_result: "opened",
-              last_open_message: "VideoCapture(0) opened successfully.",
-              last_read_result: "succeeded",
-              last_backend_name: "AVFOUNDATION",
             },
           },
         };
@@ -361,6 +417,56 @@ export function installHardwareDashboardFetchMock(
           message: "Image captured.",
           status: harness.currentHardwareStatus.camera,
           capture: harness.latestCapture,
+        });
+      }
+
+      if (url === "/api/camera/device" && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          device_id: string | null;
+        };
+        harness.cameraDeviceRequests.push(body.device_id);
+        const availableDevices = Array.isArray(harness.currentHardwareStatus.camera.details.devices)
+          ? harness.currentHardwareStatus.camera.details.devices.filter(
+              (device): device is { id: string } =>
+                typeof device === "object" &&
+                device !== null &&
+                typeof (device as { id?: unknown }).id === "string",
+            )
+          : [];
+        const effectiveSelectedDeviceId =
+          body.device_id ??
+          (availableDevices.length === 1 ? availableDevices[0].id : null);
+
+        harness.currentHardwareStatus = {
+          ...harness.currentHardwareStatus,
+          camera: {
+            ...harness.currentHardwareStatus.camera,
+            available: effectiveSelectedDeviceId !== null,
+            connected: true,
+            busy: false,
+            error: null,
+            last_updated: "2026-03-15T20:05:00Z",
+            details: {
+              ...harness.currentHardwareStatus.camera.details,
+              persisted_selected_device_id: body.device_id,
+              effective_selected_device_id: effectiveSelectedDeviceId,
+              selection_required:
+                effectiveSelectedDeviceId === null && availableDevices.length > 1,
+              readiness_state:
+                effectiveSelectedDeviceId === null && availableDevices.length > 1
+                  ? "needs_device_selection"
+                  : "ready",
+            },
+          },
+        };
+
+        return jsonResponse({
+          ok: true,
+          message:
+            body.device_id === null
+              ? "Camera device preference cleared."
+              : "Camera device preference updated.",
+          status: harness.currentHardwareStatus.camera,
         });
       }
 

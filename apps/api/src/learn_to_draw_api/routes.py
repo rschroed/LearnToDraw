@@ -4,6 +4,8 @@ from fastapi import APIRouter, File, UploadFile
 
 from learn_to_draw_api.models import (
     CameraCaptureResponse,
+    CameraCommandResponse,
+    CameraDeviceSelectionRequest,
     HealthResponse,
     HardwareStatus,
     LatestPlotRunResponse,
@@ -93,6 +95,12 @@ def build_api_router(
     @router.post("/api/camera/capture", response_model=CameraCaptureResponse)
     def post_camera_capture() -> CameraCaptureResponse:
         return hardware_service.capture_image()
+
+    @router.post("/api/camera/device", response_model=CameraCommandResponse)
+    def post_camera_device(
+        request: CameraDeviceSelectionRequest,
+    ) -> CameraCommandResponse:
+        return hardware_service.set_camera_device(request)
 
     @router.get("/api/captures/latest", response_model=LatestCaptureResponse)
     def get_latest_capture() -> LatestCaptureResponse:

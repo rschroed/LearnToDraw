@@ -41,6 +41,10 @@ class AppConfig:
     opencv_camera_index: int = 0
     camera_warmup_ms: int = 150
     camera_discard_frames: int = 2
+    camerabridge_base_url: Optional[str] = None
+    camerabridge_token_path: Optional[Path] = None
+    camerabridge_owner_id: str = "learntodraw-api"
+    camerabridge_default_device_id: Optional[str] = None
     plot_assets_url_prefix: str = "/plot-assets"
     plot_run_artifacts_url_prefix: str = "/plot-run-artifacts"
     cors_origins: tuple[str, ...] = (
@@ -94,6 +98,19 @@ class AppConfig:
         camera_discard_frames = _read_optional_int(
             "LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES",
             2,
+        )
+        camerabridge_base_url = _read_optional_text_or_none(
+            "LEARN_TO_DRAW_CAMERABRIDGE_BASE_URL"
+        )
+        camerabridge_token_path = _read_optional_path(
+            "LEARN_TO_DRAW_CAMERABRIDGE_TOKEN_PATH"
+        )
+        camerabridge_owner_id = os.getenv(
+            "LEARN_TO_DRAW_CAMERABRIDGE_OWNER_ID",
+            "learntodraw-api",
+        ).strip() or "learntodraw-api"
+        camerabridge_default_device_id = _read_optional_text_or_none(
+            "LEARN_TO_DRAW_CAMERABRIDGE_DEFAULT_DEVICE_ID"
         )
         plotter_driver = os.getenv("LEARN_TO_DRAW_PLOTTER_DRIVER", "mock")
         axidraw_port = os.getenv("LEARN_TO_DRAW_AXIDRAW_PORT")
@@ -172,6 +189,10 @@ class AppConfig:
             opencv_camera_index=opencv_camera_index,
             camera_warmup_ms=camera_warmup_ms,
             camera_discard_frames=camera_discard_frames,
+            camerabridge_base_url=camerabridge_base_url,
+            camerabridge_token_path=camerabridge_token_path,
+            camerabridge_owner_id=camerabridge_owner_id,
+            camerabridge_default_device_id=camerabridge_default_device_id,
             plot_assets_url_prefix=plot_assets_url_prefix,
             plot_run_artifacts_url_prefix=plot_run_artifacts_url_prefix,
         )
@@ -235,3 +256,11 @@ def _read_optional_float_or_none(env_name: str) -> Optional[float]:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _read_optional_text_or_none(env_name: str) -> Optional[str]:
+    value = os.getenv(env_name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None

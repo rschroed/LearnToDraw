@@ -1,11 +1,13 @@
 # LearnToDraw macOS Camera Helper
 
-This helper is a macOS-first proof of concept for backend-owned real camera startup.
+This helper is a legacy macOS-first proof of concept for backend-owned real camera startup.
+
+It is no longer part of the supported LearnToDraw dashboard flow. The active real-camera path is now the backend-owned CameraBridge integration. This helper remains in the repo only as non-active legacy code while cleanup is deferred.
 
 It does three things:
 
 - runs as a native macOS helper process
-- starts the existing FastAPI backend in OpenCV camera mode
+- starts the existing FastAPI backend in the legacy OpenCV camera mode
 - exposes localhost helper endpoints on `127.0.0.1:8001`
 
 The helper does not proxy hardware requests. The backend on `127.0.0.1:8000` remains the only hardware authority.

@@ -1,5 +1,10 @@
-import type { CaptureMetadata, HardwareStatus, PlotterCalibration, PlotterDeviceSettings, PlotterWorkspace } from "../../types/hardware";
-import type { HelperStatus } from "../../types/helper";
+import type {
+  CaptureMetadata,
+  HardwareStatus,
+  PlotterCalibration,
+  PlotterDeviceSettings,
+  PlotterWorkspace,
+} from "../../types/hardware";
 
 export type PlotterDiagnosticAction = "raise_pen" | "lower_pen" | "cycle_pen" | "align";
 export type DiagnosticPatternId = "tiny-square" | "dash-row" | "double-box";
@@ -10,12 +15,11 @@ export type ActionName =
   | "plotter-workspace"
   | "plotter-pen-heights"
   | "camera-capture"
+  | "camera-device"
   | `plotter-test:${PlotterDiagnosticAction}`
   | `plotter-pattern:${DiagnosticPatternId}`
   | null;
 export type ActionTone = "info" | "success" | "error";
-export type HelperActionName = "start" | "restart" | null;
-export type HelperConnectionState = "unknown" | "reachable" | "missing";
 
 export interface ActionFeedback {
   action: Exclude<ActionName, null>;
@@ -42,7 +46,4 @@ export interface HardwareDashboardState {
   actionName: ActionName;
   actionFeedback: ActionFeedback | null;
   error: string | null;
-  helperStatus: HelperStatus | null;
-  helperConnectionState: HelperConnectionState;
-  helperActionName: HelperActionName;
 }
