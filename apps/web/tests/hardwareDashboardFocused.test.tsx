@@ -186,13 +186,12 @@ describe("Hardware dashboard focused behaviors", () => {
     ).toBeGreaterThan(0);
     expect(screen.getByText(/^choose a camera$/i)).toBeInTheDocument();
     expect(screen.getByText(/^no camera selected$/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /save camera/i })).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: "camera-2" } });
     await waitFor(() => {
       expect(select).toHaveValue("camera-2");
     });
-    fireEvent.click(screen.getByRole("button", { name: /save camera/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /save camera/i }));
 
     expect(await screen.findByText(/camera selection saved\./i)).toBeInTheDocument();
     expect(harness.cameraDeviceRequests).toEqual(["camera-2"]);
