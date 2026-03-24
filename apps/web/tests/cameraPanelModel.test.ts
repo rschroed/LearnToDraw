@@ -57,7 +57,17 @@ describe("cameraPanelModel", () => {
     expect(model.notice).toBeNull();
     expect(model.captureDisabled).toBe(false);
     expect(model.selectionRequired).toBe(false);
-    expect(model.selectedDeviceLabel).toBe("Built-in Camera");
+    expect(model.canEditDevice).toBe(true);
+    expect(model.savedDeviceLabel).toBe("Built-in Camera");
+    expect(model.saveDeviceDisabled).toBe(true);
+    expect(model.deviceEditLabel).toBe("Edit");
+    expect(model.headerStatusLabel).toBeNull();
+    expect(model.summaryTitle).toBe("Ready to capture");
+    expect(model.summaryDetail).toBeNull();
+    expect(model.captureActionLabel).toBe("Capture image");
+    expect(model.capturePendingLabel).toBe("Capturing...");
+    expect(model.secondaryActionLabel).toBeNull();
+    expect(model.secondaryActionIntent).toBeNull();
   });
 
   it("maps service unavailable to an informational notice", () => {
@@ -85,11 +95,12 @@ describe("cameraPanelModel", () => {
     });
 
     expect(model.captureDisabled).toBe(true);
-    expect(model.notice).toEqual({
-      tone: "info",
-      message:
-        "Open CameraBridgeApp, click Start CameraBridge Service, then retry once the local service is running.",
-    });
+    expect(model.notice).toBeNull();
+    expect(model.headerStatusLabel).toBe("Offline");
+    expect(model.summaryTitle).toBe("Start CameraBridge");
+    expect(model.summaryDetail).toBe("Open CameraBridge and start the local service.");
+    expect(model.secondaryActionLabel).toBe("Open CameraBridgeApp");
+    expect(model.secondaryActionIntent).toBe("open_camera_bridge_app");
   });
 
   it("maps permission-required state to the backend guidance", () => {
@@ -113,10 +124,14 @@ describe("cameraPanelModel", () => {
       selectedDeviceId: "camera-1",
     });
 
-    expect(model.notice).toEqual({
-      tone: "info",
-      message: "Open CameraBridgeApp to request camera access.",
-    });
+    expect(model.notice).toBeNull();
+    expect(model.headerStatusLabel).toBe("Needs permission");
+    expect(model.summaryTitle).toBe("Camera access required");
+    expect(model.summaryDetail).toBe(
+      "Grant camera access in CameraBridgeApp before capturing.",
+    );
+    expect(model.secondaryActionLabel).toBe("Open CameraBridgeApp");
+    expect(model.secondaryActionIntent).toBe("open_camera_bridge_app");
   });
 
   it("requires explicit device selection when the backend says so", () => {
@@ -147,9 +162,44 @@ describe("cameraPanelModel", () => {
     });
 
     expect(model.selectionRequired).toBe(true);
+    expect(model.canEditDevice).toBe(true);
     expect(model.captureDisabled).toBe(true);
     expect(model.availableDevices).toHaveLength(2);
     expect(model.saveDeviceDisabled).toBe(false);
+    expect(model.deviceSelectionHelper).toBe(
+      "Pick a camera and save it before capturing.",
+    );
+    expect(model.deviceEditLabel).toBeNull();
+    expect(model.secondaryActionLabel).toBeNull();
+  });
+
+  it("keeps save disabled when the selected camera already matches the saved device", () => {
+    const parsedStatus = parseCameraStatus(
+      buildDeviceStatus({
+        details: {
+          ...buildDeviceStatus().details,
+          devices: [
+            { id: "camera-1", name: "Built-in Camera", position: "front" },
+            { id: "camera-2", name: "Desk Camera", position: "external" },
+          ],
+          device_count: 2,
+          persisted_selected_device_id: "camera-1",
+          effective_selected_device_id: "camera-1",
+        },
+      }),
+    );
+
+    const model = buildCameraPanelModel({
+      parsedStatus,
+      actionFeedback: null,
+      actionName: null,
+      selectedDeviceId: "camera-1",
+    });
+
+    expect(model.canEditDevice).toBe(true);
+    expect(model.saveDeviceDisabled).toBe(true);
+    expect(model.deviceSelectionHelper).toBeNull();
+    expect(model.deviceEditLabel).toBe("Edit");
   });
 
   it("maps external ownership to an error notice", () => {
@@ -171,11 +221,9 @@ describe("cameraPanelModel", () => {
       selectedDeviceId: "camera-1",
     });
 
-    expect(model.notice).toEqual({
-      tone: "error",
-      message:
-        "Another local client currently owns the CameraBridge session. Stop it there and retry.",
-    });
+    expect(model.notice).toBeNull();
+    expect(model.headerStatusLabel).toBe("Busy");
+    expect(model.summaryTitle).toBe("Camera busy");
   });
 
   it("prefers action feedback over readiness messaging", () => {
@@ -205,6 +253,7 @@ describe("cameraPanelModel", () => {
       tone: "success",
       message: "Camera selection saved.",
     });
+    expect(model.summaryTitle).toBe("Start CameraBridge");
   });
 
   it("falls back cleanly for non-CameraBridge drivers", () => {
@@ -228,6 +277,8 @@ describe("cameraPanelModel", () => {
     expect(parsedStatus.kind).toBe("generic");
     expect(model.availableDevices).toEqual([]);
     expect(model.selectionRequired).toBe(false);
+    expect(model.canEditDevice).toBe(false);
     expect(model.saveDeviceDisabled).toBe(true);
+    expect(model.summaryTitle).toBe("Ready to capture");
   });
 });

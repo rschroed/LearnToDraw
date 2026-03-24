@@ -1221,6 +1221,114 @@ describe("Hardware dashboard", () => {
     expect(screen.getByText(/image\/svg\+xml/i)).toBeInTheDocument();
   });
 
+  it("keeps capture success when the post-capture refresh times out", async () => {
+    let hardwareStatusRequests = 0;
+
+    vi.mocked(globalThis.fetch).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          hardwareStatusRequests += 1;
+          if (hardwareStatusRequests > 2) {
+            throw new DOMException("timeout", "AbortError");
+          }
+          return new Response(JSON.stringify(currentHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: latestCapture }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: latestRun }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs") {
+          return new Response(JSON.stringify({ runs: recentRuns }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/camera/capture" && method === "POST") {
+          latestCapture = {
+            id: "capture-timeout-001",
+            timestamp: "2026-03-24T03:10:00Z",
+            file_path: "/tmp/capture-timeout-001.svg",
+            public_url: "/captures/capture-timeout-001.svg",
+            width: 1280,
+            height: 960,
+            mime_type: "image/svg+xml",
+          };
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: "Image captured.",
+              status: currentHardwareStatus.camera,
+              capture: latestCapture,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /capture image/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("img", {
+          name: /latest camera capture capture-timeout-001/i,
+        }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/local service timed out\./i)).not.toBeInTheDocument();
+  });
+
   it("renders a jpeg capture from the CameraBridge camera path", async () => {
     currentHardwareStatus.camera = {
       ...cameraBridgeHardwareStatus.camera,
@@ -1376,7 +1484,10 @@ describe("Hardware dashboard", () => {
     expect(
       await screen.findByRole("button", { name: /capture image/i }),
     ).toBeDisabled();
-    expect(screen.getByText(/choose a camerabridge device to enable capture/i)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/pick a camera and save it before capturing/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /save camera/i })).toBeEnabled();
   });
 
   it("creates a built-in pattern and completes a plot run", async () => {

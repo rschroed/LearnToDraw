@@ -12,6 +12,7 @@ import {
   setPlotterWorkspace,
   walkPlotterHome,
 } from "../../lib/api";
+import type { CaptureMetadata } from "../../types/hardware";
 import { useHardwareActionRunner } from "./useHardwareActionRunner";
 import type {
   DiagnosticPatternId,
@@ -195,6 +196,14 @@ export function useHardwareDashboard(): HardwareDashboardController {
       actionRunner.runAction("camera-capture", captureImage, {
         pending: "Capturing image...",
         success: "Image captured.",
+      }, {
+        onSuccess: (result) => {
+          const response = result as { capture?: CaptureMetadata };
+          if (mountedRef.current && response.capture) {
+            snapshotState.setLatestCaptureState(response.capture);
+          }
+        },
+        ignoreRefreshErrors: true,
       }),
     setCameraDevice: (deviceId: string | null) =>
       actionRunner.runAction("camera-device", () => setCameraDevice(deviceId), {

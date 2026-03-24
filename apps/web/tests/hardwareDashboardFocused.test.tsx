@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import { CameraPanel } from "../src/features/hardware/CameraPanel";
+import * as api from "../src/lib/api";
 import {
   createHardwareDashboardHarness,
   defaultAxiDrawHardwareStatus,
@@ -62,8 +64,12 @@ describe("Hardware dashboard focused behaviors", () => {
     expect(
       await screen.findByRole("button", { name: /capture image/i }),
     ).toBeDisabled();
+    expect(screen.getByText(/start camerabridge/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/start camerabridge service/i),
+      screen.getByText(/open camerabridge and start the local service/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /open camerabridgeapp/i }),
     ).toBeInTheDocument();
   });
 
@@ -89,11 +95,52 @@ describe("Hardware dashboard focused behaviors", () => {
     render(<App />);
 
     expect(
-      await screen.findAllByText(/open camerabridgeapp to request camera access/i),
-    ).toHaveLength(2);
+      await screen.findByText(/camera access required/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/grant camera access in camerabridgeapp before capturing/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /capture image/i }),
     ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /open camerabridgeapp/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens CameraBridgeApp from the offline handoff button", async () => {
+    const openCameraBridgeAppSpy = vi
+      .spyOn(api, "openCameraBridgeApp")
+      .mockImplementation(() => {});
+
+    render(
+      <CameraPanel
+        cameraStatus={{
+          ...structuredClone(defaultCameraBridgeHardwareStatus.camera),
+          available: false,
+          connected: false,
+          details: {
+            ...structuredClone(defaultCameraBridgeDetails),
+            service_available: false,
+            readiness_state: "needs_service",
+            effective_selected_device_id: null,
+            active_device_id: null,
+            devices: [],
+            device_count: 0,
+          },
+        }}
+        actionName={null}
+        actionFeedback={null}
+        capture={async () => {}}
+        setCameraDevice={async () => {}}
+      />,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /open camerabridgeapp/i }),
+    );
+
+    expect(openCameraBridgeAppSpy).toHaveBeenCalledTimes(1);
   });
 
   it("persists CameraBridge device selection through the backend and enables capture", async () => {
@@ -131,9 +178,15 @@ describe("Hardware dashboard focused behaviors", () => {
 
     render(<App />);
 
-    const select = await screen.findByLabelText(/choose a device/i);
+    const select = await screen.findByLabelText(/choose camera/i);
     const captureButton = screen.getByRole("button", { name: /capture image/i });
     expect(captureButton).toBeDisabled();
+    expect(
+      screen.getAllByText(/pick a camera and save it before capturing/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/^choose a camera$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^no camera selected$/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save camera/i })).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: "camera-2" } });
     await waitFor(() => {
@@ -147,7 +200,129 @@ describe("Hardware dashboard focused behaviors", () => {
     await waitFor(() => {
       expect(captureButton).toBeEnabled();
     });
-    expect(screen.getByText(/selected device: desk camera\./i)).toBeInTheDocument();
+    expect(screen.getByText(/^ready to capture$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^desk camera$/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save camera/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
+  });
+
+  it("keeps the selector visible so a saved camera can be switched later", async () => {
+    const harness = createHardwareDashboardHarness({
+      currentHardwareStatus: {
+        ...structuredClone(defaultAxiDrawHardwareStatus),
+        camera: {
+          ...structuredClone(defaultCameraBridgeHardwareStatus.camera),
+          details: {
+            ...structuredClone(defaultCameraBridgeDetails),
+            devices: [
+              {
+                id: "camera-1",
+                name: "Built-in Camera",
+                position: "front",
+              },
+              {
+                id: "camera-2",
+                name: "Desk Camera",
+                position: "external",
+              },
+            ],
+            device_count: 2,
+            persisted_selected_device_id: "camera-1",
+            effective_selected_device_id: "camera-1",
+          },
+        },
+      },
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: /edit/i })).toBeInTheDocument();
+    const captureButton = screen.getByRole("button", { name: /capture image/i });
+
+    expect(screen.getByText(/^ready to capture$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^built-in camera$/i)).toBeInTheDocument();
+    expect(captureButton).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    const select = await screen.findByLabelText(/choose camera/i);
+    expect(select).toHaveValue("camera-1");
+    expect(screen.queryByText(/switch cameras here/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save camera/i })).not.toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "camera-2" } });
+
+    const saveButton = await screen.findByRole("button", { name: /save camera/i });
+    await waitFor(() => {
+      expect(select).toHaveValue("camera-2");
+      expect(saveButton).toBeEnabled();
+    });
+
+    fireEvent.click(saveButton);
+
+    expect(await screen.findByText(/camera selection saved\./i)).toBeInTheDocument();
+    expect(harness.cameraDeviceRequests).toEqual(["camera-2"]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/^ready to capture$/i)).toBeInTheDocument();
+      expect(screen.getByText(/^desk camera$/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/choose camera/i)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
+    });
+  });
+
+  it("keeps the camera editor open across prop refreshes", async () => {
+    const cameraStatus = {
+      ...structuredClone(defaultCameraBridgeHardwareStatus.camera),
+      details: {
+        ...structuredClone(defaultCameraBridgeDetails),
+        devices: [
+          {
+            id: "camera-1",
+            name: "Built-in Camera",
+            position: "front" as const,
+          },
+          {
+            id: "camera-2",
+            name: "Desk Camera",
+            position: "external" as const,
+          },
+        ],
+        device_count: 2,
+        persisted_selected_device_id: "camera-1",
+        effective_selected_device_id: "camera-1",
+      },
+    };
+
+    const { rerender } = render(
+      <CameraPanel
+        cameraStatus={cameraStatus}
+        actionName={null}
+        actionFeedback={null}
+        capture={async () => {}}
+        setCameraDevice={async () => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /edit camera selection/i }));
+
+    const select = await screen.findByLabelText(/choose camera/i);
+    fireEvent.change(select, { target: { value: "camera-2" } });
+    expect(select).toHaveValue("camera-2");
+
+    rerender(
+      <CameraPanel
+        cameraStatus={structuredClone(cameraStatus)}
+        actionName={null}
+        actionFeedback={null}
+        capture={async () => {}}
+        setCameraDevice={async () => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/choose camera/i)).toHaveValue("camera-2");
+    expect(screen.getByRole("button", { name: /save camera/i })).toBeInTheDocument();
   });
 
   it("refreshes the latest capture preview after a successful CameraBridge capture", async () => {
@@ -166,6 +341,13 @@ describe("Hardware dashboard focused behaviors", () => {
     expect(await screen.findByText(/image captured\./i)).toBeInTheDocument();
     expect(await screen.findByRole("img", { name: /latest camera capture capture-real-001/i }))
       .toBeInTheDocument();
+    const latestCapturePanel = screen.getByRole("heading", { name: /latest capture/i }).closest(
+      ".capture-panel",
+    );
+    expect(latestCapturePanel).not.toBeNull();
+    expect(
+      within(latestCapturePanel as HTMLElement).getByText(/^saved at$/i),
+    ).toBeInTheDocument();
     expect(screen.getByText(/1920 x 1080/i)).toBeInTheDocument();
     expect(screen.getByText(/image\/jpeg/i)).toBeInTheDocument();
     expect(harness.cameraCaptureAttempts).toBe(1);

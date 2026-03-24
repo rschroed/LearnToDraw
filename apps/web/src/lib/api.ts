@@ -21,6 +21,7 @@ import type { HelperStatus } from "../types/helper";
 
 const REQUEST_TIMEOUT_MS = 2000;
 const HELPER_OPEN_URL = "learntodraw-helper://open";
+const CAMERABRIDGE_PERMISSION_URL = "camerabridge://permission";
 
 export class ApiRequestError extends Error {
   readonly statusCode: number | null;
@@ -230,6 +231,10 @@ export function setCameraDevice(deviceId: string | null) {
       device_id: deviceId,
     }),
   });
+}
+
+export function openCameraBridgeApp() {
+  window.location.assign(CAMERABRIDGE_PERMISSION_URL);
 }
 
 export function uploadPlotAsset(file: File) {

@@ -191,6 +191,72 @@ button {
   color: #253746;
 }
 
+.camera-summary {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(139, 94, 52, 0.1), transparent 40%),
+    rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(111, 78, 55, 0.12);
+}
+
+.camera-summary-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.camera-summary-label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.camera-summary h3 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.camera-summary-detail {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.camera-summary-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.camera-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(111, 78, 55, 0.14);
+  color: #253746;
+  font-size: 0.84rem;
+}
+
+.camera-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.camera-device-control {
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(111, 78, 55, 0.12);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -213,6 +279,48 @@ button {
 .diagnostic-section h3 {
   margin: 0 0 12px;
   font-size: 1rem;
+}
+
+.camera-selection-helper {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.camera-selection-current {
+  margin: 0;
+  color: #253746;
+  font-size: 0.98rem;
+  font-weight: 600;
+}
+
+.camera-device-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.camera-selection-label {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.camera-device-editor {
+  display: grid;
+  gap: 0;
+}
+
+.camera-device-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .diagnostic-subsection {
@@ -564,7 +672,8 @@ button {
 }
 
 .button-primary,
-.button-secondary {
+.button-secondary,
+.button-ghost {
   border: 0;
   border-radius: 999px;
   padding: 12px 18px;
@@ -585,13 +694,20 @@ button {
   border: 1px solid rgba(111, 78, 55, 0.16);
 }
 
+.button-ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
 .button-primary:hover,
-.button-secondary:hover {
+.button-secondary:hover,
+.button-ghost:hover {
   transform: translateY(-1px);
 }
 
 .button-primary:disabled,
-.button-secondary:disabled {
+.button-secondary:disabled,
+.button-ghost:disabled {
   opacity: 0.55;
   transform: none;
   cursor: not-allowed;
@@ -624,6 +740,45 @@ button {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.capture-meta {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.capture-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.capture-meta-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(111, 78, 55, 0.12);
+}
+
+.capture-meta-item span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.capture-meta-item strong {
+  color: #253746;
+}
+
+.capture-meta-path {
+  margin-top: 0;
+  opacity: 0.82;
+  word-break: break-all;
 }
 
 .workflow-grid {

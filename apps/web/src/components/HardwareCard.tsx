@@ -6,9 +6,13 @@ import { StatusPill } from "./StatusPill";
 interface HardwareCardProps {
   title: string;
   status: DeviceStatus;
+  summary?: ReactNode;
+  headerMeta?: ReactNode;
+  headerStatus?: ReactNode;
   actionLabel?: string;
   onAction?: (() => Promise<void>) | null;
   actionPending?: boolean;
+  actionPendingLabel?: string;
   actionDisabled?: boolean;
   secondaryActionLabel?: string;
   onSecondaryAction?: (() => Promise<void>) | null;
@@ -20,6 +24,9 @@ interface HardwareCardProps {
   } | null;
   footer?: ReactNode;
   children?: ReactNode;
+  detailItems?: Array<{ label: string; value: string }>;
+  hideDetails?: boolean;
+  hideStatusRow?: boolean;
 }
 
 function formatDetails(details: Record<string, unknown>) {
@@ -43,9 +50,13 @@ function formatValue(value: unknown) {
 export function HardwareCard({
   title,
   status,
+  summary,
+  headerMeta,
+  headerStatus,
   actionLabel,
   onAction,
   actionPending = false,
+  actionPendingLabel = "Working...",
   actionDisabled,
   secondaryActionLabel,
   onSecondaryAction,
@@ -54,8 +65,14 @@ export function HardwareCard({
   notice,
   footer,
   children,
+  detailItems,
+  hideDetails = false,
+  hideStatusRow = false,
 }: HardwareCardProps) {
-  const details = formatDetails(status.details);
+  const details = detailItems ?? formatDetails(status.details).map(([label, value]) => ({
+    label,
+    value: formatValue(value),
+  }));
   const primaryActionDisabled =
     actionDisabled ?? (actionPending || status.busy || !status.available);
   const resolvedSecondaryActionDisabled =
@@ -69,46 +86,56 @@ export function HardwareCard({
       <header>
         <div>
           <h2>{title}</h2>
-          <div className="hardware-meta">{status.driver}</div>
+          {headerMeta !== undefined ? headerMeta : (
+            <div className="hardware-meta">{status.driver}</div>
+          )}
         </div>
-        <StatusPill
-          label="Connection"
-          value={status.connected ? "connected" : "disconnected"}
-          tone={status.connected ? "ok" : "warn"}
-        />
+        {headerStatus !== undefined ? headerStatus : (
+          <StatusPill
+            label="Connection"
+            value={status.connected ? "connected" : "disconnected"}
+            tone={status.connected ? "ok" : "warn"}
+          />
+        )}
       </header>
 
-      <div className="status-row">
-        <StatusPill
-          label="Availability"
-          value={status.available ? "ready" : "offline"}
-          tone={status.available ? "ok" : "warn"}
-        />
-        <StatusPill
-          label="Activity"
-          value={status.busy ? "busy" : "idle"}
-          tone={status.busy ? "warn" : "ok"}
-        />
-      </div>
+      {!hideStatusRow ? (
+        <div className="status-row">
+          <StatusPill
+            label="Availability"
+            value={status.available ? "ready" : "offline"}
+            tone={status.available ? "ok" : "warn"}
+          />
+          <StatusPill
+            label="Activity"
+            value={status.busy ? "busy" : "idle"}
+            tone={status.busy ? "warn" : "ok"}
+          />
+        </div>
+      ) : null}
 
-      <ul className="details-list">
-        <li>
-          <span>Last updated</span>
-          <strong>{new Date(status.last_updated).toLocaleTimeString()}</strong>
-        </li>
-        {details.map(([key, value]) => (
-          <li key={key}>
-            <span>{key}</span>
-            <strong>{formatValue(value)}</strong>
-          </li>
-        ))}
-        {status.error ? (
+      {summary}
+
+      {!hideDetails ? (
+        <ul className="details-list">
           <li>
-            <span>Error</span>
-            <strong>{status.error}</strong>
+            <span>Last updated</span>
+            <strong>{new Date(status.last_updated).toLocaleTimeString()}</strong>
           </li>
-        ) : null}
-      </ul>
+          {details.map(({ label, value }) => (
+            <li key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </li>
+          ))}
+          {status.error ? (
+            <li>
+              <span>Error</span>
+              <strong>{status.error}</strong>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
 
       {notice ? (
         <div className={`inline-notice inline-notice-${notice.tone}`}>
@@ -125,7 +152,7 @@ export function HardwareCard({
               onClick={() => void onAction?.()}
               disabled={primaryActionDisabled}
             >
-              {actionPending ? "Working..." : actionLabel}
+              {actionPending ? actionPendingLabel : actionLabel}
             </button>
           ) : null}
           {hasSecondaryAction ? (

@@ -26,15 +26,27 @@ export type ParsedCameraStatus =
 
 export interface CameraPanelModel {
   notice: CameraNotice | null;
+  headerStatusLabel: string | null;
+  headerStatusTone: "ok" | "warn";
+  summaryTitle: string;
+  summaryDetail: string | null;
+  summaryBadges: string[];
+  captureActionLabel: string;
+  capturePendingLabel: string;
   captureDisabled: boolean;
   capturePending: boolean;
+  secondaryActionLabel: string | null;
+  secondaryActionIntent: "open_camera_bridge_app" | null;
+  canEditDevice: boolean;
   selectionRequired: boolean;
   availableDevices: CameraBridgeDeviceOption[];
   selectedDeviceId: string;
-  selectedDeviceLabel: string | null;
+  savedDeviceLabel: string | null;
+  hasSelectionDraft: boolean;
+  deviceSelectionHelper: string | null;
+  deviceEditLabel: string | null;
   saveDeviceDisabled: boolean;
   saveDevicePending: boolean;
-  footerNote: string;
 }
 
 export function parseCameraStatus(status: DeviceStatus): ParsedCameraStatus {
@@ -120,41 +132,85 @@ export function buildCameraPanelModel({
 
   if (parsedStatus.kind === "camerabridge") {
     const { details, status } = parsedStatus;
-    const selectedDeviceLabel =
+    const savedDeviceLabel =
       details.devices.find(
         (device) => device.id === details.effective_selected_device_id,
       )?.name ?? null;
+    const currentSavedDeviceId =
+      details.effective_selected_device_id ?? details.persisted_selected_device_id ?? "";
+    const hasSelectionDraft =
+      selectedDeviceId.length > 0 && selectedDeviceId !== currentSavedDeviceId;
+    const summaryTitle = buildCameraSummaryTitle(details, savedDeviceLabel);
+    const summaryDetail = buildCameraSummaryDetail(details, savedDeviceLabel);
 
     return {
       notice,
+      headerStatusLabel:
+        details.readiness_state === "ready"
+          ? null
+          : describeHeaderStatus(details.readiness_state),
+      headerStatusTone: details.readiness_state === "ready" ? "ok" : "warn",
+      summaryTitle,
+      summaryDetail,
+      summaryBadges: [],
+      captureActionLabel: "Capture image",
+      capturePendingLabel: "Capturing...",
       captureDisabled:
         capturePending || status.busy || details.readiness_state !== "ready",
       capturePending,
+      secondaryActionLabel: shouldShowCameraBridgeAppHandoff(details)
+        ? "Open CameraBridgeApp"
+        : null,
+      secondaryActionIntent: shouldShowCameraBridgeAppHandoff(details)
+        ? "open_camera_bridge_app"
+        : null,
+      canEditDevice: details.devices.length > 0,
       selectionRequired: details.selection_required,
       availableDevices: details.devices,
       selectedDeviceId,
-      selectedDeviceLabel,
-      saveDeviceDisabled: saveDevicePending || selectedDeviceId.length === 0,
+      savedDeviceLabel,
+      hasSelectionDraft,
+      deviceSelectionHelper:
+        details.selection_required
+          ? "Pick a camera and save it before capturing."
+          : null,
+      deviceEditLabel:
+        details.devices.length > 0 && !details.selection_required && savedDeviceLabel
+          ? "Edit"
+          : null,
+      saveDeviceDisabled:
+        saveDevicePending ||
+        selectedDeviceId.length === 0 ||
+        selectedDeviceId === currentSavedDeviceId,
       saveDevicePending,
-      footerNote: `${
-        selectedDeviceLabel ? `Selected device: ${selectedDeviceLabel}. ` : ""
-      }Captures are saved locally and served back through the backend.`,
     };
   }
 
   const { status } = parsedStatus;
   return {
     notice,
+    headerStatusLabel: status.available ? null : "Unavailable",
+    headerStatusTone: status.available ? "ok" : "warn",
+    summaryTitle: status.available ? "Ready to capture" : "Camera unavailable",
+    summaryDetail: status.error ?? "Backend-owned capture is available from this panel.",
+    summaryBadges: [],
+    captureActionLabel: "Capture image",
+    capturePendingLabel: "Capturing...",
     captureDisabled:
       capturePending || status.busy || !status.available || status.error !== null,
     capturePending,
+    secondaryActionLabel: null,
+    secondaryActionIntent: null,
+    canEditDevice: false,
     selectionRequired: false,
     availableDevices: [],
     selectedDeviceId,
-    selectedDeviceLabel: null,
+    savedDeviceLabel: null,
+    hasSelectionDraft: false,
+    deviceSelectionHelper: null,
+    deviceEditLabel: null,
     saveDeviceDisabled: true,
     saveDevicePending,
-    footerNote: "Captures are saved locally and served back through the backend.",
   };
 }
 
@@ -173,39 +229,15 @@ function buildCameraNotice(
   }
 
   if (parsedStatus.kind === "camerabridge") {
-    const { details, status } = parsedStatus;
+    const { details } = parsedStatus;
     switch (details.readiness_state) {
-      case "needs_service":
-        return {
-          tone: "info",
-          message:
-            "Open CameraBridgeApp, click Start CameraBridge Service, then retry once the local service is running.",
-        };
-      case "needs_permission":
-        return {
-          tone: "info",
-          message:
-            details.permission_message ??
-            "Open CameraBridgeApp and request camera access before capturing.",
-        };
-      case "needs_device_selection":
-        return {
-          tone: "info",
-          message: "Choose a CameraBridge device to enable capture.",
-        };
-      case "busy_external":
-        return {
-          tone: "error",
-          message:
-            "Another local client currently owns the CameraBridge session. Stop it there and retry.",
-        };
       case "error":
-        if (status.error) {
-          return { tone: "error", message: status.error };
+        if (parsedStatus.status.error) {
+          return { tone: "error", message: parsedStatus.status.error };
         }
         return null;
       default:
-        break;
+        return null;
     }
   }
 
@@ -226,4 +258,92 @@ function getBoolean(details: Record<string, unknown>, key: string, fallback = fa
 
 function getNumber(details: Record<string, unknown>, key: string, fallback = 0) {
   return typeof details[key] === "number" ? details[key] : fallback;
+}
+
+function describeReadiness(readinessState: CameraReadinessState) {
+  switch (readinessState) {
+    case "ready":
+      return "Ready to capture";
+    case "needs_service":
+      return "CameraBridge service offline";
+    case "needs_permission":
+      return "Camera permission needed";
+    case "needs_device_selection":
+      return "Camera selection required";
+    case "busy_external":
+      return "Busy in another app";
+    default:
+      return "Camera unavailable";
+  }
+}
+
+function describeHeaderStatus(readinessState: CameraReadinessState) {
+  switch (readinessState) {
+    case "ready":
+      return "Ready";
+    case "needs_service":
+      return "Offline";
+    case "needs_permission":
+      return "Needs permission";
+    case "needs_device_selection":
+      return "Choose camera";
+    case "busy_external":
+      return "Busy";
+    default:
+      return "Unavailable";
+  }
+}
+
+function buildCameraSummaryTitle(
+  details: CameraBridgeStatusDetails,
+  _selectedDeviceLabel: string | null,
+) {
+  switch (details.readiness_state) {
+    case "ready":
+      return "Ready to capture";
+    case "needs_service":
+      return "Start CameraBridge";
+    case "needs_permission":
+      return "Camera access required";
+    case "needs_device_selection":
+      return "Choose a camera";
+    case "busy_external":
+      return "Camera busy";
+    default:
+      return "Camera unavailable";
+  }
+}
+
+function buildCameraSummaryDetail(
+  details: CameraBridgeStatusDetails,
+  _selectedDeviceLabel: string | null,
+) {
+  switch (details.readiness_state) {
+    case "ready":
+      return null;
+    case "needs_service":
+      return "Open CameraBridge and start the local service.";
+    case "needs_permission":
+      return "Grant camera access in CameraBridgeApp before capturing.";
+    case "needs_device_selection":
+      return "Pick a camera and save it before capturing.";
+    case "busy_external":
+      return "Another local app is using CameraBridge right now.";
+    default:
+      return details.configuration_error ?? "Check the camera state and retry.";
+  }
+}
+
+function buildSummaryBadges(
+  _details: CameraBridgeStatusDetails,
+  _selectedDeviceLabel: string | null,
+) {
+  return [];
+}
+
+function shouldShowCameraBridgeAppHandoff(details: CameraBridgeStatusDetails) {
+  return (
+    details.readiness_state === "needs_service" ||
+    details.readiness_state === "needs_permission"
+  );
 }
