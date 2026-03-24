@@ -59,7 +59,7 @@ If you need to start the backend manually instead, install the backend dependenc
 export LEARN_TO_DRAW_CAMERA_DRIVER=camerabridge
 ```
 
-LearnToDraw supports CameraBridge against an explicit tested `v0.1.x` range, initially `v0.1.0`, and relies on CameraBridge's localhost service plus support-directory artifacts. Optional CameraBridge env vars:
+LearnToDraw supports CameraBridge against an explicit tested `v0.1.x` range, audited and smoke-validated against the published `v0.1.2` localhost runtime contract, and relies on CameraBridge's localhost service plus support-directory artifacts. Optional CameraBridge env vars:
 
 ```bash
 export LEARN_TO_DRAW_CAMERABRIDGE_BASE_URL=http://127.0.0.1:8731
