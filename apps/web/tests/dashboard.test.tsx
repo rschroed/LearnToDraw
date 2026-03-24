@@ -296,8 +296,6 @@ describe("Hardware dashboard", () => {
   let backendReachable: boolean;
   let helperReachable: boolean;
   let helperStatus: HelperStatus;
-  let helperStartCount: number;
-  let helperRestartCount: number;
   let helperStatusPollCount: number;
   let helperTransitionsToRunning: boolean;
   let helperFailsOnStart: boolean;
@@ -315,8 +313,6 @@ describe("Hardware dashboard", () => {
     backendReachable = true;
     helperReachable = false;
     helperStatus = makeHelperStatus();
-    helperStartCount = 0;
-    helperRestartCount = 0;
     helperStatusPollCount = 0;
     helperTransitionsToRunning = true;
     helperFailsOnStart = false;
@@ -377,7 +373,6 @@ describe("Hardware dashboard", () => {
           }
 
           if (url === "/local-helper/start" && method === "POST") {
-            helperStartCount += 1;
             helperStatusPollCount = 0;
             helperStatus = makeHelperStatus({
               state: "starting",
@@ -392,7 +387,6 @@ describe("Hardware dashboard", () => {
           }
 
           if (url === "/local-helper/restart" && method === "POST") {
-            helperRestartCount += 1;
             helperStatusPollCount = 0;
             helperStatus = makeHelperStatus({
               state: "starting",

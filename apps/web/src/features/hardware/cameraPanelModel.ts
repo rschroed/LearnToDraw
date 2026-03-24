@@ -260,23 +260,6 @@ function getNumber(details: Record<string, unknown>, key: string, fallback = 0) 
   return typeof details[key] === "number" ? details[key] : fallback;
 }
 
-function describeReadiness(readinessState: CameraReadinessState) {
-  switch (readinessState) {
-    case "ready":
-      return "Ready to capture";
-    case "needs_service":
-      return "CameraBridge service offline";
-    case "needs_permission":
-      return "Camera permission needed";
-    case "needs_device_selection":
-      return "Camera selection required";
-    case "busy_external":
-      return "Busy in another app";
-    default:
-      return "Camera unavailable";
-  }
-}
-
 function describeHeaderStatus(readinessState: CameraReadinessState) {
   switch (readinessState) {
     case "ready":
@@ -332,13 +315,6 @@ function buildCameraSummaryDetail(
     default:
       return details.configuration_error ?? "Check the camera state and retry.";
   }
-}
-
-function buildSummaryBadges(
-  _details: CameraBridgeStatusDetails,
-  _selectedDeviceLabel: string | null,
-) {
-  return [];
 }
 
 function shouldShowCameraBridgeAppHandoff(details: CameraBridgeStatusDetails) {
