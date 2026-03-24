@@ -47,3 +47,29 @@ export interface HardwareDashboardState {
   actionFeedback: ActionFeedback | null;
   error: string | null;
 }
+
+export interface HardwareDashboardActions {
+  refresh: (options?: { silent?: boolean }) => Promise<void>;
+  walkHome: () => Promise<void>;
+  runPlotterTestAction: (action: PlotterDiagnosticAction) => Promise<void>;
+  runDiagnosticPattern: (patternId: DiagnosticPatternId) => Promise<void>;
+  setPlotterPenHeights: (penPosUp: number, penPosDown: number) => Promise<void>;
+  setPlotterCalibration: (nativeResFactor: number) => Promise<void>;
+  setPlotterSafeBounds: (safeBounds: {
+    width_mm: number | null;
+    height_mm: number | null;
+  }) => Promise<void>;
+  setPlotterWorkspace: (workspace: {
+    page_width_mm: number;
+    page_height_mm: number;
+    margin_left_mm: number;
+    margin_top_mm: number;
+    margin_right_mm: number;
+    margin_bottom_mm: number;
+  }) => Promise<void>;
+  capture: () => Promise<void>;
+  setCameraDevice: (deviceId: string | null) => Promise<void>;
+}
+
+export type HardwareDashboardController = HardwareDashboardState &
+  HardwareDashboardActions;

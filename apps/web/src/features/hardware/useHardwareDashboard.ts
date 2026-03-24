@@ -15,6 +15,7 @@ import {
 import { useHardwareActionRunner } from "./useHardwareActionRunner";
 import type {
   DiagnosticPatternId,
+  HardwareDashboardController,
   PlotterDiagnosticAction,
 } from "./hardwareDashboardTypes";
 import { useHardwareSnapshotState } from "./useHardwareSnapshotState";
@@ -23,7 +24,7 @@ import { useHardwareSnapshotState } from "./useHardwareSnapshotState";
 const POLL_INTERVAL_MS = 2500;
 
 
-export function useHardwareDashboard() {
+export function useHardwareDashboard(): HardwareDashboardController {
   const mountedRef = useRef(true);
   const [error, setError] = useState<string | null>(null);
   const snapshotState = useHardwareSnapshotState();
