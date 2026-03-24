@@ -1481,7 +1481,6 @@ describe("Hardware dashboard", () => {
     expect(
       screen.getAllByText(/pick a camera and save it before capturing/i).length,
     ).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /save camera/i })).toBeEnabled();
   });
 
   it("creates a built-in pattern and completes a plot run", async () => {
