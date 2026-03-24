@@ -33,7 +33,7 @@ from learn_to_draw_api.services.plotter_workspace import (
 
 
 class StubRealCamera:
-    driver = "opencv-camera"
+    driver = "camerabridge"
 
     def __init__(self) -> None:
         self._connected = False
@@ -49,6 +49,9 @@ class StubRealCamera:
         return MockCamera(driver=self.driver).get_status().model_copy(
             update={"connected": self._connected}
         )
+
+    def set_selected_device(self, device_id: str | None):
+        return self.get_status()
 
     def capture(self) -> CaptureArtifact:
         self._capture_count += 1
@@ -237,8 +240,8 @@ def test_plot_workflow_service_persists_real_camera_capture(tmp_path):
     assert completed.capture.mime_type == "image/jpeg"
     assert completed.capture.public_url.endswith(".jpg")
     assert completed.observed_result.capture.mime_type == "image/jpeg"
-    assert completed.observed_result.camera_driver == "opencv-camera"
-    assert completed.camera_run_details["driver"] == "opencv-camera"
+    assert completed.observed_result.camera_driver == "camerabridge"
+    assert completed.camera_run_details["driver"] == "camerabridge"
     assert completed.camera_run_details["resolution"] == "640x480"
 
 

@@ -6,6 +6,8 @@ from learn_to_draw_api.adapters.camera import CameraAdapter
 from learn_to_draw_api.adapters.plotter import PlotterAdapter
 from learn_to_draw_api.models import (
     CameraCaptureResponse,
+    CameraCommandResponse,
+    CameraDeviceSelectionRequest,
     HardwareBusyError,
     HardwareStatus,
     LatestCaptureResponse,
@@ -188,6 +190,25 @@ class HardwareService:
                 message="Image captured.",
                 status=self._camera.get_status(),
                 capture=metadata,
+            )
+        finally:
+            self._camera_lock.release()
+
+    def set_camera_device(
+        self,
+        request: CameraDeviceSelectionRequest,
+    ) -> CameraCommandResponse:
+        if not self._camera_lock.acquire(blocking=False):
+            raise HardwareBusyError("Camera is busy.")
+        try:
+            status = self._camera.set_selected_device(request.device_id)
+            return CameraCommandResponse(
+                message=(
+                    "Camera device preference cleared."
+                    if request.device_id is None
+                    else "Camera device preference updated."
+                ),
+                status=status,
             )
         finally:
             self._camera_lock.release()

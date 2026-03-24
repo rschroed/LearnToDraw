@@ -1,10 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
-import {
-  formatMm,
-} from "../src/features/hardware/hardwareDashboardUtils";
-import * as api from "../src/lib/api";
+import { formatMm } from "../src/features/hardware/hardwareDashboardUtils";
 import type { HardwareStatus } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
 
@@ -32,6 +29,45 @@ const hardwareStatus = {
     details: {
       resolution: "1280x960",
       last_capture_id: null,
+    },
+  },
+};
+
+const cameraBridgeHardwareStatus = {
+  ...hardwareStatus,
+  camera: {
+    available: true,
+    connected: true,
+    busy: false,
+    error: null,
+    driver: "camerabridge",
+    last_updated: "2026-03-15T20:00:00Z",
+    details: {
+      base_url: "http://127.0.0.1:8731",
+      token_path: "/tmp/camerabridge/auth-token",
+      token_readable: true,
+      service_available: true,
+      permission_status: "authorized",
+      permission_message: null,
+      permission_next_step_kind: null,
+      session_state: "stopped",
+      session_owner_id: null,
+      active_device_id: "camera-1",
+      devices: [
+        {
+          id: "camera-1",
+          name: "Built-in Camera",
+          position: "front",
+        },
+      ],
+      device_count: 1,
+      persisted_selected_device_id: null,
+      effective_selected_device_id: "camera-1",
+      selection_required: false,
+      readiness_state: "ready",
+      last_capture_id: null,
+      resolution: null,
+      configuration_error: null,
     },
   },
 };
@@ -260,8 +296,6 @@ describe("Hardware dashboard", () => {
   let backendReachable: boolean;
   let helperReachable: boolean;
   let helperStatus: HelperStatus;
-  let helperStartCount: number;
-  let helperRestartCount: number;
   let helperStatusPollCount: number;
   let helperTransitionsToRunning: boolean;
   let helperFailsOnStart: boolean;
@@ -279,8 +313,6 @@ describe("Hardware dashboard", () => {
     backendReachable = true;
     helperReachable = false;
     helperStatus = makeHelperStatus();
-    helperStartCount = 0;
-    helperRestartCount = 0;
     helperStatusPollCount = 0;
     helperTransitionsToRunning = true;
     helperFailsOnStart = false;
@@ -341,7 +373,6 @@ describe("Hardware dashboard", () => {
           }
 
           if (url === "/local-helper/start" && method === "POST") {
-            helperStartCount += 1;
             helperStatusPollCount = 0;
             helperStatus = makeHelperStatus({
               state: "starting",
@@ -356,7 +387,6 @@ describe("Hardware dashboard", () => {
           }
 
           if (url === "/local-helper/restart" && method === "POST") {
-            helperRestartCount += 1;
             helperStatusPollCount = 0;
             helperStatus = makeHelperStatus({
               state: "starting",
@@ -847,56 +877,51 @@ describe("Hardware dashboard", () => {
     expect(screen.getByText(/paper 210 x 297 mm/i)).toBeInTheDocument();
   });
 
-  it("auto-starts the backend through the helper on first load", async () => {
+  it("shows a backend-unavailable state when the api is unreachable on first load", async () => {
     backendReachable = false;
-    helperReachable = true;
-    helperStatus = makeHelperStatus({
-      state: "stopped",
-      backend_health: "unreachable",
-    });
 
     render(<App />);
 
     expect(
       await screen.findByRole("heading", {
-        name: /starting local camera backend/i,
-      }),
-    ).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("heading", {
-          name: /learntodraw local control panel/i,
-        }),
-      ).toBeInTheDocument();
-    }, { timeout: 10000 });
-
-    expect(helperStartCount).toBe(1);
-  }, 12000);
-
-  it("shows a helper-missing state when the helper is unavailable", async () => {
-    backendReachable = false;
-    helperReachable = false;
-
-    render(<App />);
-
-    expect(
-      await screen.findByRole("heading", {
-        name: /local helper not running/i,
+        name: /local backend unavailable/i,
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/open the learntodraw helper to bring localhost control online/i),
+      screen.getByText(/start the learntodraw api locally and retry/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open helper/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("shows a non-blocking helper warning when the backend is up but the helper is missing", async () => {
-    backendReachable = true;
-    helperReachable = false;
-    const openHelperSpy = vi.spyOn(api, "openHelperApp").mockImplementation(() => {});
+  it("shows the same backend-unavailable state when the dev proxy returns 500", async () => {
+    backendReachable = false;
+    backendProxyReturns500 = true;
 
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /local backend unavailable/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/start the learntodraw api locally and retry/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show helper controls when the backend is already reachable", async () => {
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: /learntodraw local control panel/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open helper/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/local helper/i)).not.toBeInTheDocument();
+  });
+
+  it("returns to the backend-unavailable state after a later backend outage", async () => {
     render(<App />);
 
     expect(
@@ -905,130 +930,15 @@ describe("Hardware dashboard", () => {
       }),
     ).toBeInTheDocument();
 
-    expect(
-      await screen.findByText(
-        /backend is running, but the local helper is not\. dashboard start and restart controls are unavailable until the helper is open\./i,
-      ),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /open helper/i }));
-    expect(openHelperSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens the helper app and recovers when the helper becomes reachable", async () => {
     backendReachable = false;
-    helperReachable = false;
-    const openHelperSpy = vi.spyOn(api, "openHelperApp").mockImplementation(() => {
-      helperReachable = true;
-      helperStatus = makeHelperStatus({
-        state: "stopped",
-        backend_health: "unreachable",
-      });
-    });
-
-    render(<App />);
-
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: /open helper/i,
-      }),
-    );
-
-    expect(openHelperSpy).toHaveBeenCalledTimes(1);
-
-    await waitFor(() => {
-      expect(helperStartCount).toBe(1);
-    }, { timeout: 4000 });
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("heading", {
-          name: /learntodraw local control panel/i,
-        }),
-      ).toBeInTheDocument();
-    }, { timeout: 6000 });
-  }, 8000);
-
-  it("auto-starts the backend when the dev proxy returns 500 for a missing backend", async () => {
-    backendReachable = false;
-    backendProxyReturns500 = true;
-    helperReachable = true;
-    helperStatus = makeHelperStatus({
-      state: "stopped",
-      backend_health: "unreachable",
-    });
-
-    render(<App />);
-
-    expect(
-      await screen.findByRole("heading", { name: /booting local hardware control/i }),
-    ).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(helperStartCount).toBe(1);
-    });
 
     expect(
       await screen.findByRole(
         "heading",
-        { name: /learntodraw local control panel/i },
-        { timeout: 4000 },
+        { name: /local backend unavailable/i },
+        { timeout: 10000 },
       ),
     ).toBeInTheDocument();
-  });
-
-  it("shows a failed helper state and restart control", async () => {
-    backendReachable = false;
-    helperReachable = true;
-    helperStatus = makeHelperStatus({
-      state: "failed",
-      backend_health: "unreachable",
-      last_error: "camera init failed",
-      last_exit_code: 1,
-      started_at: "2026-03-15T20:00:00Z",
-    });
-    helperTransitionsToRunning = false;
-    helperFailsOnStart = true;
-
-    render(<App />);
-
-    expect(
-      await screen.findByRole("heading", {
-        name: /camera backend failed to start/i,
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/camera init failed/i)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /restart backend/i }));
-
-    await waitFor(() => {
-      expect(helperRestartCount).toBe(1);
-    });
-  });
-
-  it("does not auto-start again after a later backend outage", async () => {
-    helperReachable = true;
-    helperStatus = makeHelperStatus({
-      state: "stopped",
-      backend_health: "unreachable",
-    });
-
-    render(<App />);
-
-    expect(
-      await screen.findByRole("heading", {
-        name: /learntodraw local control panel/i,
-      }),
-    ).toBeInTheDocument();
-
-    backendReachable = false;
-
-    expect(
-      await screen.findByRole("heading", {
-        name: /camera backend stopped/i,
-      }, { timeout: 10000 }),
-    ).toBeInTheDocument();
-    expect(helperStartCount).toBe(0);
   }, 12000);
 
   it("shows a disengage motors button for axidraw and runs align mode", async () => {
@@ -1305,16 +1215,122 @@ describe("Hardware dashboard", () => {
     expect(screen.getByText(/image\/svg\+xml/i)).toBeInTheDocument();
   });
 
-  it("renders a jpeg capture from the opencv camera path", async () => {
+  it("keeps capture success when the post-capture refresh times out", async () => {
+    let hardwareStatusRequests = 0;
+
+    vi.mocked(globalThis.fetch).mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+
+        if (url === "/api/hardware/status") {
+          hardwareStatusRequests += 1;
+          if (hardwareStatusRequests > 2) {
+            throw new DOMException("timeout", "AbortError");
+          }
+          return new Response(JSON.stringify(currentHardwareStatus), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/captures/latest") {
+          return new Response(JSON.stringify({ capture: latestCapture }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/calibration") {
+          return new Response(JSON.stringify(currentCalibration), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/device") {
+          return new Response(JSON.stringify(currentDevice), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plotter/workspace") {
+          return new Response(JSON.stringify(currentWorkspace), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs/latest") {
+          return new Response(JSON.stringify({ run: latestRun }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/plot-runs") {
+          return new Response(JSON.stringify({ runs: recentRuns }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (url === "/api/camera/capture" && method === "POST") {
+          latestCapture = {
+            id: "capture-timeout-001",
+            timestamp: "2026-03-24T03:10:00Z",
+            file_path: "/tmp/capture-timeout-001.svg",
+            public_url: "/captures/capture-timeout-001.svg",
+            width: 1280,
+            height: 960,
+            mime_type: "image/svg+xml",
+          };
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: "Image captured.",
+              status: currentHardwareStatus.camera,
+              capture: latestCapture,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /capture image/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("img", {
+          name: /latest camera capture capture-timeout-001/i,
+        }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/local service timed out\./i)).not.toBeInTheDocument();
+  });
+
+  it("renders a jpeg capture from the CameraBridge camera path", async () => {
     currentHardwareStatus.camera = {
-      ...currentHardwareStatus.camera,
-      driver: "opencv-camera",
+      ...cameraBridgeHardwareStatus.camera,
       details: {
-        camera_index: 0,
-        initialization_state: "uninitialized",
+        ...cameraBridgeHardwareStatus.camera.details,
         last_capture_id: null,
         resolution: null,
-      } as Record<string, unknown>,
+      },
     };
 
     vi.mocked(globalThis.fetch).mockImplementation(
@@ -1386,11 +1402,10 @@ describe("Hardware dashboard", () => {
             available: true,
             connected: true,
             details: {
-              camera_index: 0,
-              initialization_state: "ready",
+              ...cameraBridgeHardwareStatus.camera.details,
               last_capture_id: "capture-real-001",
               resolution: "1920x1080",
-            } as Record<string, unknown>,
+            },
           };
           return new Response(
             JSON.stringify({
@@ -1425,29 +1440,47 @@ describe("Hardware dashboard", () => {
     });
     expect(screen.getByText(/image captured\./i)).toBeInTheDocument();
     expect(screen.getByText(/image\/jpeg/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/opencv-camera/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/camerabridge/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/1920 x 1080/i)).toBeInTheDocument();
   });
 
-  it("keeps capture enabled while the opencv camera is uninitialized", async () => {
+  it("disables capture while CameraBridge needs explicit device selection", async () => {
     currentHardwareStatus.camera = {
-      ...currentHardwareStatus.camera,
+      ...cameraBridgeHardwareStatus.camera,
       available: false,
-      connected: false,
-      driver: "opencv-camera",
+      connected: true,
       details: {
-        camera_index: 0,
-        initialization_state: "uninitialized",
+        ...cameraBridgeHardwareStatus.camera.details,
+        devices: [
+          {
+            id: "camera-1",
+            name: "Built-in Camera",
+            position: "front",
+          },
+          {
+            id: "camera-2",
+            name: "Desk Camera",
+            position: "external",
+          },
+        ],
+        device_count: 2,
+        active_device_id: null,
+        effective_selected_device_id: null,
+        selection_required: true,
+        readiness_state: "needs_device_selection",
         last_capture_id: null,
         resolution: null,
-      } as Record<string, unknown>,
+      },
     };
 
     render(<App />);
 
     expect(
       await screen.findByRole("button", { name: /capture image/i }),
-    ).toBeEnabled();
+    ).toBeDisabled();
+    expect(
+      screen.getAllByText(/pick a camera and save it before capturing/i).length,
+    ).toBeGreaterThan(0);
   });
 
   it("creates a built-in pattern and completes a plot run", async () => {
@@ -2694,7 +2727,7 @@ describe("Hardware dashboard", () => {
               height: 960,
               mime_type: "image/jpeg",
             },
-            camera_driver: "opencv-camera",
+            camera_driver: "camerabridge",
             captured_at: "2026-03-15T20:10:10Z",
             duration_ms: 850,
           },
@@ -2765,7 +2798,7 @@ describe("Hardware dashboard", () => {
             },
           },
           camera_run_details: {
-            driver: "opencv-camera",
+            driver: "camerabridge",
           },
         };
         const olderRunDetail = {
@@ -2798,7 +2831,7 @@ describe("Hardware dashboard", () => {
               height: 480,
               mime_type: "image/jpeg",
             },
-            camera_driver: "opencv-camera",
+            camera_driver: "camerabridge",
             captured_at: "2026-03-15T19:50:12Z",
             duration_ms: 640,
           },

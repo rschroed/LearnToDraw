@@ -14,7 +14,7 @@ api-dev-mock:
 	cd $(API_DIR) && LEARN_TO_DRAW_PLOTTER_DRIVER=mock PYTHONPATH=src $(PYTHON) -m uvicorn learn_to_draw_api.main:app --reload
 
 api-dev-camera:
-	cd $(API_DIR) && LEARN_TO_DRAW_PLOTTER_DRIVER=mock LEARN_TO_DRAW_CAMERA_DRIVER=opencv PYTHONPATH=src $(PYTHON) -m uvicorn learn_to_draw_api.main:app --host 127.0.0.1 --port 8000
+	cd $(API_DIR) && LEARN_TO_DRAW_PLOTTER_DRIVER=mock LEARN_TO_DRAW_CAMERA_DRIVER=camerabridge PYTHONPATH=src $(PYTHON) -m uvicorn learn_to_draw_api.main:app --host 127.0.0.1 --port 8000
 
 api-dev-axidraw:
 	cd $(API_DIR) && LEARN_TO_DRAW_PLOTTER_DRIVER=axidraw PYTHONPATH=src $(PYTHON) -m uvicorn learn_to_draw_api.main:app --reload

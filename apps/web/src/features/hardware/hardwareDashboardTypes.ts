@@ -1,5 +1,10 @@
-import type { CaptureMetadata, HardwareStatus, PlotterCalibration, PlotterDeviceSettings, PlotterWorkspace } from "../../types/hardware";
-import type { HelperStatus } from "../../types/helper";
+import type {
+  CaptureMetadata,
+  HardwareStatus,
+  PlotterCalibration,
+  PlotterDeviceSettings,
+  PlotterWorkspace,
+} from "../../types/hardware";
 
 export type PlotterDiagnosticAction = "raise_pen" | "lower_pen" | "cycle_pen" | "align";
 export type DiagnosticPatternId = "tiny-square" | "dash-row" | "double-box";
@@ -10,12 +15,11 @@ export type ActionName =
   | "plotter-workspace"
   | "plotter-pen-heights"
   | "camera-capture"
+  | "camera-device"
   | `plotter-test:${PlotterDiagnosticAction}`
   | `plotter-pattern:${DiagnosticPatternId}`
   | null;
 export type ActionTone = "info" | "success" | "error";
-export type HelperActionName = "start" | "restart" | null;
-export type HelperConnectionState = "unknown" | "reachable" | "missing";
 
 export interface ActionFeedback {
   action: Exclude<ActionName, null>;
@@ -42,7 +46,30 @@ export interface HardwareDashboardState {
   actionName: ActionName;
   actionFeedback: ActionFeedback | null;
   error: string | null;
-  helperStatus: HelperStatus | null;
-  helperConnectionState: HelperConnectionState;
-  helperActionName: HelperActionName;
 }
+
+export interface HardwareDashboardActions {
+  refresh: (options?: { silent?: boolean }) => Promise<void>;
+  walkHome: () => Promise<void>;
+  runPlotterTestAction: (action: PlotterDiagnosticAction) => Promise<void>;
+  runDiagnosticPattern: (patternId: DiagnosticPatternId) => Promise<void>;
+  setPlotterPenHeights: (penPosUp: number, penPosDown: number) => Promise<void>;
+  setPlotterCalibration: (nativeResFactor: number) => Promise<void>;
+  setPlotterSafeBounds: (safeBounds: {
+    width_mm: number | null;
+    height_mm: number | null;
+  }) => Promise<void>;
+  setPlotterWorkspace: (workspace: {
+    page_width_mm: number;
+    page_height_mm: number;
+    margin_left_mm: number;
+    margin_top_mm: number;
+    margin_right_mm: number;
+    margin_bottom_mm: number;
+  }) => Promise<void>;
+  capture: () => Promise<void>;
+  setCameraDevice: (deviceId: string | null) => Promise<void>;
+}
+
+export type HardwareDashboardController = HardwareDashboardState &
+  HardwareDashboardActions;

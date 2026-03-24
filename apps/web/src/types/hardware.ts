@@ -13,6 +13,50 @@ export interface HardwareStatus {
   camera: DeviceStatus;
 }
 
+export type CameraReadinessState =
+  | "ready"
+  | "needs_service"
+  | "needs_permission"
+  | "needs_device_selection"
+  | "busy_external"
+  | "error";
+
+export type CameraBridgePermissionStatus =
+  | "authorized"
+  | "not_determined"
+  | "restricted"
+  | "denied";
+
+export type CameraBridgeDevicePosition = "front" | "back" | "external";
+
+export interface CameraBridgeDeviceOption {
+  id: string;
+  name: string;
+  position: CameraBridgeDevicePosition;
+}
+
+export interface CameraBridgeStatusDetails {
+  base_url: string | null;
+  token_path: string | null;
+  token_readable: boolean;
+  service_available: boolean;
+  permission_status: CameraBridgePermissionStatus | null;
+  permission_message: string | null;
+  permission_next_step_kind: string | null;
+  session_state: "stopped" | "running" | null;
+  session_owner_id: string | null;
+  active_device_id: string | null;
+  devices: CameraBridgeDeviceOption[];
+  device_count: number;
+  persisted_selected_device_id: string | null;
+  effective_selected_device_id: string | null;
+  selection_required: boolean;
+  readiness_state: CameraReadinessState;
+  last_capture_id: string | null;
+  resolution: string | null;
+  configuration_error: string | null;
+}
+
 export interface CaptureMetadata {
   id: string;
   timestamp: string;
@@ -36,6 +80,8 @@ export interface PlotterCommandResponse {
 export interface CameraCaptureResponse extends PlotterCommandResponse {
   capture: CaptureMetadata;
 }
+
+export interface CameraCommandResponse extends PlotterCommandResponse {}
 
 export type PlotterCalibrationSource =
   | "vendor_default"

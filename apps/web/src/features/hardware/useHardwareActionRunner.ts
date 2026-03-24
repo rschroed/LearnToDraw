@@ -19,6 +19,10 @@ export function useHardwareActionRunner({
       pending: string;
       success: string;
     },
+    options?: {
+      onSuccess?: (result: unknown) => void;
+      ignoreRefreshErrors?: boolean;
+    },
   ) {
     try {
       setActionName(name);
@@ -28,8 +32,15 @@ export function useHardwareActionRunner({
         message: messages.pending,
         tone: "info",
       });
-      await action();
-      await refresh({ silent: true });
+      const result = await action();
+      options?.onSuccess?.(result);
+      try {
+        await refresh({ silent: true });
+      } catch (refreshError) {
+        if (!options?.ignoreRefreshErrors) {
+          throw refreshError;
+        }
+      }
       setActionFeedback({
         action: name,
         message: messages.success,

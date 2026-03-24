@@ -1,4 +1,5 @@
 import type {
+  CameraCommandResponse,
   CameraCaptureResponse,
   HardwareStatus,
   LatestCaptureResponse,
@@ -20,6 +21,7 @@ import type { HelperStatus } from "../types/helper";
 
 const REQUEST_TIMEOUT_MS = 2000;
 const HELPER_OPEN_URL = "learntodraw-helper://open";
+const CAMERABRIDGE_PERMISSION_URL = "camerabridge://permission";
 
 export class ApiRequestError extends Error {
   readonly statusCode: number | null;
@@ -217,6 +219,22 @@ export function captureImage() {
   return requestJson<CameraCaptureResponse>("/api/camera/capture", {
     method: "POST",
   });
+}
+
+export function setCameraDevice(deviceId: string | null) {
+  return requestJson<CameraCommandResponse>("/api/camera/device", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      device_id: deviceId,
+    }),
+  });
+}
+
+export function openCameraBridgeApp() {
+  window.location.assign(CAMERABRIDGE_PERMISSION_URL);
 }
 
 export function uploadPlotAsset(file: File) {

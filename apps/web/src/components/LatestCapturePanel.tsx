@@ -39,9 +39,25 @@ export function LatestCapturePanel({
       </div>
 
       {capture ? (
-        <p className="footer-note">
-          {capture.width} x {capture.height} · {capture.mime_type} · {capture.file_path}
-        </p>
+        <div className="capture-meta">
+          <div className="capture-meta-grid">
+            <div className="capture-meta-item">
+              <span>Saved at</span>
+              <strong>{new Date(capture.timestamp).toLocaleString()}</strong>
+            </div>
+            <div className="capture-meta-item">
+              <span>Dimensions</span>
+              <strong>
+                {capture.width} x {capture.height}
+              </strong>
+            </div>
+            <div className="capture-meta-item">
+              <span>Format</span>
+              <strong>{capture.mime_type}</strong>
+            </div>
+          </div>
+          <p className="footer-note capture-meta-path">{capture.file_path}</p>
+        </div>
       ) : null}
     </section>
   );

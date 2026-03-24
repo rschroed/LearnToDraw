@@ -35,20 +35,16 @@ The frontend is a lightweight local dashboard.
 - presents read-only hardware detail plus a small number of bounded controls
 - previews planned-vs-captured output and current workspace information without becoming a second hardware API
 
-## Local Helper Proof Slice
+## CameraBridge Real-Camera Path
 
-The repository now includes a macOS-first helper proof under `apps/macos-helper`.
+The supported real-camera architecture is now CameraBridge-backed and still backend-owned.
 
-- the helper is lifecycle-only and does not become a second backend
-- it starts and stops the existing FastAPI backend for camera-mode testing
-- it can restart the managed backend for dashboard recovery
-- it exposes helper-local startup status on `127.0.0.1:8001`
-- packaged helper bundles embed the current repo root so they can launch reliably from Finder or `/Applications`
-- the helper registers `learntodraw-helper://open` so the dashboard can prompt macOS to open it when missing
-- reliable URL-scheme launch depends on macOS LaunchServices recognizing a stable installed bundle, with `/Applications/LearnToDrawCameraHelper.app` as the recommended location
-- `apps/macos-helper/scripts/install-app.sh` is the supported local install/update path for placing the helper in `/Applications`
-- all hardware access still stays in the backend on `127.0.0.1:8000`
-- the web app can use the helper only for startup, retry, and failure state while keeping backend APIs unchanged
+- LearnToDraw talks only to its own backend; the browser never calls CameraBridge directly
+- the backend integrates with CameraBridge's published localhost `/v1` API and support-directory artifacts
+- CameraBridge session ownership stays ephemeral per capture while LearnToDraw persists only the selected device preference under `artifacts/device_settings`
+- readiness is modeled explicitly as service, permission, device-selection, busy, or error state rather than helper-owned startup flow
+- the dashboard shows manual CameraBridge guidance only; it does not start, stop, or restart CameraBridge on the user's behalf
+- the old `apps/macos-helper` proof remains in the repo only as legacy/non-active code and is no longer part of the supported dashboard flow
 
 ## Adapters And Hardware Boundary
 
@@ -67,7 +63,7 @@ Local persisted state is organized by purpose:
 - `artifacts/plot_assets`: uploaded or built-in plot sources
 - `artifacts/plot_runs`: run records and prepared output where applicable
 - `artifacts/calibration`: persisted plotter calibration values
-- `artifacts/device_settings`: persisted plotter device settings such as safe-bounds overrides
+- `artifacts/device_settings`: persisted plotter device settings such as safe-bounds overrides plus the selected CameraBridge device preference
 - `artifacts/workspace`: persisted page size and margin setup
 
 Filesystem paths and public URLs are kept separate in the backend so local storage layout does not leak into the HTTP surface.

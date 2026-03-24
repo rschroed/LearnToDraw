@@ -9,7 +9,7 @@ LearnToDraw is a local-first control panel for a pen-plotter workflow. The backe
 - Supports tracked plot runs from uploaded SVGs or built-in patterns
 - Persists captures, plot assets, plot runs, calibration, and workspace/device settings locally
 - Supports both mock adapters for development and a real AxiDraw-backed plotter path
-- Supports both mock camera capture and an OpenCV-backed real camera path
+- Supports both mock camera capture and a CameraBridge-backed real camera path
 
 ## Architecture At A Glance
 
@@ -51,23 +51,26 @@ Camera capture also defaults to the mock adapter. For frontend testing with a re
 make api-dev-camera
 ```
 
-That keeps the plotter on the mock backend and starts the API with the OpenCV camera adapter enabled.
+That keeps the plotter on the mock backend and starts the API with the CameraBridge adapter enabled.
 
 If you need to start the backend manually instead, install the backend dependencies with `make api-install` and set:
 
 ```bash
-export LEARN_TO_DRAW_CAMERA_DRIVER=opencv
+export LEARN_TO_DRAW_CAMERA_DRIVER=camerabridge
 ```
 
-Optional camera tuning env vars:
+LearnToDraw supports CameraBridge against an explicit tested `v0.1.x` range, initially `v0.1.0`, and relies on CameraBridge's localhost service plus support-directory artifacts. Optional CameraBridge env vars:
 
 ```bash
-export LEARN_TO_DRAW_OPENCV_CAMERA_INDEX=0
-export LEARN_TO_DRAW_CAMERA_WARMUP_MS=150
-export LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES=2
+export LEARN_TO_DRAW_CAMERABRIDGE_BASE_URL=http://127.0.0.1:8731
+export LEARN_TO_DRAW_CAMERABRIDGE_TOKEN_PATH="$HOME/Library/Application Support/CameraBridge/auth-token"
+export LEARN_TO_DRAW_CAMERABRIDGE_OWNER_ID=learntodraw-api
+export LEARN_TO_DRAW_CAMERABRIDGE_DEFAULT_DEVICE_ID=camera-1
 ```
 
-On macOS, the first real capture may trigger a camera permission prompt. A denied permission or missing device will surface through the backend camera status and capture endpoint.
+If `LEARN_TO_DRAW_CAMERABRIDGE_BASE_URL` is not set, LearnToDraw checks `~/Library/Application Support/CameraBridge/runtime-configuration.json` and otherwise falls back to `http://127.0.0.1:8731`. The auth token defaults to `~/Library/Application Support/CameraBridge/auth-token`.
+
+CameraBridge is not assumed to be running just because it is installed. Start `CameraBridgeApp`, click `Start CameraBridge Service`, and if needed click `Request Camera Access`. LearnToDraw surfaces those readiness steps through backend camera status and the dashboard.
 
 ## Mock Vs Real Hardware
 

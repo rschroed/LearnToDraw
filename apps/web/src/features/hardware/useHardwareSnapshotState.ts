@@ -61,6 +61,7 @@ export function useHardwareSnapshotState() {
     plotterDevice,
     plotterWorkspace,
     latestCapture,
+    setLatestCaptureState: setLatestCapture,
     loading,
     refreshing,
     setPlotterCalibrationState,
