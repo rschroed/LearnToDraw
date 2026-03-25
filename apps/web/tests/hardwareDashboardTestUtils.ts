@@ -1,3 +1,10 @@
+import { act } from "@testing-library/react";
+
+import { HARDWARE_DASHBOARD_POLL_INTERVAL_MS } from "../src/features/hardware/useHardwareDashboard";
+import {
+  PLOT_WORKFLOW_ACTIVE_POLL_INTERVAL_MS,
+  PLOT_WORKFLOW_IDLE_POLL_INTERVAL_MS,
+} from "../src/features/plot-workflow/usePlotWorkflow";
 import type {
   CaptureMetadata,
   HardwareStatus,
@@ -265,6 +272,35 @@ export function createHardwareDashboardHarness(
     workspaceRequests: [],
     ...overrides,
   };
+}
+
+export function useDashboardFakeTimers() {
+  vi.useFakeTimers();
+}
+
+export async function flushDashboardEffects() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function advanceDashboardTimersBy(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+export async function advanceHardwareDashboardPoll(cycles = 1) {
+  await advanceDashboardTimersBy(HARDWARE_DASHBOARD_POLL_INTERVAL_MS * cycles);
+}
+
+export async function advancePlotWorkflowIdlePoll(cycles = 1) {
+  await advanceDashboardTimersBy(PLOT_WORKFLOW_IDLE_POLL_INTERVAL_MS * cycles);
+}
+
+export async function advancePlotWorkflowActivePoll(cycles = 1) {
+  await advanceDashboardTimersBy(PLOT_WORKFLOW_ACTIVE_POLL_INTERVAL_MS * cycles);
 }
 
 export function installHardwareDashboardFetchMock(

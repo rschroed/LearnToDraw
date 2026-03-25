@@ -188,17 +188,12 @@ describe("Hardware dashboard focused behaviors", () => {
     expect(screen.getByText(/^no camera selected$/i)).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: "camera-2" } });
-    await waitFor(() => {
-      expect(select).toHaveValue("camera-2");
-    });
+    expect(select).toHaveValue("camera-2");
     fireEvent.click(await screen.findByRole("button", { name: /save camera/i }));
 
     expect(await screen.findByText(/camera selection saved\./i)).toBeInTheDocument();
     expect(harness.cameraDeviceRequests).toEqual(["camera-2"]);
-
-    await waitFor(() => {
-      expect(captureButton).toBeEnabled();
-    });
+    expect(captureButton).toBeEnabled();
     expect(screen.getByText(/^ready to capture$/i)).toBeInTheDocument();
     expect(screen.getByText(/^desk camera$/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save camera/i })).not.toBeInTheDocument();
@@ -253,22 +248,17 @@ describe("Hardware dashboard focused behaviors", () => {
     fireEvent.change(select, { target: { value: "camera-2" } });
 
     const saveButton = await screen.findByRole("button", { name: /save camera/i });
-    await waitFor(() => {
-      expect(select).toHaveValue("camera-2");
-      expect(saveButton).toBeEnabled();
-    });
+    expect(select).toHaveValue("camera-2");
+    expect(saveButton).toBeEnabled();
 
     fireEvent.click(saveButton);
 
     expect(await screen.findByText(/camera selection saved\./i)).toBeInTheDocument();
     expect(harness.cameraDeviceRequests).toEqual(["camera-2"]);
-
-    await waitFor(() => {
-      expect(screen.getByText(/^ready to capture$/i)).toBeInTheDocument();
-      expect(screen.getByText(/^desk camera$/i)).toBeInTheDocument();
-      expect(screen.queryByLabelText(/choose camera/i)).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
-    });
+    expect(screen.getByText(/^ready to capture$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^desk camera$/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/choose camera/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
   });
 
   it("keeps the camera editor open across prop refreshes", async () => {

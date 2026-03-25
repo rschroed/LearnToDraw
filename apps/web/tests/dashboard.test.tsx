@@ -1,9 +1,16 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
 import { formatMm } from "../src/features/hardware/hardwareDashboardUtils";
 import type { HardwareStatus } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
+import {
+  advanceHardwareDashboardPoll,
+  advancePlotWorkflowActivePoll,
+  advancePlotWorkflowIdlePoll,
+  flushDashboardEffects,
+  useDashboardFakeTimers,
+} from "./hardwareDashboardTestUtils";
 
 const hardwareStatus = {
   plotter: {
@@ -922,24 +929,25 @@ describe("Hardware dashboard", () => {
   });
 
   it("returns to the backend-unavailable state after a later backend outage", async () => {
+    useDashboardFakeTimers();
+
     render(<App />);
+    await flushDashboardEffects();
 
     expect(
-      await screen.findByRole("heading", {
+      screen.getByRole("heading", {
         name: /learntodraw local control panel/i,
       }),
     ).toBeInTheDocument();
 
     backendReachable = false;
 
+    await advanceHardwareDashboardPoll();
+
     expect(
-      await screen.findByRole(
-        "heading",
-        { name: /local backend unavailable/i },
-        { timeout: 10000 },
-      ),
+      screen.getByRole("heading", { name: /local backend unavailable/i }),
     ).toBeInTheDocument();
-  }, 12000);
+  });
 
   it("shows a disengage motors button for axidraw and runs align mode", async () => {
     vi.restoreAllMocks();
@@ -1484,14 +1492,16 @@ describe("Hardware dashboard", () => {
   });
 
   it("creates a built-in pattern and completes a plot run", async () => {
-    render(<App />);
+    useDashboardFakeTimers();
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: /load test-grid/i }),
-    );
+    render(<App />);
+    await flushDashboardEffects();
+
+    fireEvent.click(screen.getByRole("button", { name: /load test-grid/i }));
+    await flushDashboardEffects();
 
     expect(
-      await screen.findByText(
+      screen.getByText(
         /built-in test-grid pattern is ready to plot with automatic drawable-area preparation\./i,
       ),
     ).toBeInTheDocument();
@@ -1501,20 +1511,18 @@ describe("Hardware dashboard", () => {
         name: /start plot run/i,
       }),
     );
+    await flushDashboardEffects();
 
-    expect(await screen.findByText(/plot run started\./i)).toBeInTheDocument();
+    expect(screen.getByText(/plot run started\./i)).toBeInTheDocument();
 
-    await waitFor(
-      () => {
-        expect(
-          screen.getByRole("img", { name: /prepared output for run run-001/i }),
-        ).toBeInTheDocument();
-        expect(
-          screen.getByRole("img", { name: /observed output for run run-001/i }),
-        ).toBeInTheDocument();
-      },
-      { timeout: 5000 },
-    );
+    await advancePlotWorkflowActivePoll(2);
+
+    expect(
+      screen.getByRole("img", { name: /prepared output for run run-001/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: /observed output for run run-001/i }),
+    ).toBeInTheDocument();
 
     expect(screen.getAllByText(/test grid/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/completed/i).length).toBeGreaterThan(0);
@@ -2951,6 +2959,7 @@ describe("Hardware dashboard", () => {
 
   it("preserves a manual staged asset across refreshes and flags when latest run differs", async () => {
     vi.restoreAllMocks();
+    useDashboardFakeTimers();
     const manualAsset = {
       id: "asset-test-grid",
       kind: "built_in_pattern" as const,
@@ -3071,14 +3080,12 @@ describe("Hardware dashboard", () => {
     );
 
     render(<App />);
+    await flushDashboardEffects();
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: /load test-grid/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /load test-grid/i }));
+    await flushDashboardEffects();
 
-    expect(
-      await screen.findByText(/staged source: test grid/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/staged source: test grid/i)).toBeInTheDocument();
 
     latestRunResponse = {
       id: "run-diagnostic-002",
@@ -3157,14 +3164,11 @@ describe("Hardware dashboard", () => {
       camera_run_details: {},
     };
 
-    await act(async () => {
-      await new Promise((resolve) => window.setTimeout(resolve, 3600));
-    });
+    await advancePlotWorkflowIdlePoll();
 
     expect(screen.getByText(/staged source: test grid/i)).toBeInTheDocument();
     expect(
       screen.getByText(/latest run used a different source: double box\./i),
     ).toBeInTheDocument();
-
-  }, 10000);
+  });
 });
