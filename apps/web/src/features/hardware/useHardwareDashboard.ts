@@ -22,7 +22,7 @@ import type {
 import { useHardwareSnapshotState } from "./useHardwareSnapshotState";
 
 
-const POLL_INTERVAL_MS = 2500;
+export const HARDWARE_DASHBOARD_POLL_INTERVAL_MS = 2500;
 
 
 export function useHardwareDashboard(): HardwareDashboardController {
@@ -76,7 +76,7 @@ export function useHardwareDashboard(): HardwareDashboardController {
 
     const poller = window.setInterval(() => {
       void refresh({ silent: true });
-    }, POLL_INTERVAL_MS);
+    }, HARDWARE_DASHBOARD_POLL_INTERVAL_MS);
 
     return () => {
       mountedRef.current = false;

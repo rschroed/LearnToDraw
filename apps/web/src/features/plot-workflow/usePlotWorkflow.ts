@@ -19,6 +19,8 @@ type NoticeTone = "info" | "success" | "error";
 type SelectionSource = "manual" | "run-derived" | null;
 
 const ACTIVE_RUN_STATUSES = new Set(["pending", "plotting", "capturing"]);
+export const PLOT_WORKFLOW_ACTIVE_POLL_INTERVAL_MS = 1200;
+export const PLOT_WORKFLOW_IDLE_POLL_INTERVAL_MS = 3500;
 
 export function usePlotWorkflow() {
   const [selectedAsset, setSelectedAsset] = useState<PlotAsset | null>(null);
@@ -192,7 +194,9 @@ export function usePlotWorkflow() {
       () => {
         void refresh({ silent: true });
       },
-      activeRun ? 1200 : 3500,
+      activeRun
+        ? PLOT_WORKFLOW_ACTIVE_POLL_INTERVAL_MS
+        : PLOT_WORKFLOW_IDLE_POLL_INTERVAL_MS,
     );
 
     return () => {
