@@ -1,10 +1,34 @@
-import { LatestCapturePanel } from "../../components/LatestCapturePanel";
+import { useMemo, useState } from "react";
+
+import { StatusPill } from "../../components/StatusPill";
 import { PlotWorkflowPanel } from "../plot-workflow/PlotWorkflowPanel";
-import { CameraPanel } from "./CameraPanel";
+import { usePlotWorkflow } from "../plot-workflow/usePlotWorkflow";
 import { HardwareStartupState } from "./HardwareStartupState";
-import { PlotterPanel } from "./PlotterPanel";
+import { MachineSetupPanel } from "./MachineSetupPanel";
 import { useHardwareDashboard } from "./useHardwareDashboard";
 
+type DashboardTab = "workflow" | "machine" | "history";
+
+function getGlobalBlocker({
+  plotterAvailable,
+  cameraAvailable,
+  workspaceError,
+}: {
+  plotterAvailable: boolean;
+  cameraAvailable: boolean;
+  workspaceError: string | null;
+}) {
+  if (workspaceError) {
+    return `Paper setup needs attention before plotting: ${workspaceError}`;
+  }
+  if (!plotterAvailable) {
+    return "Plotter unavailable. Review the Machine tab before starting the plotter/camera loop.";
+  }
+  if (!cameraAvailable) {
+    return "Camera unavailable. Review the Machine tab before starting the plotter/camera loop.";
+  }
+  return null;
+}
 
 export function HardwareDashboard() {
   const {
@@ -29,6 +53,21 @@ export function HardwareDashboard() {
     capture,
     setCameraDevice,
   } = useHardwareDashboard();
+  const plotWorkflow = usePlotWorkflow();
+  const [activeTab, setActiveTab] = useState<DashboardTab>("workflow");
+
+  const globalBlocker = useMemo(
+    () =>
+      hardwareStatus
+        ? getGlobalBlocker({
+            plotterAvailable: hardwareStatus.plotter.available,
+            cameraAvailable: hardwareStatus.camera.available,
+            workspaceError:
+              plotterWorkspace?.is_valid === false ? plotterWorkspace.validation_error : null,
+          })
+        : null,
+    [hardwareStatus, plotterWorkspace],
+  );
 
   if (loading && !hardwareStatus) {
     return (
@@ -58,39 +97,70 @@ export function HardwareDashboard() {
   }
 
   return (
-    <main className="page-shell">
-      <section className="hero">
-        <div className="hero-card">
-          <h1>LearnToDraw local control panel</h1>
-          <p>
-            Backend-owned hardware control for local plotting and capture. The
-            UI polls device state, triggers narrow backend actions, and previews
-            the latest saved capture.
+    <main className="app-shell">
+      <header className="app-topbar">
+        <div className="topbar-copy">
+          <p className="eyebrow">LearnToDraw</p>
+          <h1>Workflow-first local operator</h1>
+          <p className="topbar-subtitle">
+            Stage an artwork, run the plotter/camera loop, and inspect the saved result
+            without moving hardware control out of the backend.
           </p>
         </div>
 
-        <aside className="hero-metrics">
-          <div className="metric">
-            <span className="metric-label">Plotter driver</span>
-            <span className="metric-value">{hardwareStatus.plotter.driver}</span>
+        <div className="topbar-side">
+          <div className="readiness-bar">
+            <StatusPill label="Backend" value={refreshing ? "refreshing" : "online"} />
+            <StatusPill
+              label="Plotter"
+              value={hardwareStatus.plotter.available ? "ready" : "offline"}
+              tone={hardwareStatus.plotter.available ? "ok" : "warn"}
+            />
+            <StatusPill
+              label="Camera"
+              value={hardwareStatus.camera.available ? "ready" : "offline"}
+              tone={hardwareStatus.camera.available ? "ok" : "warn"}
+            />
           </div>
-          <div className="metric">
-            <span className="metric-label">Camera driver</span>
-            <span className="metric-value">{hardwareStatus.camera.driver}</span>
-          </div>
-          <div className="metric">
-            <span className="metric-label">Latest capture</span>
-            <span className="metric-value">
-              {latestCapture ? latestCapture.id.slice(0, 8) : "none"}
-            </span>
-          </div>
-        </aside>
-      </section>
+          <button
+            type="button"
+            className="button-secondary"
+            onClick={() => void refresh()}
+          >
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <nav className="app-tabs" aria-label="Primary views">
+        {(["workflow", "machine", "history"] as DashboardTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={`app-tab${activeTab === tab ? " app-tab-active" : ""}`}
+            aria-pressed={activeTab === tab}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab[0].toUpperCase()}
+            {tab.slice(1)}
+          </button>
+        ))}
+      </nav>
 
       {error ? <div className="banner">{error}</div> : null}
+      {globalBlocker ? <div className="global-blocker">{globalBlocker}</div> : null}
 
-      <section className="status-grid">
-        <PlotterPanel
+      {activeTab === "workflow" ? (
+        <PlotWorkflowPanel
+          controller={plotWorkflow}
+          hardwareStatus={hardwareStatus}
+          plotterWorkspace={plotterWorkspace}
+          latestCapture={latestCapture}
+        />
+      ) : null}
+
+      {activeTab === "machine" ? (
+        <MachineSetupPanel
           hardwareStatus={hardwareStatus}
           plotterCalibration={plotterCalibration}
           plotterDevice={plotterDevice}
@@ -104,23 +174,20 @@ export function HardwareDashboard() {
           setPlotterSafeBounds={setPlotterSafeBounds}
           setPlotterWorkspace={setPlotterWorkspace}
           setPlotterPenHeights={setPlotterPenHeights}
-        />
-
-        <CameraPanel
-          cameraStatus={hardwareStatus.camera}
-          actionName={actionName}
-          actionFeedback={actionFeedback}
           capture={capture}
           setCameraDevice={setCameraDevice}
         />
-      </section>
+      ) : null}
 
-      <PlotWorkflowPanel
-        hardwareStatus={hardwareStatus}
-        plotterWorkspace={plotterWorkspace}
-      />
-
-      <LatestCapturePanel capture={latestCapture} refreshing={refreshing} />
+      {activeTab === "history" ? (
+        <PlotWorkflowPanel
+          controller={plotWorkflow}
+          hardwareStatus={hardwareStatus}
+          plotterWorkspace={plotterWorkspace}
+          latestCapture={latestCapture}
+          mode="history"
+        />
+      ) : null}
     </main>
   );
 }

@@ -22,7 +22,30 @@ const ACTIVE_RUN_STATUSES = new Set(["pending", "plotting", "capturing"]);
 export const PLOT_WORKFLOW_ACTIVE_POLL_INTERVAL_MS = 1200;
 export const PLOT_WORKFLOW_IDLE_POLL_INTERVAL_MS = 3500;
 
-export function usePlotWorkflow() {
+export interface PlotWorkflowController {
+  selectedAsset: PlotAsset | null;
+  selectionSource: SelectionSource;
+  latestRun: PlotRun | null;
+  inspectedRun: PlotRun | null;
+  inspectedRunId: string | null;
+  recentRuns: PlotRunSummary[];
+  loading: boolean;
+  refreshing: boolean;
+  busyAction: PlotAction;
+  activeRun: boolean;
+  error: string | null;
+  notice: {
+    tone: NoticeTone;
+    message: string;
+  } | null;
+  refresh: (options?: { silent?: boolean }) => Promise<void>;
+  createBuiltInPattern: () => Promise<void>;
+  uploadSvg: (file: File) => Promise<void>;
+  startRun: () => Promise<void>;
+  inspectRun: (runId: string) => Promise<void>;
+}
+
+export function usePlotWorkflow(): PlotWorkflowController {
   const [selectedAsset, setSelectedAsset] = useState<PlotAsset | null>(null);
   const [selectionSource, setSelectionSource] = useState<SelectionSource>(null);
   const [latestRun, setLatestRun] = useState<PlotRun | null>(null);
