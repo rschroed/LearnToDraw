@@ -64,7 +64,7 @@ describe("cameraPanelModel", () => {
     expect(model.headerStatusLabel).toBeNull();
     expect(model.summaryTitle).toBe("Ready to capture");
     expect(model.summaryDetail).toBeNull();
-    expect(model.captureActionLabel).toBe("Capture image");
+    expect(model.captureActionLabel).toBe("Capture test image");
     expect(model.capturePendingLabel).toBe("Capturing...");
     expect(model.secondaryActionLabel).toBeNull();
     expect(model.secondaryActionIntent).toBeNull();

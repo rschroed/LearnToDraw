@@ -5,7 +5,7 @@ LearnToDraw is a local-first control panel for a pen-plotter workflow. The backe
 ## What It Does
 
 - Runs a FastAPI backend that stays responsible for plotter and camera access
-- Provides a React/Vite dashboard for local status, actions, and workflow visibility
+- Provides a React/Vite operator UI with focused Workflow, Machine, and History views
 - Supports tracked plot runs from uploaded SVGs or built-in patterns
 - Persists captures, plot assets, plot runs, calibration, and workspace/device settings locally
 - Supports both mock adapters for development and a real AxiDraw-backed plotter path

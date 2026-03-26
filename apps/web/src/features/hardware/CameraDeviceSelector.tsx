@@ -32,6 +32,21 @@ export function CameraDeviceSelector({
   const showCurrentValue = Boolean(editLabel && onEdit) || !savedDeviceLabel;
   const showActionRow = hasSelectionDraft;
 
+  if (editLabel && onEdit && savedDeviceLabel) {
+    return (
+      <div className="camera-device-control camera-device-control-compact">
+        <button
+          type="button"
+          className="button-primary button-compact"
+          onClick={onEdit}
+          aria-label="Edit camera selection"
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="camera-device-control">
       <div className="camera-device-header">
@@ -46,7 +61,7 @@ export function CameraDeviceSelector({
         {editLabel && onEdit ? (
           <button
             type="button"
-            className="button-secondary button-compact"
+            className="button-primary button-compact"
             onClick={onEdit}
             aria-label="Edit camera selection"
           >
@@ -85,7 +100,7 @@ export function CameraDeviceSelector({
             <div className="actions camera-device-actions" style={{ marginTop: 12 }}>
               <button
                 type="button"
-                className="button-secondary button-compact"
+                className="button-primary button-compact"
                 disabled={saveDisabled}
                 onClick={onSave}
               >

@@ -184,6 +184,7 @@ export interface HardwareDashboardHarness {
   latestCapture: CaptureMetadata | null;
   latestRun: Record<string, unknown> | null;
   recentRuns: Record<string, unknown>[];
+  plotRunsById: Record<string, Record<string, unknown>>;
   backendReachable: boolean;
   helperReachable: boolean;
   helperStatus: HelperStatus;
@@ -254,6 +255,7 @@ export function createHardwareDashboardHarness(
     latestCapture: null,
     latestRun: null,
     recentRuns: [],
+    plotRunsById: {},
     backendReachable: true,
     helperReachable: false,
     helperStatus: makeHelperStatus(),
@@ -512,6 +514,17 @@ export function installHardwareDashboardFetchMock(
 
       if (url === "/api/plot-runs" && method === "GET") {
         return jsonResponse({ runs: harness.recentRuns });
+      }
+
+      if (url.startsWith("/api/plot-runs/") && method === "GET") {
+        const runId = url.slice("/api/plot-runs/".length);
+        if (harness.latestRun && harness.latestRun.id === runId) {
+          return jsonResponse(harness.latestRun);
+        }
+        if (harness.plotRunsById[runId]) {
+          return jsonResponse(harness.plotRunsById[runId]);
+        }
+        return new Response("Not found", { status: 404 });
       }
 
       if (url === "/api/plotter/calibration") {

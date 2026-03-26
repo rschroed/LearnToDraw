@@ -91,4 +91,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Removed helper-driven startup and OpenCV-specific real-camera UX from the active dashboard path in favor of manual CameraBridge guidance
 - Left `apps/macos-helper` in the repo as legacy/non-active code for now instead of treating it as a current architecture dependency
 
+## Setup-First Machine Tab Slice
+
+- Replaced the Machine tab's equal-weight hardware dashboard layout with a setup-first surface centered on paper configuration
+- Moved plotter model, readiness, and bounds context into the paper-setup section instead of a standalone summary panel
+- Made camera selection the primary camera action, demoted capture to a test action, and removed the Machine-tab latest-capture surface
+- Collapsed machine details and diagnostics so advanced hardware data no longer competes with setup tasks in the default view
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

@@ -153,7 +153,7 @@ export function buildCameraPanelModel({
       summaryTitle,
       summaryDetail,
       summaryBadges: [],
-      captureActionLabel: "Capture image",
+      captureActionLabel: "Capture test image",
       capturePendingLabel: "Capturing...",
       captureDisabled:
         capturePending || status.busy || details.readiness_state !== "ready",
@@ -194,7 +194,7 @@ export function buildCameraPanelModel({
     summaryTitle: status.available ? "Ready to capture" : "Camera unavailable",
     summaryDetail: status.error ?? "Backend-owned capture is available from this panel.",
     summaryBadges: [],
-    captureActionLabel: "Capture image",
+      captureActionLabel: "Capture test image",
     capturePendingLabel: "Capturing...",
     captureDisabled:
       capturePending || status.busy || !status.available || status.error !== null,

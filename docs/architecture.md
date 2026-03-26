@@ -32,6 +32,7 @@ The frontend is a lightweight local dashboard.
 
 - polls backend endpoints for hardware status, captures, plot runs, and plotter state
 - triggers safe backend-owned actions such as capture, return-to-origin, test actions, and plot workflow operations
+- organizes the local operator experience into workflow, machine-setup, and run-history surfaces
 - presents read-only hardware detail plus a small number of bounded controls
 - previews planned-vs-captured output and current workspace information without becoming a second hardware API
 
