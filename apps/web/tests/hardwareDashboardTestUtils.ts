@@ -8,11 +8,13 @@ import {
 import type {
   CaptureMetadata,
   HardwareStatus,
+  NormalizationCorners,
   PlotterCalibration,
   PlotterDeviceSettings,
   PlotterWorkspace,
 } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
+import type { PlotRun, PlotRunSummary } from "../src/types/plotting";
 
 export const defaultHardwareStatus: HardwareStatus = {
   plotter: {
@@ -182,9 +184,9 @@ export interface HardwareDashboardHarness {
   currentDevice: PlotterDeviceSettings;
   currentWorkspace: PlotterWorkspace;
   latestCapture: CaptureMetadata | null;
-  latestRun: Record<string, unknown> | null;
-  recentRuns: Record<string, unknown>[];
-  plotRunsById: Record<string, Record<string, unknown>>;
+  latestRun: PlotRun | null;
+  recentRuns: PlotRunSummary[];
+  plotRunsById: Record<string, PlotRun>;
   backendReachable: boolean;
   helperReachable: boolean;
   helperStatus: HelperStatus;
@@ -210,6 +212,11 @@ export interface HardwareDashboardHarness {
     margin_top_mm: number;
     margin_right_mm: number;
     margin_bottom_mm: number;
+  }>;
+  captureReviewActions: Array<{
+    runId: string;
+    action: "accept" | "adjust" | "reuse-last";
+    corners?: NormalizationCorners;
   }>;
 }
 
@@ -272,6 +279,7 @@ export function createHardwareDashboardHarness(
     plotterTestActions: [],
     safeBoundsRequests: [],
     workspaceRequests: [],
+    captureReviewActions: [],
     ...overrides,
   };
 }
@@ -415,6 +423,8 @@ export function installHardwareDashboardFetchMock(
           width: 1920,
           height: 1080,
           mime_type: "image/jpeg",
+          review: null,
+          normalized: null,
         };
         harness.currentHardwareStatus = {
           ...harness.currentHardwareStatus,
@@ -514,6 +524,93 @@ export function installHardwareDashboardFetchMock(
 
       if (url === "/api/plot-runs" && method === "GET") {
         return jsonResponse({ runs: harness.recentRuns });
+      }
+
+      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review$/) && method === "GET") {
+        const runId = url.split("/")[3] ?? "";
+        const run =
+          (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
+          harness.plotRunsById[runId];
+        if (!run || !run.capture || !run.capture.review) {
+          return new Response("Not found", { status: 404 });
+        }
+        return jsonResponse({
+          run_id: runId,
+          capture: run.capture,
+          review: run.capture.review,
+        });
+      }
+
+      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/accept$/) && method === "POST") {
+        const runId = url.split("/")[3] ?? "";
+        harness.captureReviewActions.push({ runId, action: "accept" });
+        const run =
+          (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
+          harness.plotRunsById[runId];
+        if (!run || !run.capture?.review) {
+          return new Response("Not found", { status: 404 });
+        }
+        run.capture.review = {
+          ...run.capture.review,
+          review_status: "confirmed",
+          confirmation_source: "auto",
+          confirmed_corners: run.capture.review.proposed_corners,
+        };
+        run.status = "capturing";
+        return jsonResponse({
+          ok: true,
+          message: "Capture review accepted. Finalizing normalization.",
+          run,
+        });
+      }
+
+      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/adjust$/) && method === "POST") {
+        const runId = url.split("/")[3] ?? "";
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          corners: NormalizationCorners;
+        };
+        harness.captureReviewActions.push({ runId, action: "adjust", corners: body.corners });
+        const run =
+          (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
+          harness.plotRunsById[runId];
+        if (!run || !run.capture?.review) {
+          return new Response("Not found", { status: 404 });
+        }
+        run.capture.review = {
+          ...run.capture.review,
+          review_status: "confirmed",
+          confirmation_source: "adjusted",
+          confirmed_corners: body.corners,
+        };
+        run.status = "capturing";
+        return jsonResponse({
+          ok: true,
+          message: "Adjusted capture corners saved. Finalizing normalization.",
+          run,
+        });
+      }
+
+      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/reuse-last$/) && method === "POST") {
+        const runId = url.split("/")[3] ?? "";
+        harness.captureReviewActions.push({ runId, action: "reuse-last" });
+        const run =
+          (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
+          harness.plotRunsById[runId];
+        if (!run || !run.capture?.review) {
+          return new Response("Not found", { status: 404 });
+        }
+        run.capture.review = {
+          ...run.capture.review,
+          review_status: "confirmed",
+          confirmation_source: "reused_last",
+          confirmed_corners: run.capture.review.proposed_corners,
+        };
+        run.status = "capturing";
+        return jsonResponse({
+          ok: true,
+          message: "Reused the last confirmed quad for this setup.",
+          run,
+        });
       }
 
       if (url.startsWith("/api/plot-runs/") && method === "GET") {

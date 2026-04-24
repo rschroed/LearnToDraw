@@ -11,6 +11,7 @@ from learn_to_draw_api.services.plot_workflow_preparation import (
     pattern_definition,
     prepare_svg_for_plotting,
 )
+from xml.etree import ElementTree as ET
 
 
 def build_device_settings() -> PlotterDeviceSettings:
@@ -127,3 +128,58 @@ def test_prepare_svg_for_plotting_rejects_non_finite_viewbox_math() -> None:
         )
 
     assert str(exc_info.value) == "Prepared SVG math produced non-finite bounds or scale."
+
+
+def test_prepare_svg_for_plotting_hoists_full_page_background_rect() -> None:
+    svg_text = (
+        "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' "
+        "viewBox='0 0 200 100'>"
+        "<rect width='100%' height='100%' fill='#f8f3ea' />"
+        "<path d='M 0 0 H 200' stroke='black' />"
+        "</svg>"
+    )
+    root = parse_svg_root(svg_text)
+
+    prepared_svg_text, _ = prepare_svg_for_plotting(
+        svg_text,
+        root,
+        purpose="normal",
+        plot_area=build_plot_area(),
+        device_settings=build_device_settings(),
+    )
+
+    prepared_root = ET.fromstring(prepared_svg_text)
+    children = list(prepared_root)
+
+    assert len(children) == 2
+    assert children[0].tag.endswith("rect")
+    assert children[0].attrib["x"] == "0"
+    assert children[0].attrib["y"] == "0"
+    assert children[0].attrib["width"] == "100%"
+    assert children[0].attrib["height"] == "100%"
+    assert children[0].attrib["fill"] == "#ffffff"
+    assert children[1].tag.endswith("g")
+    assert children[1].attrib["transform"].startswith("translate(")
+    assert len(list(children[1])) == 1
+    assert list(children[1])[0].tag.endswith("path")
+
+
+def test_prepare_svg_for_plotting_records_tight_content_ratios_for_test_grid() -> None:
+    pattern = pattern_definition("test-grid")
+    assert pattern is not None
+    root = parse_svg_root(pattern["svg_text"])
+
+    _, preparation = prepare_svg_for_plotting(
+        pattern["svg_text"],
+        root,
+        purpose="normal",
+        plot_area=build_plot_area(),
+        device_settings=build_device_settings(),
+    )
+
+    audit = preparation.preparation_audit
+    assert audit.comparison_frame_version == 1
+    assert audit.source_content_left_ratio == pytest.approx(80 / 960, abs=1e-6)
+    assert audit.source_content_top_ratio == pytest.approx(80 / 720, abs=1e-6)
+    assert audit.source_content_width_ratio == pytest.approx(800 / 960, abs=1e-6)
+    assert audit.source_content_height_ratio == pytest.approx(560 / 720, abs=1e-6)

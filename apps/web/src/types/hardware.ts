@@ -65,6 +65,96 @@ export interface CaptureMetadata {
   width: number;
   height: number;
   mime_type: string;
+  review: CaptureReview | null;
+  normalized: NormalizedCaptureArtifacts | null;
+}
+
+export interface CaptureReview {
+  review_required: boolean;
+  review_status: "pending" | "confirmed";
+  proposed_corners: NormalizationCorners;
+  confirmed_corners: NormalizationCorners | null;
+  confirmation_source: "auto" | "adjusted" | "reused_last" | null;
+  detector_method: "paper_contour_v3" | "paper_region_v2" | "paper_edges_v1" | "fallback_full_frame";
+  detector_confidence: number;
+  reuse_last_available: boolean;
+}
+
+export interface NormalizationCorners {
+  top_left: [number, number];
+  top_right: [number, number];
+  bottom_right: [number, number];
+  bottom_left: [number, number];
+}
+
+export interface NormalizationTransform {
+  matrix: number[][];
+}
+
+export interface NormalizationOutput {
+  width: number;
+  height: number;
+  aspect_ratio: number;
+}
+
+export interface NormalizationFrame {
+  kind: "page_aligned";
+  version: number;
+  page_width_mm: number;
+  page_height_mm: number;
+}
+
+export interface NormalizationDiagnosticCandidate {
+  corners?: NormalizationCorners | null;
+  bounds?: [number, number, number, number] | null;
+  component_area?: number | null;
+  rect_area?: number | null;
+  fill_ratio?: number | null;
+  occupancy_score?: number | null;
+  edge_support_score?: number | null;
+  top_score?: number | null;
+  right_score?: number | null;
+  bottom_score?: number | null;
+  left_score?: number | null;
+  mean_border_support?: number | null;
+  max_outward_expansion_px?: number | null;
+  refined_area_ratio?: number | null;
+  aspect_log_error?: number | null;
+  score?: number | null;
+  confidence?: number | null;
+  rejection_reason?: string | null;
+}
+
+export interface NormalizationMethodDiagnostics {
+  status: "used" | "rejected" | "not_run" | "unavailable";
+  rejection_reason?: string | null;
+  candidate_count: number;
+  best_candidate?: NormalizationDiagnosticCandidate | null;
+}
+
+export interface NormalizationDiagnostics {
+  mode: "default" | "region_only";
+  contour_v3?: NormalizationMethodDiagnostics | null;
+  region_v2: NormalizationMethodDiagnostics;
+  line_v1: NormalizationMethodDiagnostics;
+}
+
+export interface NormalizationMetadata {
+  method: "paper_contour_v3" | "paper_region_v2" | "paper_edges_v1" | "fallback_full_frame";
+  confidence: number;
+  corners: NormalizationCorners;
+  transform: NormalizationTransform;
+  output: NormalizationOutput;
+  target_frame_source: "prepared_svg" | "workspace_drawable_area";
+  frame?: NormalizationFrame | null;
+  diagnostics?: NormalizationDiagnostics | null;
+}
+
+export interface NormalizedCaptureArtifacts {
+  rectified_color_url: string;
+  rectified_grayscale_url: string;
+  debug_overlay_url: string;
+  metadata: NormalizationMetadata;
 }
 
 export interface LatestCaptureResponse {

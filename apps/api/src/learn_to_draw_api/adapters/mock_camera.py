@@ -5,6 +5,9 @@ import time
 from typing import Optional
 from uuid import uuid4
 
+import cv2
+import numpy as np
+
 from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.models import (
     DeviceStatus,
@@ -89,9 +92,9 @@ class MockCamera:
             return CaptureArtifact(
                 capture_id=capture_id,
                 timestamp=timestamp,
-                filename=f"{capture_id}.svg",
-                content=self._build_svg(capture_id, timestamp).encode("utf-8"),
-                media_type="image/svg+xml",
+                filename=f"{capture_id}.png",
+                content=self._build_png(capture_id, timestamp),
+                media_type="image/png",
                 width=self._width,
                 height=self._height,
             )
@@ -99,22 +102,107 @@ class MockCamera:
             self._busy = False
             self._touch()
 
-    def _build_svg(self, capture_id: str, timestamp: datetime) -> str:
+    def _build_png(self, capture_id: str, timestamp: datetime) -> bytes:
         stamp = timestamp.isoformat()
-        return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{self._width}" height="{self._height}" viewBox="0 0 {self._width} {self._height}">
-  <rect width="100%" height="100%" fill="#f6f1e8" />
-  <g stroke="#1f2933" stroke-width="6" fill="none">
-    <path d="M 120 760 C 360 280, 620 280, 860 760" />
-    <path d="M 240 700 C 420 420, 560 420, 740 700" />
-    <line x1="950" y1="120" x2="1140" y2="310" />
-    <line x1="950" y1="310" x2="1140" y2="120" />
-  </g>
-  <g fill="#8b5e34" font-family="Menlo, monospace" font-size="32">
-    <text x="120" y="120">Mock Capture</text>
-    <text x="120" y="170">ID: {capture_id[:12]}</text>
-    <text x="120" y="220">Time: {stamp}</text>
-  </g>
-</svg>"""
+        frame = np.full((self._height, self._width, 3), (28, 32, 30), dtype=np.uint8)
+        paper_height = int(self._height * 0.72)
+        paper_width = int(paper_height * 0.75)
+        paper = np.full((paper_height, paper_width, 3), 244, dtype=np.uint8)
+        cv2.rectangle(paper, (0, 0), (paper_width - 1, paper_height - 1), (224, 219, 209), 6)
+        cv2.line(
+            paper,
+            (paper_width // 6, int(paper_height * 0.2)),
+            (paper_width - (paper_width // 6), int(paper_height * 0.2)),
+            (58, 66, 74),
+            8,
+        )
+        cv2.putText(
+            paper,
+            "Mock Capture",
+            (int(paper_width * 0.12), int(paper_height * 0.16)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (78, 56, 33),
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            paper,
+            capture_id[:12],
+            (int(paper_width * 0.12), int(paper_height * 0.24)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (78, 56, 33),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            paper,
+            stamp[:19],
+            (int(paper_width * 0.12), int(paper_height * 0.3)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (78, 56, 33),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.polylines(
+            paper,
+            [
+                np.array(
+                    [
+                        (int(paper_width * 0.16), int(paper_height * 0.75)),
+                        (int(paper_width * 0.32), int(paper_height * 0.42)),
+                        (int(paper_width * 0.5), int(paper_height * 0.58)),
+                        (int(paper_width * 0.68), int(paper_height * 0.34)),
+                        (int(paper_width * 0.84), int(paper_height * 0.72)),
+                    ],
+                    dtype=np.int32,
+                )
+            ],
+            isClosed=False,
+            color=(31, 41, 51),
+            thickness=8,
+        )
+        cv2.rectangle(
+            paper,
+            (int(paper_width * 0.14), int(paper_height * 0.36)),
+            (int(paper_width * 0.82), int(paper_height * 0.84)),
+            (32, 40, 48),
+            6,
+        )
+
+        source = np.array(
+            [
+                [0.0, 0.0],
+                [float(paper_width - 1), 0.0],
+                [float(paper_width - 1), float(paper_height - 1)],
+                [0.0, float(paper_height - 1)],
+            ],
+            dtype=np.float32,
+        )
+        destination = np.array(
+            [
+                [self._width * 0.18, self._height * 0.12],
+                [self._width * 0.77, self._height * 0.08],
+                [self._width * 0.82, self._height * 0.88],
+                [self._width * 0.16, self._height * 0.9],
+            ],
+            dtype=np.float32,
+        )
+        matrix = cv2.getPerspectiveTransform(source, destination)
+        warped_paper = cv2.warpPerspective(paper, matrix, (self._width, self._height))
+        warped_mask = cv2.warpPerspective(
+            np.full((paper_height, paper_width), 255, dtype=np.uint8),
+            matrix,
+            (self._width, self._height),
+        )
+        mask = warped_mask > 0
+        frame[mask] = warped_paper[mask]
+        ok, encoded = cv2.imencode(".png", frame)
+        if not ok:
+            raise HardwareOperationError("Mock camera failed to encode the capture preview.")
+        return encoded.tobytes()
 
     def _ensure_ready(self) -> None:
         if not self.available:

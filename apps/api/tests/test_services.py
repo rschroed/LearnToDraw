@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 import time
 
+import cv2
+import numpy as np
 import pytest
 
 from learn_to_draw_api.adapters.axidraw_models import resolve_axidraw_model_info
@@ -15,6 +17,8 @@ from learn_to_draw_api.models import (
     HardwareUnavailableError,
     InvalidArtifactError,
 )
+from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
+from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.hardware import HardwareService
 from learn_to_draw_api.services.plotter_calibration import (
@@ -56,11 +60,35 @@ class StubRealCamera:
             capture_id="real-capture",
             timestamp=MockCamera(capture_delay_s=0).capture().timestamp,
             filename="real-capture.jpg",
-            content=b"jpeg-bytes",
+            content=_jpeg_bytes(),
             media_type="image/jpeg",
             width=640,
             height=480,
         )
+
+
+def _jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
+    image = np.full((height, width, 3), 245, dtype=np.uint8)
+    cv2.rectangle(image, (80, 60), (width - 80, height - 60), (30, 30, 30), 6)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    return encoded.tobytes()
+
+
+def _capture_service(store: CaptureStore) -> CaptureService:
+    return CaptureService(
+        store=store,
+        normalization_service=CaptureNormalizationService(),
+    )
+
+
+def _wait_for_latest_normalized(store: CaptureStore, capture_id: str):
+    for _ in range(200):
+        latest = store.latest()
+        if latest is not None and latest.id == capture_id and latest.normalized is not None:
+            return latest
+        time.sleep(0.01)
+    raise AssertionError("Capture normalization did not finish in time.")
 
 
 def build_calibration_service(tmp_path):
@@ -115,9 +143,9 @@ def test_capture_store_persists_latest_capture(tmp_path):
     artifact = camera.capture()
     saved = store.save(artifact)
 
-    assert (tmp_path / f"{saved.id}.svg").exists()
+    assert (tmp_path / f"{saved.id}.png").exists()
     assert store.latest() is not None
-    assert store.latest().public_url == f"/captures/{saved.id}.svg"
+    assert store.latest().public_url == f"/captures/{saved.id}.png"
 
     reloaded_store = CaptureStore(tmp_path, "/captures")
     assert reloaded_store.latest() is not None
@@ -146,10 +174,12 @@ def test_capture_store_normalizes_public_url_independently_of_disk_path(tmp_path
 
 
 def test_hardware_service_runs_walk_home_and_capture(tmp_path):
+    capture_store = CaptureStore(tmp_path, "/captures")
     service = HardwareService(
         plotter=MockPlotter(origin_delay_s=0),
         camera=MockCamera(capture_delay_s=0),
-        capture_store=CaptureStore(tmp_path, "/captures"),
+        capture_store=capture_store,
+        capture_service=_capture_service(capture_store),
         calibration_service=build_calibration_service(tmp_path),
         device_settings_service=build_device_settings_service(tmp_path),
         workspace_service=build_workspace_service(tmp_path),
@@ -160,15 +190,25 @@ def test_hardware_service_runs_walk_home_and_capture(tmp_path):
     capture_response = service.capture_image()
 
     assert origin_response.status.details["position"] == "walk_home"
-    assert capture_response.capture.public_url.endswith(".svg")
+    assert capture_response.capture.public_url.endswith(".png")
+    assert capture_response.capture.normalized is None
     assert service.latest_capture().capture.id == capture_response.capture.id
+    normalized = _wait_for_latest_normalized(capture_store, capture_response.capture.id)
+    assert normalized.normalized is not None
+    assert normalized.normalized.metadata.target_frame_source == "workspace_drawable_area"
+    assert normalized.normalized.metadata.frame is not None
+    assert normalized.normalized.metadata.frame.kind == "page_aligned"
+    assert normalized.normalized.metadata.frame.page_width_mm == 210.0
+    assert normalized.normalized.metadata.frame.page_height_mm == 297.0
 
 
 def test_hardware_service_persists_real_camera_capture_metadata(tmp_path):
+    capture_store = CaptureStore(tmp_path, "/captures")
     service = HardwareService(
         plotter=MockPlotter(origin_delay_s=0),
         camera=StubRealCamera(),
-        capture_store=CaptureStore(tmp_path, "/captures"),
+        capture_store=capture_store,
+        capture_service=_capture_service(capture_store),
         calibration_service=build_calibration_service(tmp_path),
         device_settings_service=build_device_settings_service(tmp_path),
         workspace_service=build_workspace_service(tmp_path),
@@ -181,13 +221,19 @@ def test_hardware_service_persists_real_camera_capture_metadata(tmp_path):
     assert capture_response.capture.mime_type == "image/jpeg"
     assert capture_response.capture.width == 640
     assert capture_response.capture.height == 480
+    normalized = _wait_for_latest_normalized(capture_store, capture_response.capture.id)
+    assert normalized.normalized is not None
+    assert normalized.normalized.metadata.frame is not None
+    assert normalized.normalized.metadata.frame.kind == "page_aligned"
 
 
 def test_hardware_service_rejects_concurrent_plotter_actions(tmp_path):
+    capture_store = CaptureStore(tmp_path, "/captures")
     service = HardwareService(
         plotter=MockPlotter(origin_delay_s=0.2),
         camera=MockCamera(capture_delay_s=0),
-        capture_store=CaptureStore(tmp_path, "/captures"),
+        capture_store=capture_store,
+        capture_service=_capture_service(capture_store),
         calibration_service=build_calibration_service(tmp_path),
         device_settings_service=build_device_settings_service(tmp_path),
         workspace_service=build_workspace_service(tmp_path),

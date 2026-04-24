@@ -49,6 +49,103 @@ class HardwareStatus(BaseModel):
     camera: DeviceStatus
 
 
+class NormalizationCorners(BaseModel):
+    top_left: tuple[float, float]
+    top_right: tuple[float, float]
+    bottom_right: tuple[float, float]
+    bottom_left: tuple[float, float]
+
+
+class NormalizationTransform(BaseModel):
+    matrix: list[list[float]]
+
+
+class NormalizationOutput(BaseModel):
+    width: int
+    height: int
+    aspect_ratio: float = Field(gt=0)
+
+
+NormalizationMethod = Literal["paper_contour_v3", "paper_region_v2", "paper_edges_v1", "fallback_full_frame"]
+NormalizationTargetFrameSource = Literal["prepared_svg", "workspace_drawable_area"]
+NormalizationFrameKind = Literal["page_aligned"]
+
+
+class NormalizationFrame(BaseModel):
+    kind: NormalizationFrameKind
+    version: int = Field(ge=1)
+    page_width_mm: float = Field(gt=0)
+    page_height_mm: float = Field(gt=0)
+
+
+class NormalizationDiagnosticCandidate(BaseModel):
+    corners: Optional[NormalizationCorners] = None
+    bounds: Optional[tuple[int, int, int, int]] = None
+    component_area: Optional[float] = None
+    rect_area: Optional[float] = None
+    fill_ratio: Optional[float] = None
+    occupancy_score: Optional[float] = None
+    edge_support_score: Optional[float] = None
+    top_score: Optional[float] = None
+    right_score: Optional[float] = None
+    bottom_score: Optional[float] = None
+    left_score: Optional[float] = None
+    mean_border_support: Optional[float] = None
+    max_outward_expansion_px: Optional[float] = None
+    refined_area_ratio: Optional[float] = None
+    aspect_log_error: Optional[float] = None
+    score: Optional[float] = None
+    confidence: Optional[float] = None
+    rejection_reason: Optional[str] = None
+
+
+class NormalizationMethodDiagnostics(BaseModel):
+    status: Literal["used", "rejected", "not_run", "unavailable"]
+    rejection_reason: Optional[str] = None
+    candidate_count: int = Field(ge=0, default=0)
+    best_candidate: Optional[NormalizationDiagnosticCandidate] = None
+
+
+class NormalizationDiagnostics(BaseModel):
+    mode: Literal["default", "region_only"]
+    contour_v3: Optional[NormalizationMethodDiagnostics] = None
+    region_v2: NormalizationMethodDiagnostics
+    line_v1: NormalizationMethodDiagnostics
+
+
+class NormalizationMetadata(BaseModel):
+    method: NormalizationMethod
+    confidence: float = Field(ge=0, le=1)
+    corners: NormalizationCorners
+    transform: NormalizationTransform
+    output: NormalizationOutput
+    target_frame_source: NormalizationTargetFrameSource
+    frame: Optional[NormalizationFrame] = None
+    diagnostics: Optional[NormalizationDiagnostics] = None
+
+
+class NormalizedCaptureArtifacts(BaseModel):
+    rectified_color_url: str
+    rectified_grayscale_url: str
+    debug_overlay_url: str
+    metadata: NormalizationMetadata
+
+
+CaptureReviewStatus = Literal["pending", "confirmed"]
+CaptureReviewConfirmationSource = Literal["auto", "adjusted", "reused_last"]
+
+
+class CaptureReview(BaseModel):
+    review_required: bool
+    review_status: CaptureReviewStatus
+    proposed_corners: NormalizationCorners
+    confirmed_corners: Optional[NormalizationCorners] = None
+    confirmation_source: Optional[CaptureReviewConfirmationSource] = None
+    detector_method: NormalizationMethod
+    detector_confidence: float = Field(ge=0, le=1)
+    reuse_last_available: bool = False
+
+
 class CaptureMetadata(BaseModel):
     id: str
     timestamp: datetime
@@ -57,6 +154,8 @@ class CaptureMetadata(BaseModel):
     width: int
     height: int
     mime_type: str
+    review: Optional[CaptureReview] = None
+    normalized: Optional[NormalizedCaptureArtifacts] = None
 
 
 class ObservedResultRecord(BaseModel):
@@ -123,6 +222,7 @@ class PlotPreparationMetadata(BaseModel):
 
     class PreparationAudit(BaseModel):
         strategy: str
+        comparison_frame_version: int = Field(ge=1, default=1)
         fit_scale: Optional[float] = None
         prepared_within_drawable_area: bool
         overflow_x_mm: float
@@ -139,6 +239,10 @@ class PlotPreparationMetadata(BaseModel):
         prepared_viewbox_min_y: Optional[float] = None
         prepared_viewbox_width: Optional[float] = None
         prepared_viewbox_height: Optional[float] = None
+        source_content_left_ratio: Optional[float] = None
+        source_content_top_ratio: Optional[float] = None
+        source_content_width_ratio: Optional[float] = None
+        source_content_height_ratio: Optional[float] = None
 
     source_width: float
     source_height: float
@@ -168,6 +272,14 @@ class PlotResult(BaseModel):
 
 PlotRunPurpose = Literal["normal", "diagnostic"]
 PlotRunCaptureMode = Literal["auto", "skip"]
+PlotRunStatus = Literal[
+    "pending",
+    "plotting",
+    "capturing",
+    "awaiting_capture_review",
+    "completed",
+    "failed",
+]
 PlotterTestAction = Literal["raise_pen", "lower_pen", "cycle_pen", "align"]
 NominalPlotterBoundsSource = Literal["model_default", "config_override", "config_default"]
 PlotterBoundsSource = Literal["manual_override", "default_clearance", "config_default"]
@@ -201,7 +313,7 @@ class PlotStageState(BaseModel):
 
 class PlotRun(BaseModel):
     id: str
-    status: Literal["pending", "plotting", "capturing", "completed", "failed"]
+    status: PlotRunStatus
     purpose: PlotRunPurpose = "normal"
     capture_mode: PlotRunCaptureMode = "auto"
     created_at: datetime
@@ -218,7 +330,7 @@ class PlotRun(BaseModel):
 
 class PlotRunSummary(BaseModel):
     id: str
-    status: Literal["pending", "plotting", "capturing", "completed", "failed"]
+    status: PlotRunStatus
     purpose: PlotRunPurpose = "normal"
     created_at: datetime
     updated_at: datetime
@@ -266,6 +378,20 @@ class CameraCaptureResponse(CommandResponse):
 
 class CameraCommandResponse(CommandResponse):
     status: DeviceStatus
+
+
+class PlotRunCaptureReviewPayload(BaseModel):
+    run_id: str
+    capture: CaptureMetadata
+    review: CaptureReview
+
+
+class PlotRunCaptureReviewAdjustRequest(BaseModel):
+    corners: NormalizationCorners
+
+
+class PlotRunCaptureReviewResponse(CommandResponse):
+    run: PlotRun
 
 
 class LatestPlotRunResponse(BaseModel):
