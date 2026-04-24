@@ -24,6 +24,8 @@ from learn_to_draw_api.models import (
     PlotterWorkspaceRequest,
     PlotterWorkspaceResponse,
 )
+from learn_to_draw_api.services.capture_normalization import target_from_page_size
+from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.plotter_calibration import PlotterCalibrationService
 from learn_to_draw_api.services.plotter_device_settings import PlotterDeviceSettingsService
@@ -37,6 +39,7 @@ class HardwareService:
         plotter: PlotterAdapter,
         camera: CameraAdapter,
         capture_store: CaptureStore,
+        capture_service: CaptureService,
         calibration_service: PlotterCalibrationService,
         device_settings_service: PlotterDeviceSettingsService,
         workspace_service: PlotterWorkspaceService,
@@ -44,6 +47,7 @@ class HardwareService:
         self._plotter = plotter
         self._camera = camera
         self._capture_store = capture_store
+        self._capture_service = capture_service
         self._calibration_service = calibration_service
         self._device_settings_service = device_settings_service
         self._workspace_service = workspace_service
@@ -185,7 +189,21 @@ class HardwareService:
             raise HardwareBusyError("Camera is busy.")
         try:
             artifact = self._camera.capture()
-            metadata = self._capture_store.save(artifact)
+            workspace = self._workspace_service.current()
+            normalization_target = None
+            page_width = workspace.page_size_mm.width_mm
+            page_height = workspace.page_size_mm.height_mm
+            if page_width > 0 and page_height > 0:
+                normalization_target = target_from_page_size(
+                    page_width_mm=page_width,
+                    page_height_mm=page_height,
+                    source="workspace_drawable_area",
+                )
+            metadata = self._capture_service.persist_capture(
+                artifact,
+                normalization_target=normalization_target,
+                background=True,
+            )
             return CameraCaptureResponse(
                 message="Image captured.",
                 status=self._camera.get_status(),

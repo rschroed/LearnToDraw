@@ -98,4 +98,20 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Made camera selection the primary camera action, demoted capture to a test action, and removed the Machine-tab latest-capture surface
 - Collapsed machine details and diagnostics so advanced hardware data no longer competes with setup tasks in the default view
 
+## Post-Capture Normalization Slice
+
+- Added a backend-owned normalization pipeline that turns raw raster captures into rectified, framed, and comparison-ready derivatives without mutating the raw artifact
+- Extended capture records so both standalone captures and plot-run observed results can expose normalized grayscale, debug overlay, and normalization metadata through the existing API responses
+- Kept manual capture requests fast by saving the raw artifact first and running workspace page-frame normalization in the background, while normal plot runs normalize inline before completion into the prepared page frame
+- Adjusted the line-based fallback to stabilize top-edge selection against bright plotter-rail captures and changed the canonical normalized artifact to a white-backed page-aligned frame instead of a drawing-frame artifact with UI crop compensation
+- Replaced the primary edge-led paper detector with a region-first `paper_region_v2` detector that segments the bright sheet from the dark mat, refines the fitted rectangle with local edge evidence, and falls back to the older line detector only when the region candidate is not credible
+- Relaxed region occupancy scoring so dense plotted strokes and titles inside the paper no longer cause otherwise-valid paper regions to be rejected back into the weaker line fallback
+- Tightened the region-first fit by replacing the loose `minAreaRect` candidate with a contour-clipped rotated box, which keeps left and bottom edges closer to the visible paper border on off-axis real captures
+- Added structured normalization diagnostics plus a temporary `region_only` backend mode so rejected `paper_region_v2` candidates can be inspected directly without the noisy line-based fallback masking the failure reason
+- Replaced the loose region-box refinement with contour-anchored border snapping, added per-side border-support diagnostics, and started explicitly rejecting region candidates whose left/right/top/bottom borders do not align with the visible paper edge
+- Added an experimental contour-first `paper_contour_v3` detector plus a backend experiment switch and replay helper so saved real captures can be compared against `paper_region_v2` without relying on live-camera trial and error
+- Increased the canonical normalization long side to `2048px` so downstream comparison artifacts preserve more stroke detail
+- Added tight source-content bounds plus a comparison-frame version to preparation metadata and simplified the Workflow comparison view so Prepared and Normalized Result render directly from matching backend-owned page-frame artifacts
+- Added deterministic OpenCV regression coverage for confident paper detection, low-confidence best-effort output, and full-frame fallback plus a small result-variant selector in the workflow UI
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import re
@@ -23,8 +24,27 @@ PATTERNS_DIR = Path(__file__).resolve().parent.parent / "assets" / "patterns"
 PREPARATION_EPSILON_MM = 0.001
 NORMAL_PREPARATION_STRATEGY = "fit_top_left"
 DIAGNOSTIC_PREPARATION_STRATEGY = "diagnostic_passthrough"
+PREPARED_PAGE_BACKGROUND_FILL = "#ffffff"
 
 ET.register_namespace("", "http://www.w3.org/2000/svg")
+
+SVG_SHAPE_TAGS = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon"}
+
+
+@dataclass(frozen=True)
+class Bounds:
+    min_x: float
+    min_y: float
+    max_x: float
+    max_y: float
+
+    @property
+    def width(self) -> float:
+        return self.max_x - self.min_x
+
+    @property
+    def height(self) -> float:
+        return self.max_y - self.min_y
 
 
 def parse_svg_root(svg_text: str) -> ET.Element:
@@ -126,6 +146,7 @@ def prepare_svg_for_plotting(
     device_settings: PlotterDeviceSettings,
 ) -> tuple[str, PlotPreparationMetadata]:
     source_box = extract_source_box(root)
+    source_content_ratios = extract_source_content_ratios(root, source_box=source_box)
     source_units = classify_source_units(root)
     units_inferred = source_units in {"unitless", "px", "unknown"}
     strategy = (
@@ -154,6 +175,7 @@ def prepare_svg_for_plotting(
             placement_origin_x_mm=0.0,
             placement_origin_y_mm=0.0,
             prepared_view_box=None,
+            source_content_ratios=source_content_ratios,
         )
         validate_preparation_consistency(
             prepared_width_mm=prepared_width_mm,
@@ -208,6 +230,7 @@ def prepare_svg_for_plotting(
             placement_origin_x_mm=plot_area.margin_left_mm,
             placement_origin_y_mm=plot_area.margin_top_mm,
             prepared_view_box=(0.0, 0.0, plot_area.page_width_mm, plot_area.page_height_mm),
+            source_content_ratios=source_content_ratios,
         )
         validate_preparation_consistency(
             prepared_width_mm=prepared_width_mm,
@@ -324,6 +347,333 @@ def extract_source_box(root: ET.Element) -> SourceBox:
     )
 
 
+def extract_source_content_ratios(
+    root: ET.Element,
+    *,
+    source_box: SourceBox,
+) -> Optional[tuple[float, float, float, float]]:
+    if source_box.view_box_width <= 0 or source_box.view_box_height <= 0:
+        return None
+
+    bounds = _element_bounds(
+        root,
+        matrix=_identity_matrix(),
+        source_box=source_box,
+    )
+    if bounds is None or bounds.width <= 0 or bounds.height <= 0:
+        return None
+
+    left_ratio = (bounds.min_x - source_box.view_box_min_x) / source_box.view_box_width
+    top_ratio = (bounds.min_y - source_box.view_box_min_y) / source_box.view_box_height
+    width_ratio = bounds.width / source_box.view_box_width
+    height_ratio = bounds.height / source_box.view_box_height
+    ratios = (left_ratio, top_ratio, width_ratio, height_ratio)
+    if not all(math.isfinite(value) for value in ratios):
+        return None
+    if width_ratio <= 0 or height_ratio <= 0:
+        return None
+    return tuple(max(0.0, min(1.0, value)) for value in ratios)
+
+
+def _element_bounds(
+    element: ET.Element,
+    *,
+    matrix: list[list[float]],
+    source_box: SourceBox,
+) -> Optional[Bounds]:
+    tag = element.tag.rsplit("}", 1)[-1]
+    local_matrix = _compose_matrices(matrix, _parse_transform(element.attrib.get("transform")))
+
+    if tag == "svg":
+        child_bounds = [
+            _element_bounds(child, matrix=local_matrix, source_box=source_box)
+            for child in list(element)
+        ]
+        return _union_bounds([bound for bound in child_bounds if bound is not None])
+
+    if tag == "g":
+        child_bounds = [
+            _element_bounds(child, matrix=local_matrix, source_box=source_box)
+            for child in list(element)
+        ]
+        return _union_bounds([bound for bound in child_bounds if bound is not None])
+
+    if tag not in SVG_SHAPE_TAGS:
+        return None
+
+    if tag == "rect" and is_full_page_background_rect(element, source_box=source_box):
+        return None
+
+    points = _shape_points(element)
+    if not points:
+        return None
+    transformed = [_apply_matrix(local_matrix, point) for point in points]
+    return _bounds_from_points(transformed)
+
+
+def _shape_points(element: ET.Element) -> list[tuple[float, float]]:
+    tag = element.tag.rsplit("}", 1)[-1]
+    if tag == "rect":
+        x = _parse_float(element.attrib.get("x"), 0.0)
+        y = _parse_float(element.attrib.get("y"), 0.0)
+        width = _parse_float(element.attrib.get("width"))
+        height = _parse_float(element.attrib.get("height"))
+        if width is None or height is None:
+            return []
+        return [
+            (x, y),
+            (x + width, y),
+            (x + width, y + height),
+            (x, y + height),
+        ]
+    if tag == "circle":
+        cx = _parse_float(element.attrib.get("cx"), 0.0)
+        cy = _parse_float(element.attrib.get("cy"), 0.0)
+        radius = _parse_float(element.attrib.get("r"))
+        if radius is None:
+            return []
+        return [
+            (cx - radius, cy - radius),
+            (cx + radius, cy - radius),
+            (cx + radius, cy + radius),
+            (cx - radius, cy + radius),
+        ]
+    if tag == "ellipse":
+        cx = _parse_float(element.attrib.get("cx"), 0.0)
+        cy = _parse_float(element.attrib.get("cy"), 0.0)
+        rx = _parse_float(element.attrib.get("rx"))
+        ry = _parse_float(element.attrib.get("ry"))
+        if rx is None or ry is None:
+            return []
+        return [
+            (cx - rx, cy - ry),
+            (cx + rx, cy - ry),
+            (cx + rx, cy + ry),
+            (cx - rx, cy + ry),
+        ]
+    if tag == "line":
+        x1 = _parse_float(element.attrib.get("x1"))
+        y1 = _parse_float(element.attrib.get("y1"))
+        x2 = _parse_float(element.attrib.get("x2"))
+        y2 = _parse_float(element.attrib.get("y2"))
+        if None in {x1, y1, x2, y2}:
+            return []
+        return [(x1, y1), (x2, y2)]
+    if tag in {"polyline", "polygon"}:
+        return _parse_points_list(element.attrib.get("points", ""))
+    if tag == "path":
+        return _parse_path_points(element.attrib.get("d", ""))
+    return []
+
+
+def _parse_float(value: Optional[str], default: Optional[float] = None) -> Optional[float]:
+    if value is None:
+        return default
+    match = re.match(r"^\s*([+-]?[0-9]+(?:\.[0-9]+)?)", value)
+    if not match:
+        return default
+    return float(match.group(1))
+
+
+def _parse_points_list(value: str) -> list[tuple[float, float]]:
+    numbers = re.findall(r"[+-]?(?:\d*\.\d+|\d+)", value)
+    if len(numbers) < 2 or len(numbers) % 2 != 0:
+        return []
+    coords = [float(number) for number in numbers]
+    return [(coords[index], coords[index + 1]) for index in range(0, len(coords), 2)]
+
+
+def _parse_path_points(value: str) -> list[tuple[float, float]]:
+    tokens = re.findall(r"[A-Za-z]|[+-]?(?:\d*\.\d+|\d+)", value)
+    if not tokens:
+        return []
+
+    points: list[tuple[float, float]] = []
+    index = 0
+    command = None
+    current_x = 0.0
+    current_y = 0.0
+    start_x = 0.0
+    start_y = 0.0
+
+    while index < len(tokens):
+        token = tokens[index]
+        if re.match(r"[A-Za-z]", token):
+            command = token
+            index += 1
+            if command in {"Z", "z"}:
+                current_x, current_y = start_x, start_y
+                points.append((current_x, current_y))
+            continue
+        if command is None:
+            return []
+
+        if command in {"M", "L"}:
+            if index + 1 >= len(tokens):
+                break
+            current_x = float(tokens[index])
+            current_y = float(tokens[index + 1])
+            if command == "M":
+                start_x, start_y = current_x, current_y
+                command = "L"
+            points.append((current_x, current_y))
+            index += 2
+            continue
+        if command in {"m", "l"}:
+            if index + 1 >= len(tokens):
+                break
+            current_x += float(tokens[index])
+            current_y += float(tokens[index + 1])
+            if command == "m":
+                start_x, start_y = current_x, current_y
+                command = "l"
+            points.append((current_x, current_y))
+            index += 2
+            continue
+        if command == "H":
+            current_x = float(tokens[index])
+            points.append((current_x, current_y))
+            index += 1
+            continue
+        if command == "h":
+            current_x += float(tokens[index])
+            points.append((current_x, current_y))
+            index += 1
+            continue
+        if command == "V":
+            current_y = float(tokens[index])
+            points.append((current_x, current_y))
+            index += 1
+            continue
+        if command == "v":
+            current_y += float(tokens[index])
+            points.append((current_x, current_y))
+            index += 1
+            continue
+        if command in {"C", "c"}:
+            if index + 5 >= len(tokens):
+                break
+            values = [float(tokens[index + offset]) for offset in range(6)]
+            if command == "c":
+                curve_points = [
+                    (current_x + values[0], current_y + values[1]),
+                    (current_x + values[2], current_y + values[3]),
+                    (current_x + values[4], current_y + values[5]),
+                ]
+                current_x += values[4]
+                current_y += values[5]
+            else:
+                curve_points = [
+                    (values[0], values[1]),
+                    (values[2], values[3]),
+                    (values[4], values[5]),
+                ]
+                current_x = values[4]
+                current_y = values[5]
+            points.extend(curve_points)
+            index += 6
+            continue
+        if command in {"Q", "q"}:
+            if index + 3 >= len(tokens):
+                break
+            values = [float(tokens[index + offset]) for offset in range(4)]
+            if command == "q":
+                curve_points = [
+                    (current_x + values[0], current_y + values[1]),
+                    (current_x + values[2], current_y + values[3]),
+                ]
+                current_x += values[2]
+                current_y += values[3]
+            else:
+                curve_points = [
+                    (values[0], values[1]),
+                    (values[2], values[3]),
+                ]
+                current_x = values[2]
+                current_y = values[3]
+            points.extend(curve_points)
+            index += 4
+            continue
+        return []
+
+    return points
+
+
+def _identity_matrix() -> list[list[float]]:
+    return [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+
+
+def _parse_transform(value: Optional[str]) -> list[list[float]]:
+    matrix = _identity_matrix()
+    if not value:
+        return matrix
+    for name, args in re.findall(r"([A-Za-z]+)\s*\(([^)]*)\)", value):
+        numbers = [float(number) for number in re.findall(r"[+-]?(?:\d*\.\d+|\d+)", args)]
+        if name == "translate":
+            tx = numbers[0] if numbers else 0.0
+            ty = numbers[1] if len(numbers) > 1 else 0.0
+            transform = [
+                [1.0, 0.0, tx],
+                [0.0, 1.0, ty],
+                [0.0, 0.0, 1.0],
+            ]
+        elif name == "scale":
+            sx = numbers[0] if numbers else 1.0
+            sy = numbers[1] if len(numbers) > 1 else sx
+            transform = [
+                [sx, 0.0, 0.0],
+                [0.0, sy, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        else:
+            return matrix
+        matrix = _compose_matrices(matrix, transform)
+    return matrix
+
+
+def _compose_matrices(left: list[list[float]], right: list[list[float]]) -> list[list[float]]:
+    return [
+        [
+            left[row][0] * right[0][column]
+            + left[row][1] * right[1][column]
+            + left[row][2] * right[2][column]
+            for column in range(3)
+        ]
+        for row in range(3)
+    ]
+
+
+def _apply_matrix(matrix: list[list[float]], point: tuple[float, float]) -> tuple[float, float]:
+    x, y = point
+    return (
+        matrix[0][0] * x + matrix[0][1] * y + matrix[0][2],
+        matrix[1][0] * x + matrix[1][1] * y + matrix[1][2],
+    )
+
+
+def _bounds_from_points(points: list[tuple[float, float]]) -> Optional[Bounds]:
+    if not points:
+        return None
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return Bounds(min(xs), min(ys), max(xs), max(ys))
+
+
+def _union_bounds(bounds: list[Bounds]) -> Optional[Bounds]:
+    if not bounds:
+        return None
+    return Bounds(
+        min(bound.min_x for bound in bounds),
+        min(bound.min_y for bound in bounds),
+        max(bound.max_x for bound in bounds),
+        max(bound.max_y for bound in bounds),
+    )
+
+
 def build_workspace_audit(
     *,
     plot_area: PlotArea,
@@ -361,6 +711,7 @@ def build_preparation_audit(
     placement_origin_x_mm: Optional[float],
     placement_origin_y_mm: Optional[float],
     prepared_view_box: Optional[tuple[float, float, float, float]],
+    source_content_ratios: Optional[tuple[float, float, float, float]],
 ) -> PlotPreparationMetadata.PreparationAudit:
     overflow_x = max(0.0, prepared_width_mm - plot_area.draw_width_mm)
     overflow_y = max(0.0, prepared_height_mm - plot_area.draw_height_mm)
@@ -378,6 +729,7 @@ def build_preparation_audit(
     )
     return PlotPreparationMetadata.PreparationAudit(
         strategy=strategy,
+        comparison_frame_version=1,
         fit_scale=round(scale, 6) if scale is not None else None,
         prepared_within_drawable_area=(
             overflow_x <= PREPARATION_EPSILON_MM and overflow_y <= PREPARATION_EPSILON_MM
@@ -411,6 +763,18 @@ def build_preparation_audit(
         ),
         prepared_viewbox_height=(
             round(prepared_view_box[3], 3) if prepared_view_box is not None else None
+        ),
+        source_content_left_ratio=(
+            round(source_content_ratios[0], 6) if source_content_ratios is not None else None
+        ),
+        source_content_top_ratio=(
+            round(source_content_ratios[1], 6) if source_content_ratios is not None else None
+        ),
+        source_content_width_ratio=(
+            round(source_content_ratios[2], 6) if source_content_ratios is not None else None
+        ),
+        source_content_height_ratio=(
+            round(source_content_ratios[3], 6) if source_content_ratios is not None else None
         ),
     )
 
@@ -537,6 +901,16 @@ def build_prepared_svg(
     root_copy.attrib["viewBox"] = (
         f"0 0 {format_numeric(plot_area.page_width_mm)} {format_numeric(plot_area.page_height_mm)}"
     )
+    prepared_background = ET.Element(
+        qualify_svg_tag(root_copy.tag, "rect"),
+        {
+            "x": "0",
+            "y": "0",
+            "width": "100%",
+            "height": "100%",
+            "fill": PREPARED_PAGE_BACKGROUND_FILL,
+        },
+    )
     wrapper = ET.Element(
         qualify_svg_tag(root_copy.tag, "g"),
         {
@@ -552,7 +926,9 @@ def build_prepared_svg(
     existing_children = list(root_copy)
     for child in existing_children:
         root_copy.remove(child)
-        wrapper.append(child)
+        if not is_full_page_background_rect(child, source_box=source_box):
+            wrapper.append(child)
+    root_copy.append(prepared_background)
     root_copy.append(wrapper)
     return ET.tostring(root_copy, encoding="unicode")
 
@@ -579,6 +955,46 @@ def classify_source_units(root: ET.Element) -> str:
     if len(units) > 1:
         return "mixed"
     return next(iter(units))
+
+
+def is_full_page_background_rect(child: ET.Element, *, source_box: SourceBox) -> bool:
+    if child.tag.rsplit("}", 1)[-1] != "rect":
+        return False
+
+    width = child.attrib.get("width", "").strip()
+    height = child.attrib.get("height", "").strip()
+    if width == "100%" and height == "100%":
+        return True
+
+    x = child.attrib.get("x", "0").strip() or "0"
+    y = child.attrib.get("y", "0").strip() or "0"
+    if not is_zero_length(x) or not is_zero_length(y):
+        return False
+
+    width_length = parse_svg_length(width)
+    height_length = parse_svg_length(height)
+    if width_length is None or height_length is None:
+        return False
+
+    return lengths_match_source_bounds(
+        width_length,
+        source_box.view_box_width,
+    ) and lengths_match_source_bounds(
+        height_length,
+        source_box.view_box_height,
+    )
+
+
+def is_zero_length(value: str) -> bool:
+    if value in {"", "0", "0.0", "0%"}:
+        return True
+    parsed = parse_svg_length(value)
+    return parsed is not None and parsed[0] == 0.0
+
+
+def lengths_match_source_bounds(length: tuple[float, Optional[str]], expected: float) -> bool:
+    value, unit = length
+    return unit in {None, "px"} and abs(value - expected) <= 1e-6
 
 
 def parse_svg_length(value: Optional[str]) -> Optional[tuple[float, Optional[str]]]:

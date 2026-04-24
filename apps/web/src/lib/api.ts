@@ -15,6 +15,7 @@ import type {
   LatestPlotRunResponse,
   PlotAsset,
   PlotRun,
+  PlotRunCaptureReviewPayload,
   PlotRunListResponse,
 } from "../types/plotting";
 import type { HelperStatus } from "../types/helper";
@@ -286,6 +287,49 @@ export function fetchPlotRuns() {
 
 export function fetchPlotRun(runId: string) {
   return requestJson<PlotRun>(`/api/plot-runs/${runId}`);
+}
+
+export function fetchPlotRunCaptureReview(runId: string) {
+  return requestJson<PlotRunCaptureReviewPayload>(`/api/plot-runs/${runId}/capture-review`);
+}
+
+export function acceptPlotRunCaptureReview(runId: string) {
+  return requestJson<{ ok: boolean; message: string; run: PlotRun }>(
+    `/api/plot-runs/${runId}/capture-review/accept`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function adjustPlotRunCaptureReview(
+  runId: string,
+  corners: {
+    top_left: [number, number];
+    top_right: [number, number];
+    bottom_right: [number, number];
+    bottom_left: [number, number];
+  },
+) {
+  return requestJson<{ ok: boolean; message: string; run: PlotRun }>(
+    `/api/plot-runs/${runId}/capture-review/adjust`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ corners }),
+    },
+  );
+}
+
+export function reuseLastPlotRunCaptureReview(runId: string) {
+  return requestJson<{ ok: boolean; message: string; run: PlotRun }>(
+    `/api/plot-runs/${runId}/capture-review/reuse-last`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function fetchHelperStatus() {

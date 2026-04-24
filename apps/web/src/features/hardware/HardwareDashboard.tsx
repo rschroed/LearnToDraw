@@ -165,6 +165,8 @@ export function HardwareDashboard() {
           plotterCalibration={plotterCalibration}
           plotterDevice={plotterDevice}
           plotterWorkspace={plotterWorkspace}
+          latestCapture={latestCapture}
+          refreshing={refreshing}
           actionName={actionName}
           actionFeedback={actionFeedback}
           walkHome={walkHome}

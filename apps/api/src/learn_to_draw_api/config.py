@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,8 @@ class AppConfig:
     opencv_camera_index: int = 0
     camera_warmup_ms: int = 150
     camera_discard_frames: int = 2
+    normalization_mode: Literal["default", "region_only"] = "default"
+    normalization_experiment: Literal["region_v2", "contour_v3"] = "region_v2"
     camerabridge_base_url: Optional[str] = None
     camerabridge_token_path: Optional[Path] = None
     camerabridge_owner_id: str = "learntodraw-api"
@@ -98,6 +100,14 @@ class AppConfig:
         camera_discard_frames = _read_optional_int(
             "LEARN_TO_DRAW_CAMERA_DISCARD_FRAMES",
             2,
+        )
+        normalization_mode = _read_normalization_mode(
+            "LEARN_TO_DRAW_NORMALIZATION_MODE",
+            "default",
+        )
+        normalization_experiment = _read_normalization_experiment(
+            "LEARN_TO_DRAW_NORMALIZATION_EXPERIMENT",
+            "region_v2",
         )
         camerabridge_base_url = _read_optional_text_or_none(
             "LEARN_TO_DRAW_CAMERABRIDGE_BASE_URL"
@@ -189,6 +199,8 @@ class AppConfig:
             opencv_camera_index=opencv_camera_index,
             camera_warmup_ms=camera_warmup_ms,
             camera_discard_frames=camera_discard_frames,
+            normalization_mode=normalization_mode,
+            normalization_experiment=normalization_experiment,
             camerabridge_base_url=camerabridge_base_url,
             camerabridge_token_path=camerabridge_token_path,
             camerabridge_owner_id=camerabridge_owner_id,
@@ -264,3 +276,29 @@ def _read_optional_text_or_none(env_name: str) -> Optional[str]:
         return None
     value = value.strip()
     return value or None
+
+
+def _read_normalization_mode(
+    env_name: str,
+    default: Literal["default", "region_only"],
+) -> Literal["default", "region_only"]:
+    value = os.getenv(env_name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"default", "region_only"}:
+        return normalized  # type: ignore[return-value]
+    return default
+
+
+def _read_normalization_experiment(
+    env_name: str,
+    default: Literal["region_v2", "contour_v3"],
+) -> Literal["region_v2", "contour_v3"]:
+    value = os.getenv(env_name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"region_v2", "contour_v3"}:
+        return normalized  # type: ignore[return-value]
+    return default

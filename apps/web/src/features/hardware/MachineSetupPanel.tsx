@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 
+import { LatestCapturePanel } from "../../components/LatestCapturePanel";
 import { StatusPill } from "../../components/StatusPill";
 import type {
+  CaptureMetadata,
   HardwareStatus,
   PlotterCalibration,
   PlotterDeviceSettings,
@@ -33,6 +35,8 @@ interface MachineSetupPanelProps {
   plotterCalibration: PlotterCalibration | null;
   plotterDevice: PlotterDeviceSettings | null;
   plotterWorkspace: PlotterWorkspace | null;
+  latestCapture: CaptureMetadata | null;
+  refreshing: boolean;
   actionName: ActionName;
   actionFeedback: ActionFeedback | null;
   walkHome: () => Promise<void>;
@@ -117,6 +121,8 @@ export function MachineSetupPanel({
   plotterCalibration,
   plotterDevice,
   plotterWorkspace,
+  latestCapture,
+  refreshing,
   actionName,
   actionFeedback,
   walkHome,
@@ -428,6 +434,8 @@ export function MachineSetupPanel({
           capture={capture}
           setCameraDevice={setCameraDevice}
         />
+
+        <LatestCapturePanel capture={latestCapture} refreshing={refreshing} />
 
         <details className="panel machine-disclosure">
           <summary>Diagnostics</summary>

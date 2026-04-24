@@ -167,7 +167,77 @@ describe("machine and camera focused behaviors", () => {
     fireEvent.click(await screen.findByRole("button", { name: /capture test image/i }));
 
     expect(await screen.findByText(/image captured\./i)).toBeInTheDocument();
-    expect(screen.queryByText(/latest capture/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /latest capture/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: /latest camera capture capture-real-001/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows latest-capture raw, normalized, and debug variants on the Machine tab", async () => {
+    const harness = createHardwareDashboardHarness({
+      latestCapture: {
+        id: "capture-machine-001",
+        timestamp: "2026-03-15T20:05:00Z",
+        file_path: "/tmp/capture-machine-001.jpg",
+        public_url: "/captures/capture-machine-001.jpg",
+        width: 1920,
+        height: 1080,
+        mime_type: "image/jpeg",
+        review: null,
+        normalized: {
+          rectified_color_url: "/captures/capture-machine-001-rectified-color.png",
+          rectified_grayscale_url: "/captures/capture-machine-001-rectified-grayscale.png",
+          debug_overlay_url: "/captures/capture-machine-001-debug-overlay.png",
+          metadata: {
+            method: "paper_edges_v1",
+            confidence: 0.92,
+            corners: {
+              top_left: [12, 12],
+              top_right: [100, 12],
+              bottom_right: [100, 120],
+              bottom_left: [12, 120],
+            },
+            transform: {
+              matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            },
+            output: {
+              width: 1448,
+              height: 2048,
+              aspect_ratio: 0.707031,
+            },
+            target_frame_source: "workspace_drawable_area",
+            frame: {
+              kind: "page_aligned",
+              version: 1,
+              page_width_mm: 210,
+              page_height_mm: 297,
+            },
+          },
+        },
+      },
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /^machine$/i }));
+
+    expect(
+      await screen.findByRole("img", {
+        name: /normalized latest camera capture capture-machine-001/i,
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^debug$/i }));
+    expect(
+      await screen.findByRole("img", {
+        name: /debug latest camera capture capture-machine-001/i,
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^raw$/i }));
+    expect(
+      await screen.findByRole("img", {
+        name: /raw latest camera capture capture-machine-001/i,
+      }),
+    ).toBeInTheDocument();
   });
 
   it("keeps invalid paper setup drafts local and blocks save until they fit", async () => {

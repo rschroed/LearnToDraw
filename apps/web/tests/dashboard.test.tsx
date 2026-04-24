@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { App } from "../src/app/App";
+import type { CaptureReview } from "../src/types/hardware";
+import type { PlotRun } from "../src/types/plotting";
 import {
   createHardwareDashboardHarness,
   defaultAxiDrawHardwareStatus,
@@ -12,15 +14,53 @@ function buildRun({
   name,
   createdAt,
   observedCaptureId,
+  includeNormalized = false,
+  status,
+  review = null,
 }: {
   id: string;
   name: string;
   createdAt: string;
   observedCaptureId?: string;
-}) {
+  includeNormalized?: boolean;
+  status?: "completed" | "plotting" | "awaiting_capture_review";
+  review?: CaptureReview | null;
+}): PlotRun {
+  const normalized = observedCaptureId && includeNormalized
+    ? {
+        rectified_color_url: `/captures/${observedCaptureId}-rectified-color.png`,
+        rectified_grayscale_url: `/captures/${observedCaptureId}-rectified-grayscale.png`,
+        debug_overlay_url: `/captures/${observedCaptureId}-debug-overlay.png`,
+        metadata: {
+          method: "paper_edges_v1" as const,
+          confidence: 0.91,
+          corners: {
+            top_left: [10, 10] as [number, number],
+            top_right: [100, 10] as [number, number],
+            bottom_right: [100, 100] as [number, number],
+            bottom_left: [10, 100] as [number, number],
+          },
+          transform: {
+            matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+          },
+          output: {
+            width: 2048,
+            height: 1950,
+            aspect_ratio: 1.05,
+          },
+          target_frame_source: "prepared_svg" as const,
+          frame: {
+            kind: "page_aligned" as const,
+            version: 1,
+            page_width_mm: 210,
+            page_height_mm: 200,
+          },
+        },
+      }
+    : null;
   return {
     id,
-    status: observedCaptureId ? ("completed" as const) : ("plotting" as const),
+    status: status ?? (observedCaptureId ? ("completed" as const) : ("plotting" as const)),
     purpose: "normal" as const,
     capture_mode: "auto" as const,
     created_at: createdAt,
@@ -49,6 +89,8 @@ function buildRun({
           width: 1600,
           height: 1200,
           mime_type: "image/jpeg",
+          review,
+          normalized,
         }
       : null,
     observed_result: observedCaptureId
@@ -61,6 +103,8 @@ function buildRun({
             width: 1600,
             height: 1200,
             mime_type: "image/jpeg",
+            review,
+            normalized,
           },
           camera_driver: "mock-camera",
           captured_at: createdAt,
@@ -87,15 +131,39 @@ function buildRun({
         completed_at: observedCaptureId ? createdAt : null,
         message: observedCaptureId ? "Captured." : "Waiting.",
       },
+      capture_review: {
+        status:
+          status === "awaiting_capture_review"
+            ? ("in_progress" as const)
+            : observedCaptureId
+              ? ("completed" as const)
+              : ("pending" as const),
+        started_at: status === "awaiting_capture_review" || observedCaptureId ? createdAt : null,
+        completed_at: observedCaptureId ? createdAt : null,
+        message:
+          status === "awaiting_capture_review"
+            ? "Review the detected page corners before normalization."
+            : observedCaptureId
+              ? "Capture review confirmed."
+              : "Waiting.",
+      },
     },
     plotter_run_details: {
       preparation: {
         source_width: 120,
         source_height: 90,
+        page_width_mm: 210,
+        page_height_mm: 200,
         prepared_width_mm: 110,
         prepared_height_mm: 82,
         preparation_audit: {
           prepared_within_drawable_area: true,
+          placement_origin_x_mm: 5,
+          placement_origin_y_mm: 5,
+          source_content_left_ratio: 0.1,
+          source_content_top_ratio: 0.1,
+          source_content_width_ratio: 0.8,
+          source_content_height_ratio: 0.6,
         },
       },
     },
@@ -168,6 +236,8 @@ describe("workflow-first dashboard", () => {
         width: 1920,
         height: 1080,
         mime_type: "image/jpeg",
+        review: null,
+        normalized: null,
       },
     });
     installHardwareDashboardFetchMock(harness);
@@ -200,6 +270,8 @@ describe("workflow-first dashboard", () => {
         width: 1920,
         height: 1080,
         mime_type: "image/jpeg",
+        review: null,
+        normalized: null,
       },
       recentRuns: [
         {
@@ -227,6 +299,126 @@ describe("workflow-first dashboard", () => {
     expect(
       screen.queryByRole("img", { name: /latest result capture capture-global-002/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("defaults to the normalized result and allows switching to raw and debug variants", async () => {
+    const latestRun = buildRun({
+      id: "run-020",
+      name: "Variant Study",
+      createdAt: "2026-03-15T20:14:00Z",
+      observedCaptureId: "capture-run-020",
+      includeNormalized: true,
+    });
+    const harness = createHardwareDashboardHarness({
+      latestRun,
+      recentRuns: [
+        {
+          id: latestRun.id,
+          status: latestRun.status,
+          purpose: latestRun.purpose,
+          created_at: latestRun.created_at,
+          updated_at: latestRun.updated_at,
+          asset_id: latestRun.asset.id,
+          asset_name: latestRun.asset.name,
+          asset_kind: latestRun.asset.kind,
+          error: null,
+        },
+      ],
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("img", {
+        name: /normalized result image for run run-020/i,
+      }),
+    ).toBeInTheDocument();
+    const preparedFrame = screen
+      .getByRole("img", { name: /prepared output for run run-020/i })
+      .closest(".artifact-frame");
+    expect(preparedFrame?.getAttribute("style")).toContain("aspect-ratio");
+    const resultFrame = screen
+      .getByRole("img", { name: /normalized result image for run run-020/i })
+      .closest(".artifact-frame");
+    expect(resultFrame?.getAttribute("style")).toContain("aspect-ratio");
+    expect(screen.getByRole("button", { name: /^normalized$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^debug$/i }));
+    expect(
+      await screen.findByRole("img", {
+        name: /debug result image for run run-020/i,
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^raw$/i }));
+    expect(
+      await screen.findByRole("img", {
+        name: /raw result image for run run-020/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the capture review UI for a run awaiting corner confirmation", async () => {
+    const pendingRun = buildRun({
+      id: "run-review-001",
+      name: "Needs review",
+      createdAt: "2026-03-15T20:18:00Z",
+      observedCaptureId: "capture-review-001",
+      status: "awaiting_capture_review",
+      review: {
+        review_required: true,
+        review_status: "pending",
+        proposed_corners: {
+          top_left: [100, 120],
+          top_right: [1400, 110],
+          bottom_right: [1450, 1080],
+          bottom_left: [80, 1090],
+        },
+        confirmed_corners: null,
+        confirmation_source: null,
+        detector_method: "paper_region_v2",
+        detector_confidence: 0.32,
+        reuse_last_available: true,
+      },
+    });
+    const harness = createHardwareDashboardHarness({
+      latestRun: pendingRun,
+      plotRunsById: {
+        [pendingRun.id]: pendingRun,
+      },
+      recentRuns: [
+        {
+          id: pendingRun.id,
+          status: pendingRun.status,
+          purpose: pendingRun.purpose,
+          created_at: pendingRun.created_at,
+          updated_at: pendingRun.updated_at,
+          asset_id: pendingRun.asset.id,
+          asset_name: pendingRun.asset.name,
+          asset_kind: pendingRun.asset.kind,
+          error: null,
+        },
+      ],
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /review capture/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^accept$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^adjust$/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^reuse last$/i })).toBeEnabled();
+    expect(screen.getByText(/paper_region_v2/i)).toBeInTheDocument();
+    expect(screen.getByText(/confidence 0.32/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^adjust$/i }));
+
+    expect(await screen.findByRole("dialog", { name: /adjust capture corners/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /apply adjusted quad/i })).toBeDisabled();
   });
 
   it("keeps the source hidden by default and reveals it on demand in the Workflow view", async () => {
@@ -288,7 +480,7 @@ describe("workflow-first dashboard", () => {
 
     expect(await screen.findByRole("heading", { name: /paper setup/i })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /current setup/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/latest capture/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /latest capture/i })).toBeInTheDocument();
     expect(screen.getAllByLabelText(/paper setup preview/i)).toHaveLength(1);
     expect(screen.getByRole("heading", { name: /^plotter$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /capture test image/i })).toBeInTheDocument();

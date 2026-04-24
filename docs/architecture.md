@@ -22,7 +22,8 @@ The current backend structure centers on:
 
 - `routes.py` and `api.py` for the thin FastAPI surface
 - `services/hardware.py` for hardware status and control orchestration
-- `services/captures.py` for persisted capture storage and latest-capture lookup
+- `services/captures.py` for persisted raw capture storage, normalized-derivative metadata, and latest-capture lookup
+- `services/capture_service.py` and `services/capture_normalization.py` for backend-owned post-capture normalization
 - `services/plot_workflow.py` for asset storage, run creation, preparation, plotting, and capture flow
 - `services/plotter_calibration.py`, `services/plotter_device_settings.py`, and `services/plotter_workspace.py` for persisted plotter state
 
@@ -60,7 +61,7 @@ Hardware integration stays behind backend interfaces.
 
 Local persisted state is organized by purpose:
 
-- `artifacts/captures`: saved capture metadata and SVG output
+- `artifacts/captures`: saved raw capture metadata plus normalized derivative artifacts such as rectified grayscale and debug overlays
 - `artifacts/plot_assets`: uploaded or built-in plot sources
 - `artifacts/plot_runs`: run records and prepared output where applicable
 - `artifacts/calibration`: persisted plotter calibration values
@@ -74,12 +75,22 @@ Filesystem paths and public URLs are kept separate in the backend so local stora
 The app currently supports a single backend-owned plotting workflow with a few narrow supporting flows.
 
 - `status`: the frontend polls backend hardware status and availability
-- `captures`: the backend can trigger and persist camera captures, then serve the latest result
-- `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, and optional capture stages; normal runs can persist a run-scoped observed result after capture
+- `captures`: the backend can trigger and persist camera captures, then enrich them with backend-owned normalized derivatives without mutating the raw source artifact
+  Manual captures normalize into a canonical page-sized workspace frame, while normal plot runs normalize inline into the prepared page frame so prepared and observed artifacts share the same backend-owned comparison coordinates. Paper detection is backend-owned and deterministic, with a region-first bright-paper detector on dark-mat captures plus explicit edge/full-frame fallbacks.
+- `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, and optional capture stages; normal runs persist a run-scoped observed result whose embedded capture record can include normalized comparison-ready artifacts
 - `diagnostics`: fixed built-in pen and pattern tests stay separate from normal plotting semantics
 - `workspace`: page size and margins are persisted and validated against the current drawable area
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides
 - `calibration`: persisted plotter calibration remains backend-owned and separate from transient runtime overrides
+
+## Experimental Capture Normalization Diagnostics
+
+Capture normalization exposes backend-only diagnostic switches for saved-capture replay and detector comparison:
+
+- `LEARN_TO_DRAW_NORMALIZATION_MODE`: `default` or `region_only`
+- `LEARN_TO_DRAW_NORMALIZATION_EXPERIMENT`: `region_v2` or `contour_v3`
+
+These switches are session/runtime configuration only. They are not persisted as operator settings and should not be surfaced as broad browser controls. Use them to compare detector behavior or inspect rejected candidates while keeping the backend as the sole owner of capture analysis.
 
 ## Extension Points
 

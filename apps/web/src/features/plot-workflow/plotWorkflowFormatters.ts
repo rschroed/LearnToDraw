@@ -13,10 +13,24 @@ interface ResultCaptureLike {
 }
 
 export interface RunStepSummaryItem {
-  key: "prepare" | "plot" | "capture";
+  key: "prepare" | "plot" | "capture" | "capture_review";
   label: string;
   tone: "ok" | "warn" | "error" | "neutral";
   note?: string | null;
+}
+
+function getStageStateOrDefault(
+  stageState: PlotStageState | undefined,
+  fallbackMessage: string | null = null,
+): PlotStageState {
+  return (
+    stageState ?? {
+      status: "pending",
+      started_at: null,
+      completed_at: null,
+      message: fallbackMessage,
+    }
+  );
 }
 
 export function getStageLabel(run: PlotRun | null) {
@@ -28,6 +42,9 @@ export function getStageLabel(run: PlotRun | null) {
   }
   if (run.status === "capturing") {
     return "Capturing";
+  }
+  if (run.status === "awaiting_capture_review") {
+    return "Needs review";
   }
   if (run.status === "completed") {
     return "Completed";
@@ -43,7 +60,12 @@ export function getRunStatusTone(status: PlotRun["status"] | "idle") {
   if (status === "completed") {
     return "ok";
   }
-  if (status === "pending" || status === "plotting" || status === "capturing") {
+  if (
+    status === "pending" ||
+    status === "plotting" ||
+    status === "capturing" ||
+    status === "awaiting_capture_review"
+  ) {
     return "warn";
   }
   if (status === "failed") {
@@ -92,9 +114,13 @@ export function getStepSummaryItems(run: PlotRun | null): RunStepSummaryItem[] {
   }
 
   const items: RunStepSummaryItem[] = [];
-  const prepareState = run.stage_states.prepare;
-  const plotState = run.stage_states.plot;
-  const captureState = run.stage_states.capture;
+  const prepareState = getStageStateOrDefault(run.stage_states.prepare);
+  const plotState = getStageStateOrDefault(run.stage_states.plot);
+  const captureState = getStageStateOrDefault(run.stage_states.capture);
+  const captureReviewState = getStageStateOrDefault(
+    run.stage_states.capture_review,
+    "Capture review not required for this run.",
+  );
 
   items.push({
     key: "prepare",
@@ -174,6 +200,32 @@ export function getStepSummaryItems(run: PlotRun | null): RunStepSummaryItem[] {
         : captureState.message,
   });
 
+  items.push({
+    key: "capture_review",
+    label:
+      captureReviewState.status === "completed"
+        ? "Reviewed ✓"
+        : captureReviewState.status === "failed"
+          ? "Review !"
+          : captureReviewState.status === "in_progress"
+            ? run.status === "awaiting_capture_review"
+              ? "Review needed"
+              : "Reviewing…"
+            : "Review",
+    tone:
+      captureReviewState.status === "completed"
+        ? "ok"
+        : captureReviewState.status === "failed"
+          ? "error"
+          : captureReviewState.status === "in_progress"
+            ? "warn"
+            : "neutral",
+    note:
+      captureReviewState.status === "completed"
+        ? null
+        : captureReviewState.message,
+  });
+
   return items;
 }
 
@@ -183,6 +235,9 @@ export function getStepSummaryNote(run: PlotRun | null) {
   }
   if (run.status === "completed" && run.capture_mode !== "skip") {
     return null;
+  }
+  if (run.status === "awaiting_capture_review") {
+    return run.stage_states.capture_review.message ?? "Review the detected page corners.";
   }
   if (run.status === "completed" && run.capture_mode === "skip") {
     return "Capture skipped for this run.";

@@ -20,6 +20,9 @@ from learn_to_draw_api.models import (
     PlotterPenHeightsRequest,
     PlotterSafeBoundsRequest,
     PlotRun,
+    PlotRunCaptureReviewAdjustRequest,
+    PlotRunCaptureReviewPayload,
+    PlotRunCaptureReviewResponse,
     PlotRunCreateRequest,
     PlotRunListResponse,
     PlotterCommandResponse,
@@ -143,5 +146,35 @@ def build_api_router(
     @router.get("/api/plot-runs/{run_id}", response_model=PlotRun)
     def get_plot_run(run_id: str) -> PlotRun:
         return plot_workflow_service.get_run(run_id)
+
+    @router.get("/api/plot-runs/{run_id}/capture-review", response_model=PlotRunCaptureReviewPayload)
+    def get_plot_run_capture_review(run_id: str) -> PlotRunCaptureReviewPayload:
+        return plot_workflow_service.get_capture_review(run_id)
+
+    @router.post(
+        "/api/plot-runs/{run_id}/capture-review/accept",
+        response_model=PlotRunCaptureReviewResponse,
+    )
+    def post_plot_run_capture_review_accept(run_id: str) -> PlotRunCaptureReviewResponse:
+        return plot_workflow_service.accept_capture_review(run_id)
+
+    @router.post(
+        "/api/plot-runs/{run_id}/capture-review/adjust",
+        response_model=PlotRunCaptureReviewResponse,
+    )
+    def post_plot_run_capture_review_adjust(
+        run_id: str,
+        request: PlotRunCaptureReviewAdjustRequest,
+    ) -> PlotRunCaptureReviewResponse:
+        return plot_workflow_service.adjust_capture_review(run_id, request)
+
+    @router.post(
+        "/api/plot-runs/{run_id}/capture-review/reuse-last",
+        response_model=PlotRunCaptureReviewResponse,
+    )
+    def post_plot_run_capture_review_reuse_last(
+        run_id: str,
+    ) -> PlotRunCaptureReviewResponse:
+        return plot_workflow_service.reuse_last_capture_review(run_id)
 
     return router

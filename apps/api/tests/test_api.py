@@ -3,7 +3,9 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
+import cv2
 from fastapi.testclient import TestClient
+import numpy as np
 
 from learn_to_draw_api.adapters.axidraw_models import resolve_axidraw_model_info
 from learn_to_draw_api.adapters.mock_camera import MockCamera
@@ -44,6 +46,43 @@ def wait_for_run_completion(client: TestClient, run_id: str):
             return payload
         time.sleep(0.01)
     raise AssertionError("Plot run did not finish in time.")
+
+
+def wait_for_run_status(client: TestClient, run_id: str, statuses: set[str]):
+    for _ in range(200):
+        response = client.get(f"/api/plot-runs/{run_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] in statuses:
+            return payload
+        time.sleep(0.01)
+    raise AssertionError(f"Plot run did not reach expected state: {statuses}")
+
+
+def wait_for_latest_capture_normalization(client: TestClient, capture_id: str):
+    for _ in range(200):
+        response = client.get("/api/captures/latest")
+        assert response.status_code == 200
+        capture = response.json()["capture"]
+        if capture and capture["id"] == capture_id and capture.get("normalized") is not None:
+            return capture
+        time.sleep(0.01)
+    raise AssertionError("Latest capture normalization did not finish in time.")
+
+
+def _jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
+    image = np.full((height, width, 3), 245, dtype=np.uint8)
+    cv2.rectangle(image, (80, 60), (width - 80, height - 60), (32, 32, 32), 6)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    return encoded.tobytes()
+
+
+def _blank_jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
+    image = np.full((height, width, 3), 250, dtype=np.uint8)
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    return encoded.tobytes()
 
 
 def test_health_and_status_endpoints(tmp_path):
@@ -120,12 +159,18 @@ def test_status_reports_plot_capability_flags(tmp_path):
 def test_capture_and_latest_capture_endpoints(tmp_path):
     with create_test_client(tmp_path, camera=MockCamera(capture_delay_s=0)) as client:
         capture_response = client.post("/api/camera/capture")
-        latest_response = client.get("/api/captures/latest")
+        latest_capture = wait_for_latest_capture_normalization(
+            client,
+            capture_response.json()["capture"]["id"],
+        )
 
     assert capture_response.status_code == 200
     capture_payload = capture_response.json()
     assert capture_payload["capture"]["public_url"].startswith("/captures/")
-    assert latest_response.json()["capture"]["id"] == capture_payload["capture"]["id"]
+    assert capture_payload["capture"]["normalized"] is None
+    assert latest_capture["id"] == capture_payload["capture"]["id"]
+    assert latest_capture["normalized"]["metadata"]["target_frame_source"] == "workspace_drawable_area"
+    assert latest_capture["normalized"]["metadata"]["frame"]["kind"] == "page_aligned"
 
 
 class StubRealCamera:
@@ -209,7 +254,41 @@ class StubRealCamera:
             capture_id="capture-real-001",
             timestamp=datetime.now(timezone.utc),
             filename="capture-real-001.jpg",
-            content=b"jpeg-bytes",
+            content=_jpeg_bytes(),
+            media_type="image/jpeg",
+            width=640,
+            height=480,
+        )
+
+
+class LowConfidenceCamera:
+    driver = "mock-camera"
+
+    def __init__(self) -> None:
+        self._connected = False
+        self._capture_count = 0
+
+    def connect(self) -> None:
+        self._connected = True
+
+    def disconnect(self) -> None:
+        self._connected = False
+
+    def get_status(self) -> DeviceStatus:
+        return MockCamera(driver=self.driver).get_status().model_copy(
+            update={"connected": self._connected}
+        )
+
+    def set_selected_device(self, device_id: str | None):
+        return self.get_status()
+
+    def capture(self) -> CaptureArtifact:
+        self._capture_count += 1
+        return CaptureArtifact(
+            capture_id=f"capture-review-{self._capture_count}",
+            timestamp=datetime.now(timezone.utc),
+            filename=f"capture-review-{self._capture_count}.jpg",
+            content=_blank_jpeg_bytes(),
             media_type="image/jpeg",
             width=640,
             height=480,
@@ -220,7 +299,10 @@ def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
     with create_test_client(tmp_path, camera=StubRealCamera()) as client:
         status_before = client.get("/api/hardware/status")
         capture_response = client.post("/api/camera/capture")
-        latest_response = client.get("/api/captures/latest")
+        latest_capture = wait_for_latest_capture_normalization(
+            client,
+            capture_response.json()["capture"]["id"],
+        )
 
     assert status_before.status_code == 200
     assert status_before.json()["camera"]["details"]["readiness_state"] == "ready"
@@ -231,7 +313,9 @@ def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
     assert payload["capture"]["public_url"].endswith(".jpg")
     assert payload["capture"]["width"] == 640
     assert payload["capture"]["height"] == 480
-    assert latest_response.json()["capture"]["id"] == payload["capture"]["id"]
+    assert latest_capture["id"] == payload["capture"]["id"]
+    assert latest_capture["normalized"]["rectified_grayscale_url"].endswith(".png")
+    assert latest_capture["normalized"]["metadata"]["frame"]["kind"] == "page_aligned"
 
 
 def test_camera_device_endpoint_updates_selected_device(tmp_path):
@@ -612,6 +696,12 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
 
     assert completed["status"] == "completed"
     assert completed["capture"]["public_url"].startswith("/captures/")
+    assert completed["capture"]["normalized"] is not None
+    assert completed["capture"]["normalized"]["metadata"]["target_frame_source"] == "prepared_svg"
+    assert completed["capture"]["normalized"]["metadata"]["frame"]["kind"] == "page_aligned"
+    assert completed["capture"]["normalized"]["metadata"]["frame"]["version"] == 1
+    assert completed["capture"]["normalized"]["metadata"]["frame"]["page_width_mm"] == 210.0
+    assert completed["capture"]["normalized"]["metadata"]["frame"]["page_height_mm"] == 297.0
     assert completed["observed_result"]["capture"]["id"] == completed["capture"]["id"]
     assert completed["observed_result"]["camera_driver"] == "mock-camera"
     assert completed["prepared_artifact"]["public_url"].startswith("/plot-run-artifacts/")
@@ -627,9 +717,73 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
     assert completed["plotter_run_details"]["preparation"]["drawable_width_mm"] == 170.0
     assert completed["plotter_run_details"]["preparation"]["workspace_audit"]["page_within_plotter_bounds"] is True
     assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["comparison_frame_version"] == 1
     assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["placement_origin_x_mm"] == 20.0
+    assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["source_content_left_ratio"] == 0.083333
     assert latest.json()["run"]["id"] == run["id"]
     assert recent.json()["runs"][0]["id"] == run["id"]
+
+
+def test_plot_run_capture_review_accept_endpoint(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        run_response = client.post("/api/plot-runs", json={"asset_id": asset_response.json()["id"]})
+        pending = wait_for_run_status(client, run_response.json()["id"], {"awaiting_capture_review"})
+        review_response = client.get(f"/api/plot-runs/{pending['id']}/capture-review")
+        accept_response = client.post(f"/api/plot-runs/{pending['id']}/capture-review/accept")
+        completed = wait_for_run_completion(client, pending["id"])
+
+    assert review_response.status_code == 200
+    review_payload = review_response.json()
+    assert review_payload["review"]["review_status"] == "pending"
+    assert review_payload["capture"]["normalized"] is None
+    assert accept_response.status_code == 200
+    assert accept_response.json()["run"]["status"] == "capturing"
+    assert completed["status"] == "completed"
+    assert completed["capture"]["normalized"] is not None
+    assert completed["capture"]["review"]["confirmation_source"] == "auto"
+
+
+def test_plot_run_capture_review_reuse_last_endpoint(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        asset_id = asset_response.json()["id"]
+
+        first_run = client.post("/api/plot-runs", json={"asset_id": asset_id}).json()
+        first_pending = wait_for_run_status(client, first_run["id"], {"awaiting_capture_review"})
+        first_corners = first_pending["capture"]["review"]["proposed_corners"]
+        adjust_response = client.post(
+            f"/api/plot-runs/{first_pending['id']}/capture-review/adjust",
+            json={"corners": first_corners},
+        )
+        first_completed = wait_for_run_completion(client, first_pending["id"])
+
+        second_run = client.post("/api/plot-runs", json={"asset_id": asset_id}).json()
+        second_pending = wait_for_run_status(client, second_run["id"], {"awaiting_capture_review"})
+        reuse_response = client.post(
+            f"/api/plot-runs/{second_pending['id']}/capture-review/reuse-last"
+        )
+        second_completed = wait_for_run_completion(client, second_pending["id"])
+
+    assert adjust_response.status_code == 200
+    assert first_completed["capture"]["review"]["confirmation_source"] == "adjusted"
+    assert second_pending["capture"]["review"]["reuse_last_available"] is True
+    assert reuse_response.status_code == 200
+    assert second_completed["capture"]["review"]["confirmation_source"] == "reused_last"
 
 
 def test_diagnostic_plot_run_skips_capture(tmp_path):
@@ -685,6 +839,8 @@ def test_normal_preparation_accepts_unitless_upload(tmp_path):
     assert completed["status"] == "completed"
     assert completed["plotter_run_details"]["preparation"]["units_inferred"] is True
     assert completed["observed_result"]["capture"]["id"] == completed["capture"]["id"]
+    assert completed["capture"]["normalized"]["metadata"]["output"]["width"] == 1448
+    assert completed["capture"]["normalized"]["metadata"]["output"]["height"] == 2048
     assert completed["plotter_run_details"]["preparation"]["prepared_width_mm"] == 170.0
     assert completed["plotter_run_details"]["preparation"]["workspace_audit"]["drawable_origin_x_mm"] == 20.0
     assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["strategy"] == "fit_top_left"

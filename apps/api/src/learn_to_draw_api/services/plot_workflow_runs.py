@@ -14,7 +14,7 @@ from learn_to_draw_api.models import (
 )
 
 
-ACTIVE_RUN_STATUSES = {"pending", "plotting", "capturing"}
+ACTIVE_RUN_STATUSES = {"pending", "plotting", "capturing", "awaiting_capture_review"}
 
 
 class PlotRunStore:

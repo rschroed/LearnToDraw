@@ -1,3 +1,5 @@
+import type { CaptureMetadata } from "./hardware";
+
 export interface PlotAsset {
   id: string;
   kind: "uploaded_svg" | "built_in_pattern";
@@ -18,7 +20,13 @@ export interface PlotStageState {
 
 export interface PlotRun {
   id: string;
-  status: "pending" | "plotting" | "capturing" | "completed" | "failed";
+  status:
+    | "pending"
+    | "plotting"
+    | "capturing"
+    | "awaiting_capture_review"
+    | "completed"
+    | "failed";
   purpose: "normal" | "diagnostic";
   capture_mode: "auto" | "skip";
   created_at: string;
@@ -29,31 +37,15 @@ export interface PlotRun {
     public_url: string;
     mime_type: string;
   } | null;
-  capture: {
-    id: string;
-    timestamp: string;
-    file_path: string;
-    public_url: string;
-    width: number;
-    height: number;
-    mime_type: string;
-  } | null;
+  capture: CaptureMetadata | null;
   observed_result?: {
-    capture: {
-      id: string;
-      timestamp: string;
-      file_path: string;
-      public_url: string;
-      width: number;
-      height: number;
-      mime_type: string;
-    };
+    capture: CaptureMetadata;
     camera_driver: string;
     captured_at: string;
     duration_ms: number;
   } | null;
   error: string | null;
-  stage_states: Record<"prepare" | "plot" | "capture", PlotStageState>;
+  stage_states: Record<"prepare" | "plot" | "capture" | "capture_review", PlotStageState>;
   plotter_run_details: Record<string, unknown>;
   camera_run_details: Record<string, unknown>;
 }
@@ -76,4 +68,10 @@ export interface LatestPlotRunResponse {
 
 export interface PlotRunListResponse {
   runs: PlotRunSummary[];
+}
+
+export interface PlotRunCaptureReviewPayload {
+  run_id: string;
+  capture: CaptureMetadata;
+  review: CaptureMetadata["review"];
 }
