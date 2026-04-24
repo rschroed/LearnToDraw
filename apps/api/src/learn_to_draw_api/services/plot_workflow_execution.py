@@ -145,9 +145,10 @@ class PlotRunExecutor:
                     content=capture_artifact.content,
                     normalization_target=normalization_target,
                 )
-                scope_key = self._build_review_scope_key(
+                scope_key = self._review_memory_store.build_scope_key_for_workspace(
                     workspace=workspace,
                     camera_driver=self._camera.driver,
+                    camera_device_id=self._camera_device_id(),
                 )
                 reuse_last_available = (
                     self._review_memory_store.get(scope_key) is not None
@@ -301,7 +302,11 @@ class PlotRunExecutor:
                 update={"capture": updated_capture}
             )
         if persist_review_memory and review.confirmation_source in {"adjusted", "reused_last"}:
-            scope_key = self._build_review_scope_key_from_run(run)
+            scope_key = self._review_memory_store.build_scope_key_for_run(
+                run=run,
+                camera_driver=self._camera.driver,
+                camera_device_id=self._camera_device_id(),
+            )
             if scope_key is not None:
                 workspace = run.plotter_run_details["workspace"]
                 self._review_memory_store.save(
@@ -330,48 +335,6 @@ class PlotRunExecutor:
         run.updated_at = datetime.now(timezone.utc)
         self._run_store.save(run)
         return run
-
-    def _build_review_scope_key(
-        self,
-        *,
-        workspace: PlotterWorkspace,
-        camera_driver: str,
-    ) -> Optional[str]:
-        camera_device_id = self._camera_device_id()
-        if camera_device_id is None:
-            return None
-        return self._review_memory_store.build_scope_key(
-            camera_driver=camera_driver,
-            camera_device_id=camera_device_id,
-            page_width_mm=workspace.page_size_mm.width_mm,
-            page_height_mm=workspace.page_size_mm.height_mm,
-            margin_left_mm=workspace.margins_mm.left_mm,
-            margin_top_mm=workspace.margins_mm.top_mm,
-            margin_right_mm=workspace.margins_mm.right_mm,
-            margin_bottom_mm=workspace.margins_mm.bottom_mm,
-        )
-
-    def _build_review_scope_key_from_run(self, run: PlotRun) -> Optional[str]:
-        workspace = run.plotter_run_details.get("workspace")
-        if not isinstance(workspace, dict):
-            return None
-        page_size = workspace.get("page_size_mm")
-        margins = workspace.get("margins_mm")
-        if not isinstance(page_size, dict) or not isinstance(margins, dict):
-            return None
-        camera_device_id = self._camera_device_id()
-        if camera_device_id is None:
-            return None
-        return self._review_memory_store.build_scope_key(
-            camera_driver=self._camera.driver,
-            camera_device_id=camera_device_id,
-            page_width_mm=float(page_size["width_mm"]),
-            page_height_mm=float(page_size["height_mm"]),
-            margin_left_mm=float(margins["left_mm"]),
-            margin_top_mm=float(margins["top_mm"]),
-            margin_right_mm=float(margins["right_mm"]),
-            margin_bottom_mm=float(margins["bottom_mm"]),
-        )
 
     def _camera_device_id(self) -> Optional[str]:
         details = self._camera.get_status().details

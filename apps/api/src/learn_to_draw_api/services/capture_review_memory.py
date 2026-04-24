@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from learn_to_draw_api.models import NormalizationCorners
+from learn_to_draw_api.models import NormalizationCorners, PlotRun, PlotterWorkspace
 
 
 class CaptureReviewMemoryRecord(BaseModel):
@@ -73,6 +73,53 @@ class CaptureReviewMemoryStore:
             ]
         )
 
+    def build_scope_key_for_workspace(
+        self,
+        *,
+        workspace: PlotterWorkspace,
+        camera_driver: str,
+        camera_device_id: Optional[str],
+    ) -> Optional[str]:
+        if camera_device_id is None:
+            return None
+        return self.build_scope_key(
+            camera_driver=camera_driver,
+            camera_device_id=camera_device_id,
+            page_width_mm=workspace.page_size_mm.width_mm,
+            page_height_mm=workspace.page_size_mm.height_mm,
+            margin_left_mm=workspace.margins_mm.left_mm,
+            margin_top_mm=workspace.margins_mm.top_mm,
+            margin_right_mm=workspace.margins_mm.right_mm,
+            margin_bottom_mm=workspace.margins_mm.bottom_mm,
+        )
+
+    def build_scope_key_for_run(
+        self,
+        *,
+        run: PlotRun,
+        camera_driver: str,
+        camera_device_id: Optional[str],
+    ) -> Optional[str]:
+        if camera_device_id is None:
+            return None
+        workspace = run.plotter_run_details.get("workspace")
+        if not isinstance(workspace, dict):
+            return None
+        page_size = workspace.get("page_size_mm")
+        margins = workspace.get("margins_mm")
+        if not isinstance(page_size, dict) or not isinstance(margins, dict):
+            return None
+        return self.build_scope_key(
+            camera_driver=camera_driver,
+            camera_device_id=camera_device_id,
+            page_width_mm=float(page_size["width_mm"]),
+            page_height_mm=float(page_size["height_mm"]),
+            margin_left_mm=float(margins["left_mm"]),
+            margin_top_mm=float(margins["top_mm"]),
+            margin_right_mm=float(margins["right_mm"]),
+            margin_bottom_mm=float(margins["bottom_mm"]),
+        )
+
     def create_record(
         self,
         *,
@@ -113,4 +160,3 @@ class CaptureReviewMemoryStore:
 
 class CaptureReviewMemoryPayload(BaseModel):
     records: dict[str, dict] = Field(default_factory=dict)
-

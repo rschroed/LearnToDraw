@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import threading
 import time
 
@@ -16,7 +17,13 @@ from learn_to_draw_api.models import (
     HardwareBusyError,
     HardwareUnavailableError,
     InvalidArtifactError,
+    MarginsMm,
+    PlotAsset,
+    PlotRun,
+    PlotterWorkspace,
+    SizeMm,
 )
+from learn_to_draw_api.services.capture_review_memory import CaptureReviewMemoryStore
 from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
 from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
@@ -132,6 +139,74 @@ def build_workspace_service(tmp_path):
             workspace_dir=tmp_path / "workspace",
         ),
         device_settings_service=build_device_settings_service(tmp_path),
+    )
+
+
+def _workspace() -> PlotterWorkspace:
+    return PlotterWorkspace(
+        plotter_bounds_mm=SizeMm(width_mm=300.0, height_mm=218.0),
+        page_size_mm=SizeMm(width_mm=210.0, height_mm=297.0),
+        margins_mm=MarginsMm(left_mm=20.0, top_mm=21.0, right_mm=22.0, bottom_mm=23.0),
+        drawable_area_mm=SizeMm(width_mm=168.0, height_mm=253.0),
+        updated_at=datetime.now(timezone.utc),
+        source="config_default",
+    )
+
+
+def _plot_run_with_workspace(workspace: PlotterWorkspace) -> PlotRun:
+    now = datetime.now(timezone.utc)
+    return PlotRun(
+        id="run-1",
+        status="completed",
+        created_at=now,
+        updated_at=now,
+        asset=PlotAsset(
+            id="asset-1",
+            kind="built_in_pattern",
+            pattern_id="test-grid",
+            name="Test Grid",
+            timestamp=now,
+            file_path="/tmp/test-grid.svg",
+            public_url="/plot-assets/test-grid.svg",
+            mime_type="image/svg+xml",
+        ),
+        plotter_run_details={"workspace": workspace.model_dump(mode="json")},
+    )
+
+
+def test_capture_review_memory_builds_compatible_scope_keys_from_workspace_and_run(tmp_path):
+    store = CaptureReviewMemoryStore(tmp_path / "workspace")
+    workspace = _workspace()
+    expected = "camerabridge|camera-1|210.000|297.000|20.000|21.000|22.000|23.000"
+
+    from_workspace = store.build_scope_key_for_workspace(
+        workspace=workspace,
+        camera_driver="camerabridge",
+        camera_device_id="camera-1",
+    )
+    from_run = store.build_scope_key_for_run(
+        run=_plot_run_with_workspace(workspace),
+        camera_driver="camerabridge",
+        camera_device_id="camera-1",
+    )
+
+    assert from_workspace == expected
+    assert from_run == expected
+
+
+def test_capture_review_memory_returns_no_scope_key_without_run_workspace(tmp_path):
+    store = CaptureReviewMemoryStore(tmp_path / "workspace")
+    run = _plot_run_with_workspace(_workspace()).model_copy(
+        update={"plotter_run_details": {}}
+    )
+
+    assert (
+        store.build_scope_key_for_run(
+            run=run,
+            camera_driver="camerabridge",
+            camera_device_id="camera-1",
+        )
+        is None
     )
 
 
