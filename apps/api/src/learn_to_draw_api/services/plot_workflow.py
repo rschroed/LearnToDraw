@@ -194,7 +194,11 @@ class PlotWorkflowService:
 
     def reuse_last_capture_review(self, run_id: str) -> PlotRunCaptureReviewResponse:
         run = self._run_store.get(run_id)
-        scope_key = self._executor._build_review_scope_key_from_run(run)
+        scope_key = self._review_memory_store.build_scope_key_for_run(
+            run=run,
+            camera_driver=self._camera.driver,
+            camera_device_id=self._camera_device_id(),
+        )
         record = self._review_memory_store.get(scope_key) if scope_key is not None else None
         if record is None:
             raise AppConflictError("No previously confirmed quad is available for this setup.")
@@ -295,6 +299,20 @@ class PlotWorkflowService:
                 message=str(exc),
             )
             self._run_store.save(run)
+
+    def _camera_device_id(self) -> Optional[str]:
+        details = self._camera.get_status().details
+        if not isinstance(details, dict):
+            return None
+        for key in (
+            "effective_selected_device_id",
+            "active_device_id",
+            "persisted_selected_device_id",
+        ):
+            value = details.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return self._camera.driver
 
 
 __all__ = ["PlotAssetStore", "PlotRunStore", "PlotWorkflowService"]
