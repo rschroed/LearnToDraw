@@ -148,5 +148,6 @@ describe("manual capture registration editor", () => {
     );
     expect(screen.getByRole("button", { name: /registering/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^reset$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^top right$/i })).toBeDisabled();
   });
 });

@@ -122,6 +122,9 @@ export function CaptureReviewEditor({
     event: React.KeyboardEvent<SVGGElement | HTMLButtonElement>,
     key: CornerKey,
   ) {
+    if (busy) {
+      return;
+    }
     const step = event.shiftKey ? 10 : 1;
     const deltas: Partial<Record<string, [number, number]>> = {
       ArrowLeft: [-step, 0],
@@ -158,13 +161,13 @@ export function CaptureReviewEditor({
           className="capture-review-svg"
           aria-label="Captured page with registration corners"
           onPointerDown={(event) => {
-            if (!interactive) {
+            if (!interactive || busy) {
               return;
             }
             updateCorner(event.clientX, event.clientY, selectedCorner);
           }}
           onPointerMove={(event) => {
-            if (interactive && draggingCorner) {
+            if (interactive && !busy && draggingCorner) {
               updateCorner(event.clientX, event.clientY, draggingCorner);
             }
           }}
@@ -193,13 +196,17 @@ export function CaptureReviewEditor({
                 key={key}
                 className={selectedCorner === key ? "capture-review-corner-selected" : undefined}
                 role={interactive ? "button" : undefined}
-                tabIndex={interactive ? 0 : undefined}
+                tabIndex={interactive && !busy ? 0 : undefined}
+                aria-disabled={interactive ? busy : undefined}
                 aria-label={interactive ? `${name} corner` : undefined}
                 onFocus={interactive ? () => setSelectedCorner(key) : undefined}
                 onKeyDown={interactive ? (event) => handleCornerKeyDown(event, key) : undefined}
                 onPointerDown={
                   interactive
-                    ? (event) => {
+                      ? (event) => {
+                        if (busy) {
+                          return;
+                        }
                         event.preventDefault();
                         event.stopPropagation();
                         event.currentTarget.setPointerCapture(event.pointerId);
@@ -300,6 +307,7 @@ export function CaptureReviewEditor({
                       : "artifact-variant-button"
                   }
                   aria-pressed={key === selectedCorner}
+                  disabled={busy}
                   onClick={() => setSelectedCorner(key)}
                   onKeyDown={(event) => handleCornerKeyDown(event, key)}
                 >
