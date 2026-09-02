@@ -14,9 +14,8 @@ interface RunCaptureReviewProps {
   reviewCapture: CaptureMetadata;
   review: CaptureReview;
   reviewBusy: boolean;
-  onAccept: () => Promise<void>;
-  onAdjust: (corners: NormalizationCorners) => Promise<void>;
-  onReuseLast: () => Promise<void>;
+  reviewError: string | null;
+  onConfirm: (corners: NormalizationCorners) => Promise<void>;
 }
 
 export function RunCaptureReview({
@@ -26,9 +25,8 @@ export function RunCaptureReview({
   reviewCapture,
   review,
   reviewBusy,
-  onAccept,
-  onAdjust,
-  onReuseLast,
+  reviewError,
+  onConfirm,
 }: RunCaptureReviewProps) {
   const preparedFrameStyle =
     preparedPageAspectRatio !== null ? { aspectRatio: `${preparedPageAspectRatio}` } : undefined;
@@ -53,12 +51,11 @@ export function RunCaptureReview({
             capture={reviewCapture}
             review={review}
             busy={reviewBusy}
-            onAccept={onAccept}
-            onAdjust={onAdjust}
-            onReuseLast={onReuseLast}
+            error={reviewError}
+            onConfirm={onConfirm}
           />
         </div>
-        <p className="artifact-footer">Normalization will continue after you confirm the page corners.</p>
+        <p className="artifact-footer">Processing continues after you confirm all four page corners.</p>
       </article>
     </div>
   );

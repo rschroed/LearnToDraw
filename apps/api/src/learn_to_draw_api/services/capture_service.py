@@ -1,28 +1,19 @@
 from __future__ import annotations
 
-import logging
-from threading import Thread
 from typing import Optional
 
 from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.models import (
     CaptureMetadata,
     CaptureReview,
-    InvalidArtifactError,
     NormalizationCorners,
-    NormalizationDiagnostics,
-    NormalizationMethod,
     NormalizedCaptureArtifacts,
 )
 from learn_to_draw_api.services.capture_normalization import (
-    CaptureNormalizationProposal,
     CaptureNormalizationService,
     NormalizationTarget,
 )
 from learn_to_draw_api.services.captures import CaptureStore
-
-
-logger = logging.getLogger(__name__)
 
 
 class CaptureService:
@@ -38,66 +29,15 @@ class CaptureService:
     def persist_raw_capture(self, artifact: CaptureArtifact) -> CaptureMetadata:
         return self._store.save(artifact)
 
-    def persist_capture(
-        self,
-        artifact: CaptureArtifact,
-        *,
-        normalization_target: Optional[NormalizationTarget],
-        background: bool,
-    ) -> CaptureMetadata:
-        metadata = self._store.save(artifact)
-        if normalization_target is None:
-            return metadata
-        if background:
-            worker = Thread(
-                target=self._normalize_and_store,
-                kwargs={
-                    "capture_id": metadata.id,
-                    "content": artifact.content,
-                    "normalization_target": normalization_target,
-                },
-                daemon=True,
-            )
-            worker.start()
-            return metadata
-        return self._normalize_and_store(
-            capture_id=metadata.id,
-            content=artifact.content,
-            normalization_target=normalization_target,
-        )
-
-    def _normalize_and_store(
+    def initial_registration_corners(
         self,
         *,
-        capture_id: str,
-        content: bytes,
-        normalization_target: NormalizationTarget,
-    ) -> CaptureMetadata:
-        try:
-            normalized = self._normalization_service.normalize(
-                content=content,
-                target=normalization_target,
-            )
-            return self._store_normalized_artifacts(
-                capture_id,
-                normalized=normalized,
-            )
-        except Exception:
-            logger.exception("Capture normalization failed for '%s'.", capture_id)
-            metadata = self._store.get(capture_id)
-            if metadata is None:
-                raise
-            return metadata
-
-    def inspect_capture(
-        self,
-        *,
-        content: bytes,
-        normalization_target: NormalizationTarget,
-    ) -> CaptureNormalizationProposal:
-        return self._normalization_service.inspect(
-            content=content,
-            target=normalization_target,
+        image_width: int,
+        image_height: int,
+    ) -> NormalizationCorners:
+        return self._normalization_service.initial_registration_corners(
+            image_width=image_width,
+            image_height=image_height,
         )
 
     def save_capture_review(
@@ -128,30 +68,13 @@ class CaptureService:
         content: bytes,
         normalization_target: NormalizationTarget,
         corners: NormalizationCorners,
-        method: Optional[NormalizationMethod],
-        confidence: Optional[float],
-        diagnostics: Optional[NormalizationDiagnostics],
         review: CaptureReview,
     ) -> CaptureMetadata:
-        if review.registration_version >= 2:
-            normalized = self._normalization_service.register_with_corners(
-                content=content,
-                target=normalization_target,
-                corners=corners,
-            )
-        else:
-            if method is None or confidence is None:
-                raise InvalidArtifactError(
-                    "Legacy capture review is missing detector metadata."
-                )
-            normalized = self._normalization_service.normalize_with_corners(
-                content=content,
-                target=normalization_target,
-                corners=corners,
-                method=method,
-                confidence=confidence,
-                diagnostics=diagnostics,
-            )
+        normalized = self._normalization_service.register_with_corners(
+            content=content,
+            target=normalization_target,
+            corners=corners,
+        )
         return self._store_normalized_artifacts(
             capture_id,
             normalized=normalized,

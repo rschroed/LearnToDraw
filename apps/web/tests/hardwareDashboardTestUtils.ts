@@ -215,8 +215,8 @@ export interface HardwareDashboardHarness {
   }>;
   captureReviewActions: Array<{
     runId: string;
-    action: "accept" | "adjust" | "reuse-last";
-    corners?: NormalizationCorners;
+    action: "confirm";
+    corners: NormalizationCorners;
   }>;
 }
 
@@ -541,35 +541,12 @@ export function installHardwareDashboardFetchMock(
         });
       }
 
-      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/accept$/) && method === "POST") {
-        const runId = url.split("/")[3] ?? "";
-        harness.captureReviewActions.push({ runId, action: "accept" });
-        const run =
-          (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
-          harness.plotRunsById[runId];
-        if (!run || !run.capture?.review) {
-          return new Response("Not found", { status: 404 });
-        }
-        run.capture.review = {
-          ...run.capture.review,
-          review_status: "confirmed",
-          confirmation_source: "auto",
-          confirmed_corners: run.capture.review.proposed_corners,
-        };
-        run.status = "capturing";
-        return jsonResponse({
-          ok: true,
-          message: "Capture review accepted. Finalizing normalization.",
-          run,
-        });
-      }
-
-      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/adjust$/) && method === "POST") {
+      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/confirm$/) && method === "POST") {
         const runId = url.split("/")[3] ?? "";
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           corners: NormalizationCorners;
         };
-        harness.captureReviewActions.push({ runId, action: "adjust", corners: body.corners });
+        harness.captureReviewActions.push({ runId, action: "confirm", corners: body.corners });
         const run =
           (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
           harness.plotRunsById[runId];
@@ -579,36 +556,13 @@ export function installHardwareDashboardFetchMock(
         run.capture.review = {
           ...run.capture.review,
           review_status: "confirmed",
-          confirmation_source: "adjusted",
+          confirmation_source: "manual",
           confirmed_corners: body.corners,
         };
         run.status = "capturing";
         return jsonResponse({
           ok: true,
-          message: "Adjusted capture corners saved. Finalizing normalization.",
-          run,
-        });
-      }
-
-      if (url.match(/^\/api\/plot-runs\/[^/]+\/capture-review\/reuse-last$/) && method === "POST") {
-        const runId = url.split("/")[3] ?? "";
-        harness.captureReviewActions.push({ runId, action: "reuse-last" });
-        const run =
-          (harness.latestRun && harness.latestRun.id === runId ? harness.latestRun : null) ??
-          harness.plotRunsById[runId];
-        if (!run || !run.capture?.review) {
-          return new Response("Not found", { status: 404 });
-        }
-        run.capture.review = {
-          ...run.capture.review,
-          review_status: "confirmed",
-          confirmation_source: "reused_last",
-          confirmed_corners: run.capture.review.proposed_corners,
-        };
-        run.status = "capturing";
-        return jsonResponse({
-          ok: true,
-          message: "Reused the last confirmed quad for this setup.",
+          message: "Manual page registration saved. Finalizing capture.",
           run,
         });
       }

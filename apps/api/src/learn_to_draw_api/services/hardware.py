@@ -24,7 +24,6 @@ from learn_to_draw_api.models import (
     PlotterWorkspaceRequest,
     PlotterWorkspaceResponse,
 )
-from learn_to_draw_api.services.capture_normalization import target_from_page_size
 from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.plotter_calibration import PlotterCalibrationService
@@ -189,21 +188,7 @@ class HardwareService:
             raise HardwareBusyError("Camera is busy.")
         try:
             artifact = self._camera.capture()
-            workspace = self._workspace_service.current()
-            normalization_target = None
-            page_width = workspace.page_size_mm.width_mm
-            page_height = workspace.page_size_mm.height_mm
-            if page_width > 0 and page_height > 0:
-                normalization_target = target_from_page_size(
-                    page_width_mm=page_width,
-                    page_height_mm=page_height,
-                    source="workspace_drawable_area",
-                )
-            metadata = self._capture_service.persist_capture(
-                artifact,
-                normalization_target=normalization_target,
-                background=True,
-            )
+            metadata = self._capture_service.persist_raw_capture(artifact)
             return CameraCaptureResponse(
                 message="Image captured.",
                 status=self._camera.get_status(),

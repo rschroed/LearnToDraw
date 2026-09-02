@@ -114,4 +114,13 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added tight source-content bounds plus a comparison-frame version to preparation metadata and simplified the Workflow comparison view so Prepared and Normalized Result render directly from matching backend-owned page-frame artifacts
 - Added deterministic OpenCV regression coverage for confident paper detection, low-confidence best-effort output, and full-frame fallback plus a small result-variant selector in the workflow UI
 
+## Manual Capture Registration V2 Slice
+
+- Replaced unreliable automatic page detection with mandatory per-capture TL/TR/BR/BL registration for every non-skipped plot run
+- Added strict backend quad validation and a versioned `manual_corners_v2` contract whose complete forward and inverse homographies map raw capture pixels directly to top-left canonical page pixels
+- Preserved V1 JSON loading and legacy side-by-side display without rewriting existing artifacts or inactive review-memory files
+- Added a click, drag, keyboard-nudge, and reset registration editor that transforms pointer input through the SVG screen matrix before submitting raw-image coordinates
+- Added a V2-only prepared-versus-grayscale overlay with adjustable intended-art opacity, while visibly labeling V1 results as legacy registration
+- Removed the active detector modules, experiment configuration, replay helper, reuse-memory wiring, and accept-detected/reuse-last API and UI paths
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

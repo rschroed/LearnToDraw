@@ -70,14 +70,21 @@ export interface CaptureMetadata {
 }
 
 export interface CaptureReview {
+  registration_version: number;
+  review_mode?: "manual_corners" | null;
   review_required: boolean;
   review_status: "pending" | "confirmed";
   proposed_corners: NormalizationCorners;
   confirmed_corners: NormalizationCorners | null;
-  confirmation_source: "auto" | "adjusted" | "reused_last" | null;
-  detector_method: "paper_contour_v3" | "paper_region_v2" | "paper_edges_v1" | "fallback_full_frame";
-  detector_confidence: number;
-  reuse_last_available: boolean;
+  confirmation_source: "auto" | "adjusted" | "reused_last" | "manual" | null;
+  detector_method?:
+    | "paper_contour_v3"
+    | "paper_region_v2"
+    | "paper_edges_v1"
+    | "fallback_full_frame"
+    | null;
+  detector_confidence?: number | null;
+  reuse_last_available?: boolean;
 }
 
 export interface NormalizationCorners {
@@ -89,6 +96,11 @@ export interface NormalizationCorners {
 
 export interface NormalizationTransform {
   matrix: number[][];
+  inverse_matrix?: number[][] | null;
+  source_space?: "raw_capture_px" | null;
+  destination_space?: "page_px" | null;
+  pixels_per_mm_x?: number | null;
+  pixels_per_mm_y?: number | null;
 }
 
 export interface NormalizationOutput {
@@ -102,6 +114,7 @@ export interface NormalizationFrame {
   version: number;
   page_width_mm: number;
   page_height_mm: number;
+  origin?: "top-left" | null;
 }
 
 export interface NormalizationDiagnosticCandidate {
@@ -140,8 +153,13 @@ export interface NormalizationDiagnostics {
 }
 
 export interface NormalizationMetadata {
-  method: "paper_contour_v3" | "paper_region_v2" | "paper_edges_v1" | "fallback_full_frame";
-  confidence: number;
+  method:
+    | "paper_contour_v3"
+    | "paper_region_v2"
+    | "paper_edges_v1"
+    | "fallback_full_frame"
+    | "manual_corners_v2";
+  confidence: number | null;
   corners: NormalizationCorners;
   transform: NormalizationTransform;
   output: NormalizationOutput;

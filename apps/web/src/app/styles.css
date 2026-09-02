@@ -1938,6 +1938,50 @@ button {
   align-items: stretch;
 }
 
+.artifact-comparison-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.artifact-comparison-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.artifact-overlay-opacity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.artifact-overlay-opacity input {
+  accent-color: #d0a15f;
+}
+
+.run-artifact-overlay {
+  width: min(100%, 920px);
+  margin: 0 auto;
+}
+
+.artifact-overlay-stack {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.artifact-overlay-stack img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .artifact-card-prepared {
   opacity: 0.92;
 }
@@ -2100,6 +2144,17 @@ button {
   cursor: grab;
 }
 
+.capture-review-handle-target {
+  fill: transparent;
+  stroke: transparent;
+  cursor: grab;
+}
+
+.capture-review-corner-selected .capture-review-handle {
+  stroke: #fff6ec;
+  stroke-width: 5;
+}
+
 .capture-review-label {
   fill: #fff6ec;
   font-size: 22px;
@@ -2124,6 +2179,18 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.capture-review-corner-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capture-review-error {
+  margin: 8px 0 0;
+  color: #ffd0b1;
+  font-size: 0.88rem;
 }
 
 .capture-review-modal {
@@ -2151,7 +2218,7 @@ button {
   box-sizing: border-box;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 16px;
   padding: 20px;
   border-radius: 24px;

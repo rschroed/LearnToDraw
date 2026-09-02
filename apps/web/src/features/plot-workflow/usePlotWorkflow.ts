@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  acceptPlotRunCaptureReview,
-  adjustPlotRunCaptureReview,
+  confirmPlotRunCaptureReview,
   createPatternAsset,
   createPlotRun,
   fetchPlotRun,
   fetchPlotRunCaptureReview,
   fetchLatestPlotRun,
   fetchPlotRuns,
-  reuseLastPlotRunCaptureReview,
   uploadPlotAsset,
 } from "../../lib/api";
 import type {
@@ -49,12 +47,10 @@ export interface PlotWorkflowController {
   uploadSvg: (file: File) => Promise<void>;
   startRun: () => Promise<void>;
   inspectRun: (runId: string) => Promise<void>;
-  acceptCaptureReview: (runId: string) => Promise<void>;
-  adjustCaptureReview: (
+  confirmCaptureReview: (
     runId: string,
     corners: NonNullable<PlotRunCaptureReviewPayload["review"]>["proposed_corners"],
   ) => Promise<void>;
-  reuseLastCaptureReview: (runId: string) => Promise<void>;
 }
 
 export function usePlotWorkflow(): PlotWorkflowController {
@@ -305,11 +301,11 @@ export function usePlotWorkflow(): PlotWorkflowController {
         }
       }
     },
-    acceptCaptureReview: async (runId: string) => {
+    confirmCaptureReview: async (runId, corners) => {
       try {
         setBusyAction("review");
         setError(null);
-        const response = await acceptPlotRunCaptureReview(runId);
+        const response = await confirmPlotRunCaptureReview(runId, corners);
         if (!mountedRef.current) {
           return;
         }
@@ -324,63 +320,7 @@ export function usePlotWorkflow(): PlotWorkflowController {
           return;
         }
         const message =
-          actionError instanceof Error ? actionError.message : "Failed to accept capture review.";
-        setError(message);
-        setNotice({ tone: "error", message });
-      } finally {
-        if (mountedRef.current) {
-          setBusyAction(null);
-        }
-      }
-    },
-    adjustCaptureReview: async (runId, corners) => {
-      try {
-        setBusyAction("review");
-        setError(null);
-        const response = await adjustPlotRunCaptureReview(runId, corners);
-        if (!mountedRef.current) {
-          return;
-        }
-        setLatestRun(response.run);
-        setInspectedRun(response.run);
-        setInspectedRunId(response.run.id);
-        setPendingCaptureReview(null);
-        setNotice({ tone: "info", message: response.message });
-        await refresh({ silent: true });
-      } catch (actionError) {
-        if (!mountedRef.current) {
-          return;
-        }
-        const message =
-          actionError instanceof Error ? actionError.message : "Failed to save adjusted corners.";
-        setError(message);
-        setNotice({ tone: "error", message });
-      } finally {
-        if (mountedRef.current) {
-          setBusyAction(null);
-        }
-      }
-    },
-    reuseLastCaptureReview: async (runId: string) => {
-      try {
-        setBusyAction("review");
-        setError(null);
-        const response = await reuseLastPlotRunCaptureReview(runId);
-        if (!mountedRef.current) {
-          return;
-        }
-        setLatestRun(response.run);
-        setInspectedRun(response.run);
-        setInspectedRunId(response.run.id);
-        setPendingCaptureReview(null);
-        setNotice({ tone: "info", message: response.message });
-        await refresh({ silent: true });
-      } catch (actionError) {
-        if (!mountedRef.current) {
-          return;
-        }
-        const message =
-          actionError instanceof Error ? actionError.message : "Failed to reuse the last confirmed quad.";
+          actionError instanceof Error ? actionError.message : "Failed to register capture.";
         setError(message);
         setNotice({ tone: "error", message });
       } finally {

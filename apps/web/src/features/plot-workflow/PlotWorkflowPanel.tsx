@@ -388,9 +388,8 @@ function WorkflowRunSummary({
   selectedAsset,
   latestCapture,
   reviewBusy,
-  onAcceptCaptureReview,
-  onAdjustCaptureReview,
-  onReuseLastCaptureReview,
+  reviewError,
+  onConfirmCaptureReview,
   sourceOpen,
   onToggleSource,
 }: {
@@ -399,9 +398,8 @@ function WorkflowRunSummary({
   selectedAsset: PlotAsset | null;
   latestCapture: CaptureMetadata | null;
   reviewBusy: boolean;
-  onAcceptCaptureReview: (runId: string) => Promise<void>;
-  onAdjustCaptureReview: (runId: string, corners: NormalizationCorners) => Promise<void>;
-  onReuseLastCaptureReview: (runId: string) => Promise<void>;
+  reviewError: string | null;
+  onConfirmCaptureReview: (runId: string, corners: NormalizationCorners) => Promise<void>;
   sourceOpen: boolean;
   onToggleSource: () => void;
 }) {
@@ -447,9 +445,8 @@ function WorkflowRunSummary({
           reviewCapture={displayRun.capture}
           review={review}
           reviewBusy={reviewBusy}
-          onAccept={() => onAcceptCaptureReview(displayRun.id)}
-          onAdjust={(corners) => onAdjustCaptureReview(displayRun.id, corners)}
-          onReuseLast={() => onReuseLastCaptureReview(displayRun.id)}
+          reviewError={reviewError}
+          onConfirm={(corners) => onConfirmCaptureReview(displayRun.id, corners)}
         />
       ) : (
         <RunArtifactCompare
@@ -522,9 +519,7 @@ export function PlotWorkflowPanel({
     uploadSvg,
     startRun,
     inspectRun,
-    acceptCaptureReview,
-    adjustCaptureReview,
-    reuseLastCaptureReview,
+    confirmCaptureReview,
   } = controller;
   const [historyRunDetails, setHistoryRunDetails] = useState<Record<string, PlotRun>>({});
   const [workflowSourceOpen, setWorkflowSourceOpen] = useState(false);
@@ -819,9 +814,8 @@ export function PlotWorkflowPanel({
         selectedAsset={selectedAsset}
         latestCapture={latestCapture}
         reviewBusy={busyAction === "review"}
-        onAcceptCaptureReview={acceptCaptureReview}
-        onAdjustCaptureReview={adjustCaptureReview}
-        onReuseLastCaptureReview={reuseLastCaptureReview}
+        reviewError={error}
+        onConfirmCaptureReview={confirmCaptureReview}
         sourceOpen={workflowSourceOpen}
         onToggleSource={() => setWorkflowSourceOpen((current) => !current)}
       />
