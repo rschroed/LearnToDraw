@@ -58,6 +58,11 @@ class NormalizationCorners(BaseModel):
 
 class NormalizationTransform(BaseModel):
     matrix: list[list[float]]
+    inverse_matrix: Optional[list[list[float]]] = None
+    source_space: Optional[Literal["raw_capture_px"]] = None
+    destination_space: Optional[Literal["page_px"]] = None
+    pixels_per_mm_x: Optional[float] = Field(default=None, gt=0)
+    pixels_per_mm_y: Optional[float] = Field(default=None, gt=0)
 
 
 class NormalizationOutput(BaseModel):
@@ -66,7 +71,13 @@ class NormalizationOutput(BaseModel):
     aspect_ratio: float = Field(gt=0)
 
 
-NormalizationMethod = Literal["paper_contour_v3", "paper_region_v2", "paper_edges_v1", "fallback_full_frame"]
+NormalizationMethod = Literal[
+    "paper_contour_v3",
+    "paper_region_v2",
+    "paper_edges_v1",
+    "fallback_full_frame",
+    "manual_corners_v2",
+]
 NormalizationTargetFrameSource = Literal["prepared_svg", "workspace_drawable_area"]
 NormalizationFrameKind = Literal["page_aligned"]
 
@@ -76,6 +87,7 @@ class NormalizationFrame(BaseModel):
     version: int = Field(ge=1)
     page_width_mm: float = Field(gt=0)
     page_height_mm: float = Field(gt=0)
+    origin: Optional[Literal["top-left"]] = None
 
 
 class NormalizationDiagnosticCandidate(BaseModel):
@@ -115,7 +127,7 @@ class NormalizationDiagnostics(BaseModel):
 
 class NormalizationMetadata(BaseModel):
     method: NormalizationMethod
-    confidence: float = Field(ge=0, le=1)
+    confidence: Optional[float] = Field(default=None, ge=0, le=1)
     corners: NormalizationCorners
     transform: NormalizationTransform
     output: NormalizationOutput
@@ -132,17 +144,19 @@ class NormalizedCaptureArtifacts(BaseModel):
 
 
 CaptureReviewStatus = Literal["pending", "confirmed"]
-CaptureReviewConfirmationSource = Literal["auto", "adjusted", "reused_last"]
+CaptureReviewConfirmationSource = Literal["auto", "adjusted", "reused_last", "manual"]
 
 
 class CaptureReview(BaseModel):
+    registration_version: int = Field(default=1, ge=1)
+    review_mode: Optional[Literal["manual_corners"]] = None
     review_required: bool
     review_status: CaptureReviewStatus
     proposed_corners: NormalizationCorners
     confirmed_corners: Optional[NormalizationCorners] = None
     confirmation_source: Optional[CaptureReviewConfirmationSource] = None
-    detector_method: NormalizationMethod
-    detector_confidence: float = Field(ge=0, le=1)
+    detector_method: Optional[NormalizationMethod] = None
+    detector_confidence: Optional[float] = Field(default=None, ge=0, le=1)
     reuse_last_available: bool = False
 
 
@@ -387,6 +401,10 @@ class PlotRunCaptureReviewPayload(BaseModel):
 
 
 class PlotRunCaptureReviewAdjustRequest(BaseModel):
+    corners: NormalizationCorners
+
+
+class PlotRunCaptureReviewConfirmRequest(BaseModel):
     corners: NormalizationCorners
 
 

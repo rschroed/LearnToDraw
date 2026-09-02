@@ -21,6 +21,7 @@ from learn_to_draw_api.models import (
     PlotterSafeBoundsRequest,
     PlotRun,
     PlotRunCaptureReviewAdjustRequest,
+    PlotRunCaptureReviewConfirmRequest,
     PlotRunCaptureReviewPayload,
     PlotRunCaptureReviewResponse,
     PlotRunCreateRequest,
@@ -167,6 +168,16 @@ def build_api_router(
         request: PlotRunCaptureReviewAdjustRequest,
     ) -> PlotRunCaptureReviewResponse:
         return plot_workflow_service.adjust_capture_review(run_id, request)
+
+    @router.post(
+        "/api/plot-runs/{run_id}/capture-review/confirm",
+        response_model=PlotRunCaptureReviewResponse,
+    )
+    def post_plot_run_capture_review_confirm(
+        run_id: str,
+        request: PlotRunCaptureReviewConfirmRequest,
+    ) -> PlotRunCaptureReviewResponse:
+        return plot_workflow_service.confirm_capture_review(run_id, request)
 
     @router.post(
         "/api/plot-runs/{run_id}/capture-review/reuse-last",
