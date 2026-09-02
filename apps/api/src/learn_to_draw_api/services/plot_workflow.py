@@ -16,6 +16,7 @@ from learn_to_draw_api.models import (
     PlotAsset,
     PlotRun,
     PlotRunCaptureReviewAdjustRequest,
+    PlotRunCaptureReviewConfirmRequest,
     PlotRunCaptureReviewPayload,
     PlotRunCaptureMode,
     PlotRunCaptureReviewResponse,
@@ -192,6 +193,22 @@ class PlotWorkflowService:
             run=run,
         )
 
+    def confirm_capture_review(
+        self,
+        run_id: str,
+        request: PlotRunCaptureReviewConfirmRequest,
+    ) -> PlotRunCaptureReviewResponse:
+        run = self._confirm_capture_review(
+            run_id,
+            corners=request.corners,
+            source="manual",
+            registration_version=2,
+        )
+        return PlotRunCaptureReviewResponse(
+            message="Manual capture registration saved. Finalizing normalization.",
+            run=run,
+        )
+
     def reuse_last_capture_review(self, run_id: str) -> PlotRunCaptureReviewResponse:
         run = self._run_store.get(run_id)
         scope_key = self._review_memory_store.build_scope_key_for_run(
@@ -246,6 +263,7 @@ class PlotWorkflowService:
         *,
         corners,
         source,
+        registration_version: Optional[int] = None,
     ) -> PlotRun:
         with self._lock:
             run = self._run_store.get(run_id)
@@ -255,12 +273,26 @@ class PlotWorkflowService:
                 raise AppConflictError("This plot run does not have a capture review payload.")
             review = run.capture.review
             confirmed_corners = corners or review.proposed_corners
+            if registration_version is not None:
+                self._capture_service.validate_registration_corners(
+                    corners=confirmed_corners,
+                    image_width=run.capture.width,
+                    image_height=run.capture.height,
+                )
+            review_updates = {
+                "review_status": "confirmed",
+                "confirmed_corners": confirmed_corners,
+                "confirmation_source": source,
+            }
+            if registration_version is not None:
+                review_updates.update(
+                    {
+                        "registration_version": registration_version,
+                        "review_mode": "manual_corners",
+                    }
+                )
             updated_review = review.model_copy(
-                update={
-                    "review_status": "confirmed",
-                    "confirmed_corners": confirmed_corners,
-                    "confirmation_source": source,
-                }
+                update=review_updates
             )
             updated_capture = self._capture_service.save_capture_review(
                 run.capture.id,

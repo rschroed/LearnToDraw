@@ -751,6 +751,77 @@ def test_plot_run_capture_review_accept_endpoint(tmp_path):
     assert completed["capture"]["review"]["confirmation_source"] == "auto"
 
 
+def test_plot_run_capture_review_confirm_endpoint_creates_v2_registration(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        run_response = client.post(
+            "/api/plot-runs", json={"asset_id": asset_response.json()["id"]}
+        )
+        pending = wait_for_run_status(
+            client, run_response.json()["id"], {"awaiting_capture_review"}
+        )
+        corners = pending["capture"]["review"]["proposed_corners"]
+        confirm_response = client.post(
+            f"/api/plot-runs/{pending['id']}/capture-review/confirm",
+            json={"corners": corners},
+        )
+        completed = wait_for_run_completion(client, pending["id"])
+
+    assert confirm_response.status_code == 200
+    assert confirm_response.json()["run"]["status"] == "capturing"
+    assert completed["capture"]["review"]["registration_version"] == 2
+    assert completed["capture"]["review"]["review_mode"] == "manual_corners"
+    assert completed["capture"]["review"]["confirmation_source"] == "manual"
+    metadata = completed["capture"]["normalized"]["metadata"]
+    assert metadata["method"] == "manual_corners_v2"
+    assert metadata["frame"]["version"] == 2
+    assert metadata["transform"]["source_space"] == "raw_capture_px"
+    assert metadata["transform"]["destination_space"] == "page_px"
+    assert metadata["transform"]["inverse_matrix"] is not None
+
+
+def test_plot_run_capture_review_confirm_rejects_invalid_quad_without_state_change(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        run_response = client.post(
+            "/api/plot-runs", json={"asset_id": asset_response.json()["id"]}
+        )
+        pending = wait_for_run_status(
+            client, run_response.json()["id"], {"awaiting_capture_review"}
+        )
+        invalid_corners = {
+            "top_left": [50.0, 50.0],
+            "top_right": [590.0, 430.0],
+            "bottom_right": [590.0, 50.0],
+            "bottom_left": [50.0, 430.0],
+        }
+        confirm_response = client.post(
+            f"/api/plot-runs/{pending['id']}/capture-review/confirm",
+            json={"corners": invalid_corners},
+        )
+        unchanged = client.get(f"/api/plot-runs/{pending['id']}").json()
+
+    assert confirm_response.status_code == 400
+    assert "convex, non-crossing" in confirm_response.json()["detail"]
+    assert unchanged["status"] == "awaiting_capture_review"
+    assert unchanged["capture"]["review"]["review_status"] == "pending"
+    assert unchanged["capture"]["normalized"] is None
+
+
 def test_plot_run_capture_review_reuse_last_endpoint(tmp_path):
     with create_test_client(
         tmp_path,
