@@ -31,7 +31,9 @@ class PlotRunStore:
     def save(self, run: PlotRun) -> PlotRun:
         with self._lock:
             metadata_path = self._runs_dir / f"{run.id}.json"
-            metadata_path.write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            temp_path = metadata_path.with_suffix(".json.tmp")
+            temp_path.write_text(run.model_dump_json(indent=2), encoding="utf-8")
+            temp_path.replace(metadata_path)
             self._cache[run.id] = run
         return run
 
