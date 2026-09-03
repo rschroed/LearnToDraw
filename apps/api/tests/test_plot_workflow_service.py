@@ -538,9 +538,12 @@ def test_plot_workflow_fails_cleanly_when_workspace_exceeds_current_bounds(tmp_p
     failed = _wait_for_terminal_run(service, run.id)
 
     assert failed.status == "failed"
-    assert failed.error == "Configured page height exceeds the plotter bounds height."
+    assert failed.error == "Configured drawable area exceeds the plotter bounds height."
     assert failed.stage_states["prepare"].status == "failed"
-    assert failed.stage_states["prepare"].message == "Configured page height exceeds the plotter bounds height."
+    assert (
+        failed.stage_states["prepare"].message
+        == "Configured drawable area exceeds the plotter bounds height."
+    )
 
 
 def test_plot_workflow_records_effective_calibration(tmp_path):

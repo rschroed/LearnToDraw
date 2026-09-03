@@ -613,12 +613,48 @@ def test_axidraw_workspace_endpoint_returns_invalid_state_when_defaults_exceed_e
     assert payload["is_valid"] is False
     assert (
         payload["validation_error"]
-        == "Configured page height exceeds the plotter bounds height."
+        == "Configured drawable area exceeds the plotter bounds height."
     )
     assert payload["page_size_mm"]["height_mm"] == 297.0
 
 
-def test_plotter_workspace_endpoint_rejects_page_larger_than_bounds(tmp_path):
+def test_plotter_workspace_endpoint_allows_letter_paper_when_margins_keep_drawing_in_bounds(
+    tmp_path,
+):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            axidraw_model=1,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/plotter/workspace",
+            json={
+                "page_width_mm": 279.4,
+                "page_height_mm": 215.9,
+                "margin_left_mm": 10,
+                "margin_top_mm": 10,
+                "margin_right_mm": 10,
+                "margin_bottom_mm": 10,
+            },
+        )
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["page_size_mm"] == {"width_mm": 279.4, "height_mm": 215.9}
+    assert workspace["drawable_area_mm"] == {"width_mm": 259.4, "height_mm": 195.9}
+
+
+def test_plotter_workspace_endpoint_rejects_drawable_area_larger_than_bounds(tmp_path):
     with create_test_client(tmp_path) as client:
         response = client.post(
             "/api/plotter/workspace",
@@ -633,7 +669,10 @@ def test_plotter_workspace_endpoint_rejects_page_larger_than_bounds(tmp_path):
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Configured page width exceeds the plotter bounds width."
+    assert (
+        response.json()["detail"]
+        == "Configured drawable area exceeds the plotter bounds width."
+    )
 
 
 def test_upload_plot_asset_endpoint(tmp_path):

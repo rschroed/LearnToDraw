@@ -78,7 +78,7 @@ The app currently supports a single backend-owned plotting workflow with a few n
 - `captures`: the backend persists the unmodified camera image first; standalone camera tests remain raw captures, while plot-run captures are registered and enriched with backend-owned color, grayscale, and corner-debug derivatives
 - `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, registration, and capture-finalization stages; every non-skipped plot-run capture pauses in `awaiting_capture_review` until the operator confirms all four physical page corners
 - `diagnostics`: fixed built-in pen and pattern tests stay separate from normal plotting semantics
-- `workspace`: page size and margins are persisted and validated against the current drawable area
+- `workspace`: physical page size and margins are persisted; the page may extend beyond machine travel, but its margin-bounded drawable coordinates must remain inside the current operational safe bounds
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides
 - `calibration`: persisted plotter calibration remains backend-owned and separate from transient runtime overrides
 
@@ -89,6 +89,8 @@ Automatic paper detection is not part of the active capture path. Each non-skipp
 Confirmation uses `POST /api/plot-runs/{run_id}/capture-review/confirm`. The existing asynchronous executor then maps the confirmed raw-capture pixels directly to the full canonical page with one homography. The canonical raster keeps the prepared page aspect ratio, uses a 2048-pixel long side, has a top-left origin, and is not trimmed, rotated, or resized again.
 
 V2 metadata labels this contract with `method: manual_corners_v2` and `frame.version: 2`. `transform.matrix` maps `raw_capture_px` to `page_px`; `inverse_matrix` maps back to the raw capture. Horizontal and vertical pixels-per-millimeter are explicit. Prepared SVG coordinates and registered capture coordinates therefore describe the same page frame, which enables a no-crop intended-versus-observed overlay.
+
+The persisted workspace page size must match the physical sheet whose corners are registered. Machine travel constrains the drawable rectangle, not the sheet itself: right and bottom margins may reserve physical paper beyond the reachable safe bounds, while all prepared drawing coordinates remain inside those bounds.
 
 V1 capture and run JSON remains readable without migration. Its detector fields and transforms are legacy evidence only: the dashboard labels V1 registration as legacy, keeps it side by side, and never enables the exact overlay for it. Existing persisted artifacts and former review-memory files are left untouched on disk, but no active runtime reads or rewrites them.
 

@@ -352,6 +352,7 @@ describe("workflow-first dashboard", () => {
       "aria-pressed",
       "true",
     );
+    expect(screen.getByText("Normalized · Page aligned · 2048 × 1950")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^debug$/i }));
     expect(

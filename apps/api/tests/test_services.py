@@ -389,6 +389,12 @@ def test_workspace_service_returns_invalid_state_for_misaligned_axidraw_defaults
     workspace = service.current()
 
     assert workspace.is_valid is False
-    assert workspace.validation_error == "Configured page height exceeds the plotter bounds height."
-    with pytest.raises(InvalidArtifactError, match="Configured page height exceeds the plotter bounds height."):
+    assert (
+        workspace.validation_error
+        == "Configured drawable area exceeds the plotter bounds height."
+    )
+    with pytest.raises(
+        InvalidArtifactError,
+        match="Configured drawable area exceeds the plotter bounds height.",
+    ):
         service.current_validated()

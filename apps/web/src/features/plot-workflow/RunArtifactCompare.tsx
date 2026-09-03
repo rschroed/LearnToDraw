@@ -43,10 +43,13 @@ function getSelectedVariantFooter({
   selectedVariant: CaptureVariantOption | null;
   resultFooter: string | null;
 }) {
-  if (selectedVariant?.key === "normalized" && !isV2PageAlignedCapture(capture)) {
-    return resultFooter
-      ? `${selectedVariant.label} · Legacy registration · ${resultFooter}`
-      : "Normalized · Legacy registration";
+  if (selectedVariant?.key === "normalized") {
+    const output = capture?.normalized?.metadata.output;
+    const outputSize = output ? `${output.width} × ${output.height}` : null;
+    const registrationLabel = isV2PageAlignedCapture(capture)
+      ? "Page aligned"
+      : "Legacy registration";
+    return [selectedVariant.label, registrationLabel, outputSize].filter(Boolean).join(" · ");
   }
   if (selectedVariant && resultFooter) {
     return `${selectedVariant.label} · ${resultFooter}`;

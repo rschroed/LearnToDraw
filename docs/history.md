@@ -122,5 +122,6 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added a click, drag, keyboard-nudge, and reset registration editor that transforms pointer input through the SVG screen matrix before submitting raw-image coordinates
 - Added a V2-only prepared-versus-grayscale overlay with adjustable intended-art opacity, while visibly labeling V1 results as legacy registration
 - Removed the active detector modules, experiment configuration, replay helper, reuse-memory wiring, and accept-detected/reuse-last API and UI paths
+- Corrected paper validation so registration can use the true physical sheet dimensions while right and bottom margins keep prepared drawing coordinates inside operational plotter bounds
 
 For the current architecture and system boundaries, see [architecture.md](architecture.md).
