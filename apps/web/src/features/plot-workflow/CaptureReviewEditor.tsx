@@ -16,6 +16,15 @@ const CORNER_OPTIONS: readonly [CornerKey, string][] = [
   ["bottom_left", "Bottom left"],
 ];
 
+const MAGNIFIER_WINDOW_PX = 120;
+
+const MAGNIFIER_POSITIONS: Record<CornerKey, string> = {
+  top_left: "bottom-right",
+  top_right: "bottom-left",
+  bottom_right: "top-left",
+  bottom_left: "top-right",
+};
+
 interface CaptureReviewEditorProps {
   capture: CaptureMetadata;
   review: CaptureReview;
@@ -89,6 +98,32 @@ export function CaptureReviewEditor({
       document.body.style.overflow = previousOverflow;
     };
   }, [isAdjusting]);
+
+  useEffect(() => {
+    if (!isAdjusting || typeof document === "undefined") {
+      return undefined;
+    }
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (busy || event.defaultPrevented) {
+        return;
+      }
+      const step = event.shiftKey ? 10 : 1;
+      const deltas: Partial<Record<string, [number, number]>> = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      };
+      const delta = deltas[event.key];
+      if (!delta) {
+        return;
+      }
+      event.preventDefault();
+      nudgeCorner(selectedCorner, delta[0], delta[1]);
+    };
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown);
+  }, [busy, capture.height, capture.width, draftCorners, isAdjusting, selectedCorner]);
 
   function setCorner(key: CornerKey, point: [number, number]) {
     setDraftCorners((current) => ({ ...current, [key]: point }));
@@ -246,6 +281,51 @@ export function CaptureReviewEditor({
     );
   }
 
+  function renderCornerMagnifier() {
+    const [x, y] = draftCorners[selectedCorner];
+    const cornerName = CORNER_OPTIONS.find(([key]) => key === selectedCorner)?.[1] ?? "Corner";
+    const halfWindow = MAGNIFIER_WINDOW_PX / 2;
+    const oppositePosition = MAGNIFIER_POSITIONS[selectedCorner];
+
+    return (
+      <aside
+        className={`capture-review-magnifier capture-review-magnifier-opposite-${oppositePosition}`}
+        aria-label={`Magnified ${cornerName.toLowerCase()} corner`}
+      >
+        <div className="capture-review-magnifier-heading">
+          <strong>{cornerName} detail</strong>
+          <span>
+            {x.toFixed(1)}, {y.toFixed(1)} px
+          </span>
+        </div>
+        <svg
+          viewBox={`${x - halfWindow} ${y - halfWindow} ${MAGNIFIER_WINDOW_PX} ${MAGNIFIER_WINDOW_PX}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="capture-review-magnifier-svg"
+          role="img"
+          aria-label={`${cornerName} at ${x.toFixed(1)}, ${y.toFixed(1)} raw pixels`}
+        >
+          <image href={capture.public_url} x="0" y="0" width={capture.width} height={capture.height} />
+          <line
+            className="capture-review-magnifier-crosshair"
+            x1={x - halfWindow}
+            y1={y}
+            x2={x + halfWindow}
+            y2={y}
+          />
+          <line
+            className="capture-review-magnifier-crosshair"
+            x1={x}
+            y1={y - halfWindow}
+            x2={x}
+            y2={y + halfWindow}
+          />
+          <circle className="capture-review-magnifier-center" cx={x} cy={y} r="1.5" />
+        </svg>
+      </aside>
+    );
+  }
+
   const registrationModal = isAdjusting ? (
     <div
       className="capture-review-modal"
@@ -295,11 +375,15 @@ export function CaptureReviewEditor({
             </button>
           ))}
         </div>
-        <div className="capture-review-modal-stage">{renderCaptureCanvas(true)}</div>
+        <div className="capture-review-modal-stage">
+          {renderCaptureCanvas(true)}
+          {renderCornerMagnifier()}
+        </div>
         <div className="capture-review-modal-footer">
           <div>
             <p className="capture-review-caption">
-              Arrow keys nudge the selected corner by 1 raw pixel; hold Shift for 10.
+              Use the detail view to place the crosshair exactly on the paper corner. Arrow keys
+              work anywhere in this dialog and nudge by 1 raw pixel; hold Shift for 10.
             </p>
             {error ? (
               <p className="capture-review-error" role="alert">

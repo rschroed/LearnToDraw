@@ -119,7 +119,7 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Replaced unreliable automatic page detection with mandatory per-capture TL/TR/BR/BL registration for every non-skipped plot run
 - Added strict backend quad validation and a versioned `manual_corners_v2` contract whose complete forward and inverse homographies map raw capture pixels directly to top-left canonical page pixels
 - Preserved V1 JSON loading and legacy side-by-side display without rewriting existing artifacts or inactive review-memory files
-- Added a click, drag, keyboard-nudge, and reset registration editor that transforms pointer input through the SVG screen matrix before submitting raw-image coordinates
+- Added a click, drag, keyboard-nudge, and reset registration editor that transforms pointer input through the SVG screen matrix before submitting raw-image coordinates; a live raw-pixel magnifier keeps fine corner placement visible without obscuring the active point
 - Added a V2-only prepared-versus-grayscale overlay with adjustable intended-art opacity, while visibly labeling V1 results as legacy registration
 - Removed the active detector modules, experiment configuration, replay helper, reuse-memory wiring, and accept-detected/reuse-last API and UI paths
 - Corrected paper validation so registration can use the true physical sheet dimensions while right and bottom margins keep prepared drawing coordinates inside operational plotter bounds

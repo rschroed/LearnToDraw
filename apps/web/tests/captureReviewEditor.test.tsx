@@ -85,6 +85,13 @@ describe("manual capture registration editor", () => {
     installLetterboxedTransform(svg);
 
     fireEvent.pointerDown(svg, { clientX: 100, clientY: 100 });
+    expect(screen.getByLabelText(/magnified top left corner/i)).toHaveTextContent(
+      "400.0, 200.0 px",
+    );
+    expect(screen.getByRole("img", { name: /top left at 400.0, 200.0 raw pixels/i })).toHaveAttribute(
+      "viewBox",
+      "340 140 120 120",
+    );
     expect(
       screen
         .getByRole("button", { name: /top left corner/i })
@@ -96,6 +103,7 @@ describe("manual capture registration editor", () => {
         .querySelector(".capture-review-handle"),
     ).toHaveAttribute("cy", "200");
     fireEvent.click(screen.getByRole("button", { name: /^top right$/i }));
+    expect(screen.getByLabelText(/magnified top right corner/i)).toBeInTheDocument();
     const topRightHandle = screen.getByRole("button", { name: /top right corner/i });
     Object.defineProperty(topRightHandle, "setPointerCapture", {
       configurable: true,
@@ -106,6 +114,8 @@ describe("manual capture registration editor", () => {
     fireEvent.pointerUp(svg, { pointerId: 1 });
     expect(topRightHandle.querySelector(".capture-review-handle")).toHaveAttribute("cx", "1320");
     expect(topRightHandle.querySelector(".capture-review-handle")).toHaveAttribute("cy", "220");
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    expect(topRightHandle.querySelector(".capture-review-handle")).toHaveAttribute("cy", "221");
     fireEvent.keyDown(screen.getByRole("button", { name: /^bottom left$/i }), {
       key: "ArrowRight",
     });
