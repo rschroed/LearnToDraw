@@ -85,6 +85,12 @@ export interface CaptureReview {
     | null;
   detector_confidence?: number | null;
   reuse_last_available?: boolean;
+  proposal?: {
+    status: "suggested" | "fallback";
+    method: "light_page_edges_v1" | "inset_5_percent_v1";
+    stability_max_px?: number | null;
+    fallback_reason?: string | null;
+  } | null;
 }
 
 export interface NormalizationCorners {

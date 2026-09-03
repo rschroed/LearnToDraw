@@ -18,6 +18,9 @@ from learn_to_draw_api.models import (
     InvalidArtifactError,
 )
 from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
+from learn_to_draw_api.services.capture_registration_proposal import (
+    CaptureRegistrationProposalService,
+)
 from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.hardware import HardwareService
@@ -79,6 +82,7 @@ def _capture_service(store: CaptureStore) -> CaptureService:
     return CaptureService(
         store=store,
         normalization_service=CaptureNormalizationService(),
+        proposal_service=CaptureRegistrationProposalService(),
     )
 
 

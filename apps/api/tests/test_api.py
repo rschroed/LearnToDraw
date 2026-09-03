@@ -768,6 +768,11 @@ def test_plot_run_capture_review_confirm_endpoint_creates_v2_registration(tmp_pa
         pending = wait_for_run_status(
             client, run_response.json()["id"], {"awaiting_capture_review"}
         )
+        assert pending["capture"]["review"]["proposal"]["status"] == "fallback"
+        assert (
+            pending["capture"]["review"]["proposal"]["method"]
+            == "inset_5_percent_v1"
+        )
         corners = pending["capture"]["review"]["proposed_corners"]
         confirm_response = client.post(
             f"/api/plot-runs/{pending['id']}/capture-review/confirm",
@@ -780,6 +785,7 @@ def test_plot_run_capture_review_confirm_endpoint_creates_v2_registration(tmp_pa
     assert completed["capture"]["review"]["registration_version"] == 2
     assert completed["capture"]["review"]["review_mode"] == "manual_corners"
     assert completed["capture"]["review"]["confirmation_source"] == "manual"
+    assert completed["capture"]["review"]["proposal"]["status"] == "fallback"
     metadata = completed["capture"]["normalized"]["metadata"]
     assert metadata["method"] == "manual_corners_v2"
     assert metadata["frame"]["version"] == 2

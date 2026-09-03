@@ -84,7 +84,9 @@ The app currently supports a single backend-owned plotting workflow with a few n
 
 ## Manual Capture Registration V2
 
-Automatic paper detection is not part of the active capture path. Each non-skipped plot-run capture gets a versioned `manual_corners` review seeded five percent inside the raw image. The operator places named TL/TR/BR/BL points on the visible physical page corners, and the backend validates that the quad is finite, in bounds, convex, non-crossing, large enough, and has usable edge lengths before changing run state.
+Automatic page acceptance is not part of the capture path. For each non-skipped plot-run capture, the backend first attempts a `light_page_edges_v1` corner proposal: it segments a large light page, extracts a coarse quadrilateral, robustly fits the four straight page edges, and requires the result to remain stable across nearby image thresholds. A stable result seeds the versioned `manual_corners` review; an unavailable, clipped, or unstable result falls back to the five-percent inset quad. The operator must still verify named TL/TR/BR/BL points, and the backend validates that the confirmed quad is finite, in bounds, convex, non-crossing, large enough, and has usable edge lengths before changing run state.
+
+`CaptureReview.proposal` records whether `proposed_corners` came from a stable suggestion or the inset fallback, together with the proposal method, raw-pixel stability when available, and a specific fallback reason. It is optional so existing V1 and V2 artifacts remain readable. Proposal provenance never implies acceptance: new confirmations continue to persist `confirmation_source: manual`.
 
 Confirmation uses `POST /api/plot-runs/{run_id}/capture-review/confirm`. The existing asynchronous executor then maps the confirmed raw-capture pixels directly to the full canonical page with one homography. The canonical raster keeps the prepared page aspect ratio, uses a 2048-pixel long side, has a top-left origin, and is not trimmed, rotated, or resized again.
 

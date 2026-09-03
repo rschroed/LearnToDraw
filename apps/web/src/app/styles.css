@@ -2179,6 +2179,18 @@ button {
   font-size: 0.84rem;
 }
 
+.capture-review-proposal-message {
+  margin: 0;
+  color: #ffd7a0;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.capture-review-modal-header .capture-review-proposal-message {
+  margin-top: 8px;
+  color: #ffd7a0;
+}
+
 .capture-review-actions {
   display: flex;
   flex-wrap: wrap;

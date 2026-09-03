@@ -18,6 +18,19 @@ const CORNER_OPTIONS: readonly [CornerKey, string][] = [
 
 const MAGNIFIER_WINDOW_PX = 120;
 
+const PROPOSAL_FALLBACK_MESSAGES: Record<string, string> = {
+  capture_not_decodable: "The captured image could not be analyzed.",
+  capture_dimensions_mismatch: "The captured image dimensions were inconsistent.",
+  no_large_bright_region: "A distinct light page was not visible.",
+  bright_region_touches_multiple_borders: "The page could not be separated from the image border.",
+  bright_region_not_quadrilateral: "The visible page boundary was not clear enough.",
+  edge_refinement_failed: "The page edges were not clear enough to refine.",
+  physical_corner_outside_capture: "One or more physical page corners were outside the image.",
+  unstable_across_thresholds: "The page boundary changed too much under image analysis.",
+  invalid_proposal_geometry: "The suggested page geometry was invalid.",
+  proposal_unavailable: "The page boundary was not clear enough.",
+};
+
 const MAGNIFIER_POSITIONS: Record<CornerKey, string> = {
   top_left: "bottom-right",
   top_right: "bottom-left",
@@ -77,6 +90,16 @@ export function CaptureReviewEditor({
   onConfirm,
 }: CaptureReviewEditorProps) {
   const startingCorners = review.confirmed_corners ?? review.proposed_corners;
+  const activeProposal = revision ? null : review.proposal;
+  const proposalMessage =
+    activeProposal?.status === "suggested"
+      ? "Automatic corner suggestion ready — verify all four points before registering."
+      : activeProposal?.status === "fallback"
+        ? `Automatic suggestion unavailable. ${
+          PROPOSAL_FALLBACK_MESSAGES[activeProposal.fallback_reason ?? "proposal_unavailable"]
+          ?? PROPOSAL_FALLBACK_MESSAGES.proposal_unavailable
+        } Place all four corners manually.`
+        : null;
   const [draftCorners, setDraftCorners] = useState<NormalizationCorners>(() =>
     cloneCorners(startingCorners),
   );
@@ -350,7 +373,8 @@ export function CaptureReviewEditor({
         <header className="capture-review-modal-header">
           <div>
             <h3>{revision ? "Adjust captured page" : "Register captured page"}</h3>
-            <p>Choose a corner, then click or drag it onto the physical paper corner.</p>
+            <p>Choose a corner, then click or drag it to the intersection of the paper edges.</p>
+            {proposalMessage ? <p className="capture-review-proposal-message">{proposalMessage}</p> : null}
           </div>
           <button
             type="button"
@@ -387,8 +411,9 @@ export function CaptureReviewEditor({
         <div className="capture-review-modal-footer">
           <div>
             <p className="capture-review-caption">
-              Use the detail view to place the crosshair exactly on the paper corner. Arrow keys
-              work anywhere in this dialog and nudge by 1 raw pixel; hold Shift for 10.
+              Use the detail view to place the crosshair at the intersection of the straight paper
+              edges; this may be just beyond a curled corner tip. Arrow keys work anywhere in this
+              dialog and nudge by 1 raw pixel; hold Shift for 10.
             </p>
             {error ? (
               <p className="capture-review-error" role="alert">
@@ -427,8 +452,17 @@ export function CaptureReviewEditor({
           <p className="capture-review-caption">
             {revision ? "Refine the saved manual page registration." : "Manual page registration required."}
           </p>
+          {proposalMessage ? (
+            <p className="capture-review-proposal-message" role="status">
+              {proposalMessage}
+              {activeProposal?.status === "suggested"
+              && activeProposal.stability_max_px != null
+                ? ` Stable within ${activeProposal.stability_max_px.toFixed(1)} raw px across image thresholds.`
+                : ""}
+            </p>
+          ) : null}
           <p className="capture-review-caption">
-            Place each labeled point on the matching physical paper corner.
+            Place each labeled point at the intersection of the matching straight paper edges.
           </p>
         </div>
         <div className="capture-review-actions">
