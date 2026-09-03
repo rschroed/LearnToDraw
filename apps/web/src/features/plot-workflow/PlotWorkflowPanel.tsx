@@ -17,6 +17,7 @@ import {
 } from "./plotWorkflowFormatters";
 import { isV2PageAlignedCapture, RunArtifactCompare } from "./RunArtifactCompare";
 import { RunCaptureReview } from "./RunCaptureReview";
+import { DrawingSessionPanel } from "./DrawingSessionPanel";
 import type { PlotWorkflowController } from "./usePlotWorkflow";
 
 type PlotWorkflowMode = "workflow" | "history";
@@ -86,7 +87,10 @@ function getWorkflowBlockerMessage({
 }
 
 function formatRunKindLabel(kind: PlotAsset["kind"]) {
-  return kind === "built_in_pattern" ? "Built-in pattern" : "Uploaded SVG";
+  if (kind === "built_in_pattern") {
+    return "Built-in pattern";
+  }
+  return kind === "generated_svg" ? "Advisor layer" : "Uploaded SVG";
 }
 
 function getHistoryRowThumbnail(run: PlotRun | null) {
@@ -552,6 +556,7 @@ export function PlotWorkflowPanel({
     activeRun,
     error,
     notice,
+    refresh,
     createBuiltInPattern,
     uploadSvg,
     startRun,
@@ -782,6 +787,11 @@ export function PlotWorkflowPanel({
   return (
     <section className="workflow-layout">
       <div className="workflow-main">
+        <DrawingSessionPanel
+          selectedAsset={selectedAsset}
+          plotStartBlocked={startDisabled}
+          onRunStarted={() => refresh({ silent: true })}
+        />
         <section className="panel workflow-command-bar">
           {error ? <div className="banner">{error}</div> : null}
 

@@ -19,6 +19,7 @@ import type {
   PlotRunListResponse,
 } from "../types/plotting";
 import type { HelperStatus } from "../types/helper";
+import type { DrawingSession, LatestDrawingSessionResponse } from "../types/drawing";
 
 const REQUEST_TIMEOUT_MS = 2000;
 const HELPER_OPEN_URL = "learntodraw-helper://open";
@@ -49,11 +50,15 @@ export function isNetworkRequestError(error: unknown): error is ApiRequestError 
   return error instanceof ApiRequestError && error.isNetworkError;
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => {
     controller.abort("timeout");
-  }, REQUEST_TIMEOUT_MS);
+  }, timeoutMs);
   const externalSignal = init?.signal;
   const abortFromExternalSignal = () => {
     controller.abort(externalSignal?.reason);
@@ -311,6 +316,46 @@ export function confirmPlotRunCaptureReview(
       },
       body: JSON.stringify({ corners }),
     },
+  );
+}
+
+export function fetchLatestDrawingSession() {
+  return requestJson<LatestDrawingSessionResponse>("/api/drawing-sessions/latest");
+}
+
+export function fetchDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}`);
+}
+
+export function createDrawingSession(
+  intent: string,
+  initialAssetId: string,
+  iterationLimit: number,
+) {
+  return requestJson<DrawingSession>("/api/drawing-sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      intent,
+      initial_asset_id: initialAssetId,
+      iteration_limit: iterationLimit,
+      mode: "additive",
+    }),
+  });
+}
+
+export function requestDrawingAdvice(sessionId: string) {
+  return requestJson<DrawingSession>(
+    `/api/drawing-sessions/${sessionId}/advice`,
+    { method: "POST" },
+    70000,
+  );
+}
+
+export function approveDrawingIteration(sessionId: string) {
+  return requestJson<DrawingSession>(
+    `/api/drawing-sessions/${sessionId}/iterations`,
+    { method: "POST" },
   );
 }
 

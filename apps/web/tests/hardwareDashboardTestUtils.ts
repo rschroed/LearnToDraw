@@ -522,6 +522,10 @@ export function installHardwareDashboardFetchMock(
         return jsonResponse({ run: harness.latestRun });
       }
 
+      if (url === "/api/drawing-sessions/latest") {
+        return jsonResponse({ session: null });
+      }
+
       if (url === "/api/plot-runs" && method === "GET") {
         return jsonResponse({ runs: harness.recentRuns });
       }

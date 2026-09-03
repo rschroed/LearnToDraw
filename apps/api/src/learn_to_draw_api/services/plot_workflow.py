@@ -106,6 +106,14 @@ class PlotWorkflowService:
             pattern_id=request.pattern_id,
         )
 
+    def create_generated_asset(self, *, name: str, svg_text: str) -> PlotAsset:
+        parse_svg_root(svg_text)
+        return self._asset_store.save_svg(
+            svg_text=svg_text,
+            name=name,
+            kind="generated_svg",
+        )
+
     def get_asset(self, asset_id: str) -> PlotAsset:
         return self._asset_store.get(asset_id)
 

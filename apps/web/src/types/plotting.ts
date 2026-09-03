@@ -2,7 +2,7 @@ import type { CaptureMetadata } from "./hardware";
 
 export interface PlotAsset {
   id: string;
-  kind: "uploaded_svg" | "built_in_pattern";
+  kind: "uploaded_svg" | "built_in_pattern" | "generated_svg";
   pattern_id: string | null;
   name: string;
   timestamp: string;

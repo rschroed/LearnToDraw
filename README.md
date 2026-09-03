@@ -7,7 +7,7 @@ LearnToDraw is a local-first control panel for a pen-plotter workflow. The backe
 - Runs a FastAPI backend that stays responsible for plotter and camera access
 - Provides a React/Vite operator UI with focused Workflow, Machine, and History views
 - Supports tracked plot runs from uploaded SVGs or built-in patterns
-- Persists captures, plot assets, plot runs, calibration, and workspace/device settings locally
+- Persists captures, plot assets, plot runs, bounded iterative drawing sessions, calibration, and workspace/device settings locally
 - Supports both mock adapters for development and a real AxiDraw-backed plotter path
 - Supports both mock camera capture and a CameraBridge-backed real camera path
 
@@ -22,7 +22,7 @@ LearnToDraw is a local-first control panel for a pen-plotter workflow. The backe
 
 - `apps/api`: FastAPI backend, services, adapters, and models
 - `apps/web`: React/Vite dashboard
-- `artifacts/`: local captures, plot assets, plot runs, calibration, and workspace/device state
+- `artifacts/`: local captures, plot assets, plot runs, drawing sessions, calibration, and workspace/device state
 - `docs/`: architecture notes, project history, and manual test assets
 
 ## Quick Start
@@ -71,6 +71,20 @@ export LEARN_TO_DRAW_CAMERABRIDGE_DEFAULT_DEVICE_ID=camera-1
 If `LEARN_TO_DRAW_CAMERABRIDGE_BASE_URL` is not set, LearnToDraw checks `~/Library/Application Support/CameraBridge/runtime-configuration.json` and otherwise falls back to `http://127.0.0.1:8731`. The auth token defaults to `~/Library/Application Support/CameraBridge/auth-token`.
 
 CameraBridge is not assumed to be running just because it is installed. Start `CameraBridgeApp`, click `Start CameraBridge Service`, and if needed click `Request Camera Access`. LearnToDraw surfaces those readiness steps through backend camera status and the dashboard.
+
+## Optional Drawing Advisor
+
+Iterative drawing sessions are additive, use the existing backend-owned plot-run path, and require explicit operator approval before every plotted pass. The visual drawing advisor is disabled by default. To enable the OpenAI Responses API adapter, set:
+
+```bash
+export LEARN_TO_DRAW_DRAWING_ADVISOR=openai
+export OPENAI_API_KEY=YOUR_API_KEY
+export LEARN_TO_DRAW_OPENAI_MODEL=YOUR_IMAGE_CAPABLE_MODEL
+```
+
+The configured model must accept image input and structured JSON output. The adapter sends the registered grayscale observation and drawing intent, then accepts only interpretation text and a bounded SVG layer. API credentials are read from the environment and are never persisted in artifacts. For local contract testing without an external request, use `LEARN_TO_DRAW_DRAWING_ADVISOR=mock`.
+
+The implementation uses the official [Responses API](https://platform.openai.com/docs/api-reference/responses/create) contract. Model availability and billing depend on the OpenAI API project associated with the supplied key.
 
 ## Mock Vs Real Hardware
 

@@ -11,6 +11,7 @@ from learn_to_draw_api.models import (
     HardwareOperationError,
     HardwareUnavailableError,
     InvalidArtifactError,
+    ServiceUnavailableError,
 )
 
 
@@ -28,6 +29,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         _: Request, exc: InvalidArtifactError
     ) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(ServiceUnavailableError)
+    async def handle_service_unavailable(
+        _: Request, exc: ServiceUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     @app.exception_handler(HardwareBusyError)
     async def handle_busy(_: Request, exc: HardwareBusyError) -> JSONResponse:

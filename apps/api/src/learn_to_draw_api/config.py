@@ -14,6 +14,9 @@ class AppConfig:
     calibration_dir: Path = field(default_factory=lambda: Path("artifacts/calibration"))
     device_settings_dir: Path = field(default_factory=lambda: Path("artifacts/device_settings"))
     workspace_dir: Path = field(default_factory=lambda: Path("artifacts/workspace"))
+    drawing_sessions_dir: Path = field(
+        default_factory=lambda: Path("artifacts/drawing_sessions")
+    )
     plotter_driver: str = "mock"
     axidraw_port: Optional[str] = None
     axidraw_speed_pendown: Optional[int] = None
@@ -47,6 +50,9 @@ class AppConfig:
     camerabridge_default_device_id: Optional[str] = None
     plot_assets_url_prefix: str = "/plot-assets"
     plot_run_artifacts_url_prefix: str = "/plot-run-artifacts"
+    drawing_advisor_driver: str = "disabled"
+    openai_api_key: Optional[str] = None
+    openai_model: Optional[str] = None
     cors_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -89,6 +95,12 @@ class AppConfig:
             os.getenv(
                 "LEARN_TO_DRAW_WORKSPACE_DIR",
                 repo_root / "artifacts" / "workspace",
+            )
+        )
+        drawing_sessions_dir = Path(
+            os.getenv(
+                "LEARN_TO_DRAW_DRAWING_SESSIONS_DIR",
+                repo_root / "artifacts" / "drawing_sessions",
             )
         )
         capture_url_prefix = os.getenv("LEARN_TO_DRAW_CAPTURE_URL_PREFIX", "/captures")
@@ -155,6 +167,12 @@ class AppConfig:
             "LEARN_TO_DRAW_PLOT_RUN_ARTIFACTS_URL_PREFIX",
             "/plot-run-artifacts",
         )
+        drawing_advisor_driver = os.getenv(
+            "LEARN_TO_DRAW_DRAWING_ADVISOR",
+            "disabled",
+        ).strip().lower() or "disabled"
+        openai_api_key = _read_optional_text_or_none("OPENAI_API_KEY")
+        openai_model = _read_optional_text_or_none("LEARN_TO_DRAW_OPENAI_MODEL")
         return cls(
             captures_dir=captures_dir,
             plot_assets_dir=plot_assets_dir,
@@ -162,6 +180,7 @@ class AppConfig:
             calibration_dir=calibration_dir,
             device_settings_dir=device_settings_dir,
             workspace_dir=workspace_dir,
+            drawing_sessions_dir=drawing_sessions_dir,
             plotter_driver=plotter_driver,
             axidraw_port=axidraw_port,
             axidraw_speed_pendown=axidraw_speed_pendown,
@@ -195,6 +214,9 @@ class AppConfig:
             camerabridge_default_device_id=camerabridge_default_device_id,
             plot_assets_url_prefix=plot_assets_url_prefix,
             plot_run_artifacts_url_prefix=plot_run_artifacts_url_prefix,
+            drawing_advisor_driver=drawing_advisor_driver,
+            openai_api_key=openai_api_key,
+            openai_model=openai_model,
         )
 
     def ensure_directories(self) -> None:
@@ -204,6 +226,7 @@ class AppConfig:
         self.calibration_dir.mkdir(parents=True, exist_ok=True)
         self.device_settings_dir.mkdir(parents=True, exist_ok=True)
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
+        self.drawing_sessions_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def normalized_capture_url_prefix(self) -> str:
