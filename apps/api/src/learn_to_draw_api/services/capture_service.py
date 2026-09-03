@@ -6,8 +6,13 @@ from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.models import (
     CaptureMetadata,
     CaptureReview,
+    CaptureReviewProposal,
+    InvalidArtifactError,
     NormalizationCorners,
     NormalizedCaptureArtifacts,
+)
+from learn_to_draw_api.services.capture_registration_proposal import (
+    CaptureRegistrationProposalService,
 )
 from learn_to_draw_api.services.capture_normalization import (
     CaptureNormalizationService,
@@ -22,9 +27,11 @@ class CaptureService:
         *,
         store: CaptureStore,
         normalization_service: CaptureNormalizationService,
+        proposal_service: CaptureRegistrationProposalService,
     ) -> None:
         self._store = store
         self._normalization_service = normalization_service
+        self._proposal_service = proposal_service
 
     def persist_raw_capture(self, artifact: CaptureArtifact) -> CaptureMetadata:
         return self._store.save(artifact)
@@ -38,6 +45,47 @@ class CaptureService:
         return self._normalization_service.initial_registration_corners(
             image_width=image_width,
             image_height=image_height,
+        )
+
+    def propose_registration_corners(
+        self,
+        *,
+        content: bytes,
+        image_width: int,
+        image_height: int,
+    ) -> tuple[NormalizationCorners, CaptureReviewProposal]:
+        attempt = self._proposal_service.propose(
+            content=content,
+            expected_width=image_width,
+            expected_height=image_height,
+        )
+        if attempt.corners is not None:
+            try:
+                self._normalization_service.validate_registration_corners(
+                    corners=attempt.corners,
+                    image_width=image_width,
+                    image_height=image_height,
+                )
+            except InvalidArtifactError:
+                fallback_reason = "invalid_proposal_geometry"
+            else:
+                return attempt.corners, CaptureReviewProposal(
+                    status="suggested",
+                    method="light_page_edges_v1",
+                    stability_max_px=attempt.stability_max_px,
+                    fallback_reason=None,
+                )
+        else:
+            fallback_reason = attempt.fallback_reason or "proposal_unavailable"
+
+        return self.initial_registration_corners(
+            image_width=image_width,
+            image_height=image_height,
+        ), CaptureReviewProposal(
+            status="fallback",
+            method="inset_5_percent_v1",
+            stability_max_px=None,
+            fallback_reason=fallback_reason,
         )
 
     def save_capture_review(

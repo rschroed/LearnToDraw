@@ -147,6 +147,13 @@ CaptureReviewStatus = Literal["pending", "confirmed"]
 CaptureReviewConfirmationSource = Literal["auto", "adjusted", "reused_last", "manual"]
 
 
+class CaptureReviewProposal(BaseModel):
+    status: Literal["suggested", "fallback"]
+    method: Literal["light_page_edges_v1", "inset_5_percent_v1"]
+    stability_max_px: Optional[float] = Field(default=None, ge=0)
+    fallback_reason: Optional[str] = None
+
+
 class CaptureReview(BaseModel):
     registration_version: int = Field(default=1, ge=1)
     review_mode: Optional[Literal["manual_corners"]] = None
@@ -158,6 +165,7 @@ class CaptureReview(BaseModel):
     detector_method: Optional[NormalizationMethod] = None
     detector_confidence: Optional[float] = Field(default=None, ge=0, le=1)
     reuse_last_available: bool = False
+    proposal: Optional[CaptureReviewProposal] = None
 
 
 class CaptureMetadata(BaseModel):

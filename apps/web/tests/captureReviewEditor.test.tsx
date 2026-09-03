@@ -161,6 +161,59 @@ describe("manual capture registration editor", () => {
     expect(screen.getByRole("button", { name: /^top right$/i })).toBeDisabled();
   });
 
+  it("labels an automatic proposal as a suggestion that still requires verification", () => {
+    render(
+      <CaptureReviewEditor
+        capture={capture}
+        review={{
+          ...review,
+          proposal: {
+            status: "suggested",
+            method: "light_page_edges_v1",
+            stability_max_px: 0.711,
+            fallback_reason: null,
+          },
+        }}
+        busy={false}
+        error={null}
+        onConfirm={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /automatic corner suggestion ready.*verify all four points/i,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/stable within 0.7 raw px/i);
+    fireEvent.click(screen.getByRole("button", { name: /register page/i }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      /intersection of the straight paper edges/i,
+    );
+  });
+
+  it("explains when automatic proposal falls back to manual placement", () => {
+    render(
+      <CaptureReviewEditor
+        capture={capture}
+        review={{
+          ...review,
+          proposal: {
+            status: "fallback",
+            method: "inset_5_percent_v1",
+            stability_max_px: null,
+            fallback_reason: "physical_corner_outside_capture",
+          },
+        }}
+        busy={false}
+        error={null}
+        onConfirm={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /automatic suggestion unavailable.*corners were outside the image.*manually/i,
+    );
+  });
+
   it("keeps the modal and draft open when polling returns equivalent review data", () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined);
     const { rerender } = render(

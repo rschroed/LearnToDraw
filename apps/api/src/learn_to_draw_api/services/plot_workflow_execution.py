@@ -130,7 +130,8 @@ class PlotRunExecutor:
                 capture_artifact = self._camera.capture()
                 capture_completed = datetime.now(timezone.utc)
                 capture_metadata = self._capture_service.persist_raw_capture(capture_artifact)
-                initial_corners = self._capture_service.initial_registration_corners(
+                initial_corners, proposal = self._capture_service.propose_registration_corners(
+                    content=capture_artifact.content,
                     image_width=capture_metadata.width,
                     image_height=capture_metadata.height,
                 )
@@ -142,6 +143,7 @@ class PlotRunExecutor:
                     proposed_corners=initial_corners,
                     confirmed_corners=None,
                     confirmation_source=None,
+                    proposal=proposal,
                 )
                 capture_metadata = self._capture_service.save_capture_review(
                     capture_metadata.id,

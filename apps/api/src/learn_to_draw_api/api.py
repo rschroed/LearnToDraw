@@ -14,6 +14,9 @@ from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.errors import register_exception_handlers
 from learn_to_draw_api.routes import build_api_router
 from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
+from learn_to_draw_api.services.capture_registration_proposal import (
+    CaptureRegistrationProposalService,
+)
 from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.camera_device_settings import (
@@ -82,6 +85,7 @@ def create_app(
     capture_service = CaptureService(
         store=capture_store,
         normalization_service=CaptureNormalizationService(),
+        proposal_service=CaptureRegistrationProposalService(),
     )
     plot_asset_store = PlotAssetStore(
         assets_dir=app_config.plot_assets_dir,

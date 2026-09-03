@@ -330,6 +330,7 @@ def test_legacy_capture_models_remain_parseable():
 
     assert review.registration_version == 1
     assert review.review_mode is None
+    assert review.proposal is None
     assert metadata.frame is not None and metadata.frame.version == 1
     assert metadata.transform.inverse_matrix is None
     assert metadata.transform.source_space is None

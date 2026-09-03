@@ -127,4 +127,12 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Separated physical page pose from registration accuracy: the page-true overlay still exposes absolute placement, while hardware validation may remove translation and rotation—but not scale or deformation—before evaluating checkpoint residuals
 - Allowed completed V2 runs to refine confirmed corners and regenerate normalized derivatives from the same immutable raw capture without plotting or capturing again
 
+## Automatic Corner Proposal Slice
+
+- Added a backend-owned `light_page_edges_v1` proposal pass that combines light-page segmentation, coarse quadrilateral extraction, robust edge fitting, and threshold-stability checks
+- Seeded pending manual reviews from stable proposals while retaining the five-percent inset fallback for missing, clipped, or ambiguous pages
+- Added explicit proposal provenance without reusing legacy detector fields or changing the requirement for manual confirmation
+- Labeled suggestions and fallback reasons in the existing corner editor, including guidance to verify the intersection of straight page edges through curled tips
+- Covered synthetic success/failure cases, workflow fallback and confirmation behavior, legacy parsing, and the selected real C930e/AxiDraw fixture
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.adapters.mock_camera import MockCamera
@@ -16,6 +17,9 @@ from learn_to_draw_api.models import (
     PlotterWorkspaceRequest,
 )
 from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
+from learn_to_draw_api.services.capture_registration_proposal import (
+    CaptureRegistrationProposalService,
+)
 from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.plot_workflow import (
@@ -87,6 +91,18 @@ def _blank_jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
     return encoded.tobytes()
 
 
+def _page_jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
+    image = np.full((height, width, 3), 25, dtype=np.uint8)
+    cv2.fillConvexPoly(
+        image,
+        np.array([[90, 50], [530, 40], [590, 430], [45, 445]], dtype=np.int32),
+        (235, 235, 235),
+    )
+    ok, encoded = cv2.imencode(".jpg", image)
+    assert ok
+    return encoded.tobytes()
+
+
 class LowConfidenceCamera:
     driver = "mock-camera"
 
@@ -112,6 +128,20 @@ class LowConfidenceCamera:
             timestamp=MockCamera(capture_delay_s=0).capture().timestamp,
             filename=f"review-capture-{self._capture_count}.jpg",
             content=_blank_jpeg_bytes(),
+            media_type="image/jpeg",
+            width=640,
+            height=480,
+        )
+
+
+class AutomaticProposalCamera(LowConfidenceCamera):
+    def capture(self) -> CaptureArtifact:
+        self._capture_count += 1
+        return CaptureArtifact(
+            capture_id=f"proposal-capture-{self._capture_count}",
+            timestamp=MockCamera(capture_delay_s=0).capture().timestamp,
+            filename=f"proposal-capture-{self._capture_count}.jpg",
+            content=_page_jpeg_bytes(),
             media_type="image/jpeg",
             width=640,
             height=480,
@@ -150,6 +180,7 @@ def _build_service(tmp_path, *, plotter=None, camera=None, config_overrides=None
         capture_service=CaptureService(
             store=capture_store,
             normalization_service=CaptureNormalizationService(),
+            proposal_service=CaptureRegistrationProposalService(),
         ),
         asset_store=PlotAssetStore(tmp_path / "plot_assets", "/plot-assets"),
         run_store=PlotRunStore(tmp_path / "plot_runs"),
@@ -352,8 +383,39 @@ def test_plot_workflow_service_always_pauses_for_manual_capture_registration(tmp
     assert pending.capture.review.review_mode == "manual_corners"
     assert pending.capture.review.review_status == "pending"
     assert pending.capture.review.confirmed_corners is None
+    assert pending.capture.review.proposal is not None
+    assert pending.capture.review.proposal.status == "fallback"
+    assert pending.capture.review.proposal.method == "inset_5_percent_v1"
+    assert pending.capture.review.proposal.fallback_reason is not None
     assert pending.stage_states["capture"].status == "completed"
     assert pending.stage_states["capture_review"].status == "in_progress"
+
+
+def test_plot_workflow_service_seeds_manual_review_with_automatic_proposal(tmp_path):
+    service = _build_service(tmp_path, camera=AutomaticProposalCamera())
+    asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
+
+    run = service.create_run(asset.id)
+    pending = _wait_for_run_status(service, run.id, {"awaiting_capture_review"})
+
+    assert pending.capture is not None and pending.capture.review is not None
+    review = pending.capture.review
+    assert review.review_required is True
+    assert review.review_status == "pending"
+    assert review.proposal is not None
+    assert review.proposal.status == "suggested"
+    assert review.proposal.method == "light_page_edges_v1"
+    assert review.proposal.stability_max_px == pytest.approx(0.121, abs=0.02)
+    assert review.proposal.fallback_reason is None
+    assert review.proposed_corners.top_left == pytest.approx((89.535, 49.418), abs=0.1)
+
+    service.confirm_capture_review(
+        run.id,
+        PlotRunCaptureReviewConfirmRequest(corners=review.proposed_corners),
+    )
+    completed = _wait_for_terminal_run(service, run.id)
+    assert completed.capture is not None and completed.capture.review is not None
+    assert completed.capture.review.confirmation_source == "manual"
 
 
 def test_plot_workflow_service_confirms_proposed_capture_review_and_completes(tmp_path):
