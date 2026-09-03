@@ -163,10 +163,12 @@ class PlotterWorkspaceService:
         plot_area: PlotArea,
         plotter_bounds: SizeMm,
     ) -> Optional[str]:
-        if plot_area.page_width_mm > plotter_bounds.width_mm:
-            return "Configured page width exceeds the plotter bounds width."
-        if plot_area.page_height_mm > plotter_bounds.height_mm:
-            return "Configured page height exceeds the plotter bounds height."
         if plot_area.draw_width_mm <= 0 or plot_area.draw_height_mm <= 0:
             return "Configured margins must leave a positive drawable area."
+        drawable_max_x_mm = plot_area.page_width_mm - plot_area.margin_right_mm
+        drawable_max_y_mm = plot_area.page_height_mm - plot_area.margin_bottom_mm
+        if drawable_max_x_mm > plotter_bounds.width_mm:
+            return "Configured drawable area exceeds the plotter bounds width."
+        if drawable_max_y_mm > plotter_bounds.height_mm:
+            return "Configured drawable area exceeds the plotter bounds height."
         return None

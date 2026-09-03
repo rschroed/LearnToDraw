@@ -11,12 +11,11 @@ from learn_to_draw_api.adapters.mock_camera import MockCamera
 from learn_to_draw_api.adapters.mock_plotter import MockPlotter
 from learn_to_draw_api.models import (
     PatternAssetCreateRequest,
-    PlotRunCaptureReviewAdjustRequest,
+    PlotRunCaptureReviewConfirmRequest,
     PlotterCalibrationRequest,
     PlotterWorkspaceRequest,
 )
 from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
-from learn_to_draw_api.services.capture_review_memory import CaptureReviewMemoryStore
 from learn_to_draw_api.services.capture_service import CaptureService
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.plot_workflow import (
@@ -152,7 +151,6 @@ def _build_service(tmp_path, *, plotter=None, camera=None, config_overrides=None
             store=capture_store,
             normalization_service=CaptureNormalizationService(),
         ),
-        review_memory_store=CaptureReviewMemoryStore(tmp_path / "workspace"),
         asset_store=PlotAssetStore(tmp_path / "plot_assets", "/plot-assets"),
         run_store=PlotRunStore(tmp_path / "plot_runs"),
         calibration_service=calibration_service,
@@ -164,6 +162,15 @@ def _build_service(tmp_path, *, plotter=None, camera=None, config_overrides=None
 def _wait_for_terminal_run(service: PlotWorkflowService, run_id: str):
     for _ in range(200):
         run = service.get_run(run_id)
+        if run.status == "awaiting_capture_review":
+            assert run.capture is not None and run.capture.review is not None
+            service.confirm_capture_review(
+                run.id,
+                PlotRunCaptureReviewConfirmRequest(
+                    corners=run.capture.review.proposed_corners
+                ),
+            )
+            continue
         if run.status in {"completed", "failed"}:
             return run
         time.sleep(0.01)
@@ -315,12 +322,7 @@ def test_plot_workflow_service_persists_real_camera_capture(tmp_path):
     )
 
     run = service.create_run(asset.id)
-    current = _wait_for_run_status(service, run.id, {"completed", "awaiting_capture_review"})
-    if current.status == "awaiting_capture_review":
-        service.accept_capture_review(run.id)
-        completed = _wait_for_terminal_run(service, run.id)
-    else:
-        completed = current
+    completed = _wait_for_terminal_run(service, run.id)
 
     assert completed.status == "completed"
     assert completed.capture is not None
@@ -335,7 +337,7 @@ def test_plot_workflow_service_persists_real_camera_capture(tmp_path):
     assert completed.camera_run_details["resolution"] == "640x480"
 
 
-def test_plot_workflow_service_pauses_for_capture_review_on_low_confidence(tmp_path):
+def test_plot_workflow_service_always_pauses_for_manual_capture_registration(tmp_path):
     service = _build_service(tmp_path, camera=LowConfidenceCamera())
     asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
 
@@ -346,19 +348,27 @@ def test_plot_workflow_service_pauses_for_capture_review_on_low_confidence(tmp_p
     assert pending.capture.normalized is None
     assert pending.capture.review is not None
     assert pending.capture.review.review_required is True
+    assert pending.capture.review.registration_version == 2
+    assert pending.capture.review.review_mode == "manual_corners"
     assert pending.capture.review.review_status == "pending"
     assert pending.capture.review.confirmed_corners is None
     assert pending.stage_states["capture"].status == "completed"
     assert pending.stage_states["capture_review"].status == "in_progress"
 
 
-def test_plot_workflow_service_accepts_proposed_capture_review_and_completes(tmp_path):
+def test_plot_workflow_service_confirms_proposed_capture_review_and_completes(tmp_path):
     service = _build_service(tmp_path, camera=LowConfidenceCamera())
     asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
 
     run = service.create_run(asset.id)
     pending = _wait_for_run_status(service, run.id, {"awaiting_capture_review"})
-    response = service.accept_capture_review(pending.id)
+    assert pending.capture is not None and pending.capture.review is not None
+    response = service.confirm_capture_review(
+        pending.id,
+        PlotRunCaptureReviewConfirmRequest(
+            corners=pending.capture.review.proposed_corners
+        ),
+    )
     completed = _wait_for_terminal_run(service, run.id)
 
     assert response.run.status in {"capturing", "completed"}
@@ -367,7 +377,7 @@ def test_plot_workflow_service_accepts_proposed_capture_review_and_completes(tmp
     assert completed.capture.normalized is not None
     assert completed.capture.review is not None
     assert completed.capture.review.review_status == "confirmed"
-    assert completed.capture.review.confirmation_source == "auto"
+    assert completed.capture.review.confirmation_source == "manual"
     assert completed.capture.review.confirmed_corners == completed.capture.review.proposed_corners
 
 
@@ -387,83 +397,18 @@ def test_plot_workflow_service_uses_adjusted_capture_review_corners(tmp_path):
         }
     )
 
-    service.adjust_capture_review(
+    service.confirm_capture_review(
         pending.id,
-        PlotRunCaptureReviewAdjustRequest(corners=adjusted),
+        PlotRunCaptureReviewConfirmRequest(corners=adjusted),
     )
     completed = _wait_for_terminal_run(service, run.id)
 
     assert completed.capture is not None
     assert completed.capture.review is not None
-    assert completed.capture.review.confirmation_source == "adjusted"
+    assert completed.capture.review.confirmation_source == "manual"
     assert completed.capture.review.confirmed_corners == adjusted
     assert completed.capture.normalized is not None
     assert completed.capture.normalized.metadata.corners.top_left == adjusted.top_left
-
-
-def test_plot_workflow_service_reuses_last_confirmed_capture_quad_for_matching_scope(tmp_path):
-    service = _build_service(tmp_path, camera=LowConfidenceCamera())
-    asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
-
-    first_run = service.create_run(asset.id)
-    first_pending = _wait_for_run_status(service, first_run.id, {"awaiting_capture_review"})
-    assert first_pending.capture is not None
-    assert first_pending.capture.review is not None
-    first_adjusted = first_pending.capture.review.proposed_corners.model_copy(
-        update={
-            "top_left": (40.0, 30.0),
-            "top_right": (590.0, 32.0),
-            "bottom_right": (590.0, 445.0),
-            "bottom_left": (42.0, 448.0),
-        }
-    )
-    service.adjust_capture_review(
-        first_pending.id,
-        PlotRunCaptureReviewAdjustRequest(corners=first_adjusted),
-    )
-    _wait_for_terminal_run(service, first_run.id)
-
-    second_run = service.create_run(asset.id)
-    second_pending = _wait_for_run_status(service, second_run.id, {"awaiting_capture_review"})
-    assert second_pending.capture is not None
-    assert second_pending.capture.review is not None
-    assert second_pending.capture.review.reuse_last_available is True
-
-    service.reuse_last_capture_review(second_pending.id)
-    second_completed = _wait_for_terminal_run(service, second_run.id)
-
-    assert second_completed.capture is not None
-    assert second_completed.capture.review is not None
-    assert second_completed.capture.review.confirmation_source == "reused_last"
-    assert second_completed.capture.review.confirmed_corners == first_adjusted
-
-
-def test_plot_workflow_service_hides_reuse_last_for_workspace_mismatch(tmp_path):
-    first_service = _build_service(tmp_path, camera=LowConfidenceCamera())
-    asset = first_service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
-
-    first_run = first_service.create_run(asset.id)
-    first_pending = _wait_for_run_status(first_service, first_run.id, {"awaiting_capture_review"})
-    assert first_pending.capture is not None
-    assert first_pending.capture.review is not None
-    first_service.adjust_capture_review(
-        first_pending.id,
-        PlotRunCaptureReviewAdjustRequest(corners=first_pending.capture.review.proposed_corners),
-    )
-    _wait_for_terminal_run(first_service, first_run.id)
-
-    second_service = _build_service(
-        tmp_path,
-        camera=LowConfidenceCamera(),
-        config_overrides={"plot_margin_left_mm": 24.0},
-    )
-    second_asset = second_service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
-    second_run = second_service.create_run(second_asset.id)
-    second_pending = _wait_for_run_status(second_service, second_run.id, {"awaiting_capture_review"})
-
-    assert second_pending.capture is not None
-    assert second_pending.capture.review is not None
-    assert second_pending.capture.review.reuse_last_available is False
 
 
 def test_builtin_patterns_use_explicit_physical_units(tmp_path):
@@ -593,9 +538,12 @@ def test_plot_workflow_fails_cleanly_when_workspace_exceeds_current_bounds(tmp_p
     failed = _wait_for_terminal_run(service, run.id)
 
     assert failed.status == "failed"
-    assert failed.error == "Configured page height exceeds the plotter bounds height."
+    assert failed.error == "Configured drawable area exceeds the plotter bounds height."
     assert failed.stage_states["prepare"].status == "failed"
-    assert failed.stage_states["prepare"].message == "Configured page height exceeds the plotter bounds height."
+    assert (
+        failed.stage_states["prepare"].message
+        == "Configured drawable area exceeds the plotter bounds height."
+    )
 
 
 def test_plot_workflow_records_effective_calibration(tmp_path):

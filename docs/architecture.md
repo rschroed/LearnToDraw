@@ -23,7 +23,7 @@ The current backend structure centers on:
 - `routes.py` and `api.py` for the thin FastAPI surface
 - `services/hardware.py` for hardware status and control orchestration
 - `services/captures.py` for persisted raw capture storage, normalized-derivative metadata, and latest-capture lookup
-- `services/capture_service.py` and `services/capture_normalization.py` for backend-owned post-capture normalization
+- `services/capture_service.py` and `services/capture_normalization/` for backend-owned manual page registration
 - `services/plot_workflow.py` for asset storage, run creation, preparation, plotting, and capture flow
 - `services/plotter_calibration.py`, `services/plotter_device_settings.py`, and `services/plotter_workspace.py` for persisted plotter state
 
@@ -75,22 +75,30 @@ Filesystem paths and public URLs are kept separate in the backend so local stora
 The app currently supports a single backend-owned plotting workflow with a few narrow supporting flows.
 
 - `status`: the frontend polls backend hardware status and availability
-- `captures`: the backend can trigger and persist camera captures, then enrich them with backend-owned normalized derivatives without mutating the raw source artifact
-  Manual captures normalize into a canonical page-sized workspace frame, while normal plot runs normalize inline into the prepared page frame so prepared and observed artifacts share the same backend-owned comparison coordinates. Paper detection is backend-owned and deterministic, with a region-first bright-paper detector on dark-mat captures plus explicit edge/full-frame fallbacks.
-- `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, and optional capture stages; normal runs persist a run-scoped observed result whose embedded capture record can include normalized comparison-ready artifacts
+- `captures`: the backend persists the unmodified camera image first; standalone camera tests remain raw captures, while plot-run captures are registered and enriched with backend-owned color, grayscale, and corner-debug derivatives
+- `plot runs`: uploaded SVGs and built-in patterns become stored assets, then tracked runs with explicit preparation, plotting, registration, and capture-finalization stages; every non-skipped plot-run capture pauses in `awaiting_capture_review` until the operator confirms all four physical page corners
 - `diagnostics`: fixed built-in pen and pattern tests stay separate from normal plotting semantics
-- `workspace`: page size and margins are persisted and validated against the current drawable area
+- `workspace`: physical page size and margins are persisted; the page may extend beyond machine travel, but its margin-bounded drawable coordinates must remain inside the current operational safe bounds
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides
 - `calibration`: persisted plotter calibration remains backend-owned and separate from transient runtime overrides
 
-## Experimental Capture Normalization Diagnostics
+## Manual Capture Registration V2
 
-Capture normalization exposes backend-only diagnostic switches for saved-capture replay and detector comparison:
+Automatic paper detection is not part of the active capture path. Each non-skipped plot-run capture gets a versioned `manual_corners` review seeded five percent inside the raw image. The operator places named TL/TR/BR/BL points on the visible physical page corners, and the backend validates that the quad is finite, in bounds, convex, non-crossing, large enough, and has usable edge lengths before changing run state.
 
-- `LEARN_TO_DRAW_NORMALIZATION_MODE`: `default` or `region_only`
-- `LEARN_TO_DRAW_NORMALIZATION_EXPERIMENT`: `region_v2` or `contour_v3`
+Confirmation uses `POST /api/plot-runs/{run_id}/capture-review/confirm`. The existing asynchronous executor then maps the confirmed raw-capture pixels directly to the full canonical page with one homography. The canonical raster keeps the prepared page aspect ratio, uses a 2048-pixel long side, has a top-left origin, and is not trimmed, rotated, or resized again.
 
-These switches are session/runtime configuration only. They are not persisted as operator settings and should not be surfaced as broad browser controls. Use them to compare detector behavior or inspect rejected candidates while keeping the backend as the sole owner of capture analysis.
+The same confirmation operation may refine a completed, confirmed V2 run. It validates the replacement quad before changing state, then reuses the immutable raw capture to regenerate page-aligned derivatives through the existing `capturing` to `completed` finalization path. This does not plot again, take a new camera image, or make V1 captures editable.
+
+V2 metadata labels this contract with `method: manual_corners_v2` and `frame.version: 2`. `transform.matrix` maps `raw_capture_px` to `page_px`; `inverse_matrix` maps back to the raw capture. Horizontal and vertical pixels-per-millimeter are explicit. Prepared SVG coordinates and registered capture coordinates therefore describe the same page frame, which enables a no-crop intended-versus-observed overlay.
+
+The persisted workspace page size must match the physical sheet whose corners are registered. Machine travel constrains the drawable rectangle, not the sheet itself: right and bottom margins may reserve physical paper beyond the reachable safe bounds, while all prepared drawing coordinates remain inside those bounds.
+
+The AxiDraw Plot context treats the carriage position at plot start as that plot's origin. Post-capture corner registration measures the physical page frame but does not move artwork relative to that frame, so exact sheet placement affects the absolute page position shown by the page-true overlay. It is not a registration prerequisite: hardware validation may remove one best-fit rigid transform (translation and rotation only) that represents page-to-plotter pose before evaluating checkpoint residuals. Scale, shear, projective warping, lens distortion, and local error remain part of that measurement.
+
+Prepared plot SVGs contain only intentional artwork geometry. Full-page source background rectangles are stripped and no synthetic page rectangle is added; the dashboard supplies its white Prepared canvas through presentation styling so page-edge preview treatment can never become plotter motion.
+
+V1 capture and run JSON remains readable without migration. Its detector fields and transforms are legacy evidence only: the dashboard labels V1 registration as legacy, keeps it side by side, and never enables the exact overlay for it. Existing persisted artifacts and former review-memory files are left untouched on disk, but no active runtime reads or rewrites them.
 
 ## Extension Points
 

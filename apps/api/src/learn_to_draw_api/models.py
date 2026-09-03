@@ -400,10 +400,6 @@ class PlotRunCaptureReviewPayload(BaseModel):
     review: CaptureReview
 
 
-class PlotRunCaptureReviewAdjustRequest(BaseModel):
-    corners: NormalizationCorners
-
-
 class PlotRunCaptureReviewConfirmRequest(BaseModel):
     corners: NormalizationCorners
 

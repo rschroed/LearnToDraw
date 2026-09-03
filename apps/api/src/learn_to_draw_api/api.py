@@ -15,7 +15,6 @@ from learn_to_draw_api.errors import register_exception_handlers
 from learn_to_draw_api.routes import build_api_router
 from learn_to_draw_api.services.capture_normalization import CaptureNormalizationService
 from learn_to_draw_api.services.capture_service import CaptureService
-from learn_to_draw_api.services.capture_review_memory import CaptureReviewMemoryStore
 from learn_to_draw_api.services.captures import CaptureStore
 from learn_to_draw_api.services.camera_device_settings import (
     CameraDeviceSettingsService,
@@ -82,12 +81,8 @@ def create_app(
     )
     capture_service = CaptureService(
         store=capture_store,
-        normalization_service=CaptureNormalizationService(
-            mode=app_config.normalization_mode,
-            experiment=app_config.normalization_experiment,
-        ),
+        normalization_service=CaptureNormalizationService(),
     )
-    capture_review_memory_store = CaptureReviewMemoryStore(app_config.workspace_dir)
     plot_asset_store = PlotAssetStore(
         assets_dir=app_config.plot_assets_dir,
         assets_url_prefix=app_config.normalized_plot_assets_url_prefix,
@@ -110,7 +105,6 @@ def create_app(
         camera=camera_adapter,
         capture_store=capture_store,
         capture_service=capture_service,
-        review_memory_store=capture_review_memory_store,
         asset_store=plot_asset_store,
         run_store=plot_run_store,
         calibration_service=calibration_service,

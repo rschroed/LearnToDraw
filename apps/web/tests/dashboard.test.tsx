@@ -32,8 +32,8 @@ function buildRun({
         rectified_grayscale_url: `/captures/${observedCaptureId}-rectified-grayscale.png`,
         debug_overlay_url: `/captures/${observedCaptureId}-debug-overlay.png`,
         metadata: {
-          method: "paper_edges_v1" as const,
-          confidence: 0.91,
+          method: "manual_corners_v2" as const,
+          confidence: null,
           corners: {
             top_left: [10, 10] as [number, number],
             top_right: [100, 10] as [number, number],
@@ -42,6 +42,11 @@ function buildRun({
           },
           transform: {
             matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            inverse_matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            source_space: "raw_capture_px" as const,
+            destination_space: "page_px" as const,
+            pixels_per_mm_x: 2048 / 210,
+            pixels_per_mm_y: 1950 / 200,
           },
           output: {
             width: 2048,
@@ -51,7 +56,8 @@ function buildRun({
           target_frame_source: "prepared_svg" as const,
           frame: {
             kind: "page_aligned" as const,
-            version: 1,
+            version: 2,
+            origin: "top-left" as const,
             page_width_mm: 210,
             page_height_mm: 200,
           },
@@ -346,6 +352,7 @@ describe("workflow-first dashboard", () => {
       "aria-pressed",
       "true",
     );
+    expect(screen.getByText("Normalized · Page aligned · 2048 × 1950")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^debug$/i }));
     expect(
@@ -360,6 +367,43 @@ describe("workflow-first dashboard", () => {
         name: /raw result image for run run-020/i,
       }),
     ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^overlay$/i }));
+    expect(screen.getByRole("heading", { name: /intended versus observed/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /observed result image for run run-020/i })).toBeInTheDocument();
+    const opacity = screen.getByRole("slider", { name: /intended overlay opacity/i });
+    fireEvent.change(opacity, { target: { value: "72" } });
+    expect(opacity).toHaveValue("72");
+  });
+
+  it("keeps V1 normalized captures side by side and labels legacy registration", async () => {
+    const legacyRun = buildRun({
+      id: "run-legacy-001",
+      name: "Legacy result",
+      createdAt: "2026-03-15T20:16:00Z",
+      observedCaptureId: "capture-legacy-001",
+      includeNormalized: true,
+    });
+    if (!legacyRun.capture?.normalized || !legacyRun.observed_result?.capture.normalized) {
+      throw new Error("Expected normalized fixture");
+    }
+    for (const capture of [legacyRun.capture, legacyRun.observed_result.capture]) {
+      if (!capture.normalized) continue;
+      capture.normalized.metadata.method = "paper_edges_v1";
+      capture.normalized.metadata.frame = {
+        kind: "page_aligned",
+        version: 1,
+        page_width_mm: 210,
+        page_height_mm: 200,
+      };
+    }
+    const harness = createHardwareDashboardHarness({ latestRun: legacyRun });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    expect(await screen.findByText(/legacy registration/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^overlay$/i })).not.toBeInTheDocument();
   });
 
   it("shows the capture review UI for a run awaiting corner confirmation", async () => {
@@ -370,6 +414,8 @@ describe("workflow-first dashboard", () => {
       observedCaptureId: "capture-review-001",
       status: "awaiting_capture_review",
       review: {
+        registration_version: 2,
+        review_mode: "manual_corners",
         review_required: true,
         review_status: "pending",
         proposed_corners: {
@@ -380,9 +426,6 @@ describe("workflow-first dashboard", () => {
         },
         confirmed_corners: null,
         confirmation_source: null,
-        detector_method: "paper_region_v2",
-        detector_confidence: 0.32,
-        reuse_last_available: true,
       },
     });
     const harness = createHardwareDashboardHarness({
@@ -409,16 +452,93 @@ describe("workflow-first dashboard", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /review capture/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^accept$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^adjust$/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /^reuse last$/i })).toBeEnabled();
-    expect(screen.getByText(/paper_region_v2/i)).toBeInTheDocument();
-    expect(screen.getByText(/confidence 0.32/i)).toBeInTheDocument();
+    expect(screen.getByText(/manual page registration required/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^accept$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reuse last$/i })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^adjust$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /register page/i }));
 
-    expect(await screen.findByRole("dialog", { name: /adjust capture corners/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /apply adjusted quad/i })).toBeDisabled();
+    expect(await screen.findByRole("dialog", { name: /register captured page/i })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("button", { name: /^top left$/i }), {
+      key: "ArrowRight",
+    });
+    fireEvent.click(screen.getByRole("button", { name: /register capture/i }));
+
+    await waitFor(() => {
+      expect(harness.captureReviewActions).toEqual([
+        {
+          runId: "run-review-001",
+          action: "confirm",
+          corners: {
+            top_left: [101, 120],
+            top_right: [1400, 110],
+            bottom_right: [1450, 1080],
+            bottom_left: [80, 1090],
+          },
+        },
+      ]);
+    });
+  });
+
+  it("refines a completed V2 registration from its confirmed corners", async () => {
+    const confirmedCorners = {
+      top_left: [105, 125] as [number, number],
+      top_right: [1405, 115] as [number, number],
+      bottom_right: [1455, 1075] as [number, number],
+      bottom_left: [85, 1085] as [number, number],
+    };
+    const completedReview: CaptureReview = {
+      registration_version: 2,
+      review_mode: "manual_corners",
+      review_required: true,
+      review_status: "confirmed",
+      proposed_corners: {
+        top_left: [80, 60],
+        top_right: [1520, 60],
+        bottom_right: [1520, 1140],
+        bottom_left: [80, 1140],
+      },
+      confirmed_corners: confirmedCorners,
+      confirmation_source: "manual",
+    };
+    const completedRun = buildRun({
+      id: "run-refine-001",
+      name: "Refine registration",
+      createdAt: "2026-03-15T20:19:00Z",
+      observedCaptureId: "capture-refine-001",
+      includeNormalized: true,
+      status: "completed",
+      review: completedReview,
+    });
+    const harness = createHardwareDashboardHarness({
+      latestRun: completedRun,
+      plotRunsById: { [completedRun.id]: completedRun },
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^adjust registration$/i }));
+    expect(screen.getByRole("heading", { name: /^adjust registration$/i })).toBeInTheDocument();
+    expect(screen.getByText(/without plotting again/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^adjust corners$/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^top left$/i }), {
+      key: "ArrowRight",
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save registration$/i }));
+
+    await waitFor(() => {
+      expect(harness.captureReviewActions).toEqual([
+        {
+          runId: "run-refine-001",
+          action: "confirm",
+          corners: {
+            ...confirmedCorners,
+            top_left: [106, 125],
+          },
+        },
+      ]);
+    });
   });
 
   it("keeps the source hidden by default and reveals it on demand in the Workflow view", async () => {

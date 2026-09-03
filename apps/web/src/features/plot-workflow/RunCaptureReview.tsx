@@ -14,9 +14,10 @@ interface RunCaptureReviewProps {
   reviewCapture: CaptureMetadata;
   review: CaptureReview;
   reviewBusy: boolean;
-  onAccept: () => Promise<void>;
-  onAdjust: (corners: NormalizationCorners) => Promise<void>;
-  onReuseLast: () => Promise<void>;
+  reviewError: string | null;
+  revision?: boolean;
+  onCancel?: () => void;
+  onConfirm: (corners: NormalizationCorners) => Promise<void>;
 }
 
 export function RunCaptureReview({
@@ -26,9 +27,10 @@ export function RunCaptureReview({
   reviewCapture,
   review,
   reviewBusy,
-  onAccept,
-  onAdjust,
-  onReuseLast,
+  reviewError,
+  revision = false,
+  onCancel,
+  onConfirm,
 }: RunCaptureReviewProps) {
   const preparedFrameStyle =
     preparedPageAspectRatio !== null ? { aspectRatio: `${preparedPageAspectRatio}` } : undefined;
@@ -46,19 +48,24 @@ export function RunCaptureReview({
       />
       <article className="artifact-card artifact-card-result">
         <header className="artifact-card-header">
-          <h3>Review capture</h3>
+          <h3>{revision ? "Adjust registration" : "Review capture"}</h3>
         </header>
         <div className="artifact-frame artifact-frame-review">
           <CaptureReviewEditor
             capture={reviewCapture}
             review={review}
             busy={reviewBusy}
-            onAccept={onAccept}
-            onAdjust={onAdjust}
-            onReuseLast={onReuseLast}
+            error={reviewError}
+            revision={revision}
+            onCancel={onCancel}
+            onConfirm={onConfirm}
           />
         </div>
-        <p className="artifact-footer">Normalization will continue after you confirm the page corners.</p>
+        <p className="artifact-footer">
+          {revision
+            ? "Saving regenerates this capture's page-aligned artifacts without plotting again."
+            : "Processing continues after you confirm all four page corners."}
+        </p>
       </article>
     </div>
   );

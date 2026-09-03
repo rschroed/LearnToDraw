@@ -293,16 +293,7 @@ export function fetchPlotRunCaptureReview(runId: string) {
   return requestJson<PlotRunCaptureReviewPayload>(`/api/plot-runs/${runId}/capture-review`);
 }
 
-export function acceptPlotRunCaptureReview(runId: string) {
-  return requestJson<{ ok: boolean; message: string; run: PlotRun }>(
-    `/api/plot-runs/${runId}/capture-review/accept`,
-    {
-      method: "POST",
-    },
-  );
-}
-
-export function adjustPlotRunCaptureReview(
+export function confirmPlotRunCaptureReview(
   runId: string,
   corners: {
     top_left: [number, number];
@@ -312,22 +303,13 @@ export function adjustPlotRunCaptureReview(
   },
 ) {
   return requestJson<{ ok: boolean; message: string; run: PlotRun }>(
-    `/api/plot-runs/${runId}/capture-review/adjust`,
+    `/api/plot-runs/${runId}/capture-review/confirm`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ corners }),
-    },
-  );
-}
-
-export function reuseLastPlotRunCaptureReview(runId: string) {
-  return requestJson<{ ok: boolean; message: string; run: PlotRun }>(
-    `/api/plot-runs/${runId}/capture-review/reuse-last`,
-    {
-      method: "POST",
     },
   );
 }

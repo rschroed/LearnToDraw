@@ -15,7 +15,7 @@ import {
   getStepSummaryNote,
   isRecord,
 } from "./plotWorkflowFormatters";
-import { RunArtifactCompare } from "./RunArtifactCompare";
+import { isV2PageAlignedCapture, RunArtifactCompare } from "./RunArtifactCompare";
 import { RunCaptureReview } from "./RunCaptureReview";
 import type { PlotWorkflowController } from "./usePlotWorkflow";
 
@@ -388,9 +388,8 @@ function WorkflowRunSummary({
   selectedAsset,
   latestCapture,
   reviewBusy,
-  onAcceptCaptureReview,
-  onAdjustCaptureReview,
-  onReuseLastCaptureReview,
+  reviewError,
+  onConfirmCaptureReview,
   sourceOpen,
   onToggleSource,
 }: {
@@ -399,24 +398,48 @@ function WorkflowRunSummary({
   selectedAsset: PlotAsset | null;
   latestCapture: CaptureMetadata | null;
   reviewBusy: boolean;
-  onAcceptCaptureReview: (runId: string) => Promise<void>;
-  onAdjustCaptureReview: (runId: string, corners: NormalizationCorners) => Promise<void>;
-  onReuseLastCaptureReview: (runId: string) => Promise<void>;
+  reviewError: string | null;
+  onConfirmCaptureReview: (runId: string, corners: NormalizationCorners) => Promise<void>;
   sourceOpen: boolean;
   onToggleSource: () => void;
 }) {
+  const [adjustingCompletedRegistration, setAdjustingCompletedRegistration] = useState(false);
   const sourceAsset = displayRun?.asset ?? selectedAsset;
   const resultCapture = displayRun?.observed_result?.capture ?? displayRun?.capture ?? latestCapture;
   const preparedImageUrl = displayRun?.prepared_artifact
     ? resolvePreparedArtifactUrl(displayRun.prepared_artifact.public_url)
     : null;
   const preparedPageAspectRatio = getPreparedPageAspectRatio(displayRun);
-  const review =
+  const pendingReview =
     displayRun?.status === "awaiting_capture_review" &&
     pendingCaptureReview?.run_id === displayRun.id &&
     pendingCaptureReview.capture.review
       ? pendingCaptureReview.capture.review
       : null;
+  const completedReview =
+    displayRun?.status === "completed" &&
+    resultCapture?.review?.registration_version === 2 &&
+    resultCapture.review.review_mode === "manual_corners" &&
+    resultCapture.review.review_status === "confirmed" &&
+    resultCapture.review.confirmed_corners &&
+    isV2PageAlignedCapture(resultCapture)
+      ? resultCapture.review
+      : null;
+  const revisingCompletedRegistration = Boolean(
+    adjustingCompletedRegistration && completedReview,
+  );
+  const review = pendingReview ?? (revisingCompletedRegistration ? completedReview : null);
+  const reviewCapture = revisingCompletedRegistration ? resultCapture : displayRun?.capture;
+
+  useEffect(() => {
+    setAdjustingCompletedRegistration(false);
+  }, [displayRun?.id]);
+
+  useEffect(() => {
+    if (displayRun?.status !== "completed") {
+      setAdjustingCompletedRegistration(false);
+    }
+  }, [displayRun?.status]);
 
   return (
     <section className="panel comparison-panel">
@@ -439,17 +462,22 @@ function WorkflowRunSummary({
         </div>
       </header>
 
-      {displayRun?.status === "awaiting_capture_review" && displayRun.capture && review ? (
+      {displayRun && reviewCapture && review ? (
         <RunCaptureReview
           run={displayRun}
           preparedImageUrl={preparedImageUrl}
           preparedPageAspectRatio={preparedPageAspectRatio}
-          reviewCapture={displayRun.capture}
+          reviewCapture={reviewCapture}
           review={review}
           reviewBusy={reviewBusy}
-          onAccept={() => onAcceptCaptureReview(displayRun.id)}
-          onAdjust={(corners) => onAdjustCaptureReview(displayRun.id, corners)}
-          onReuseLast={() => onReuseLastCaptureReview(displayRun.id)}
+          reviewError={reviewError}
+          revision={revisingCompletedRegistration}
+          onCancel={
+            revisingCompletedRegistration
+              ? () => setAdjustingCompletedRegistration(false)
+              : undefined
+          }
+          onConfirm={(corners) => onConfirmCaptureReview(displayRun.id, corners)}
         />
       ) : (
         <RunArtifactCompare
@@ -489,6 +517,9 @@ function WorkflowRunSummary({
               : "No saved result yet."
           }
           preparedPageAspectRatio={preparedPageAspectRatio}
+          onAdjustRegistration={
+            completedReview ? () => setAdjustingCompletedRegistration(true) : undefined
+          }
         />
       )}
 
@@ -522,9 +553,7 @@ export function PlotWorkflowPanel({
     uploadSvg,
     startRun,
     inspectRun,
-    acceptCaptureReview,
-    adjustCaptureReview,
-    reuseLastCaptureReview,
+    confirmCaptureReview,
   } = controller;
   const [historyRunDetails, setHistoryRunDetails] = useState<Record<string, PlotRun>>({});
   const [workflowSourceOpen, setWorkflowSourceOpen] = useState(false);
@@ -819,9 +848,8 @@ export function PlotWorkflowPanel({
         selectedAsset={selectedAsset}
         latestCapture={latestCapture}
         reviewBusy={busyAction === "review"}
-        onAcceptCaptureReview={acceptCaptureReview}
-        onAdjustCaptureReview={adjustCaptureReview}
-        onReuseLastCaptureReview={reuseLastCaptureReview}
+        reviewError={error}
+        onConfirmCaptureReview={confirmCaptureReview}
         sourceOpen={workflowSourceOpen}
         onToggleSource={() => setWorkflowSourceOpen((current) => !current)}
       />

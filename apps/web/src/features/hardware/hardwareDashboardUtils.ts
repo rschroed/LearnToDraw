@@ -194,10 +194,10 @@ export function getWorkspaceValidation(
 
   if (
     plotterBounds &&
-    (workspace.pageWidthMm > plotterBounds.width_mm ||
-      workspace.pageHeightMm > plotterBounds.height_mm)
+    (workspace.pageWidthMm - workspace.marginRightMm > plotterBounds.width_mm ||
+      workspace.pageHeightMm - workspace.marginBottomMm > plotterBounds.height_mm)
   ) {
-    return `Paper size exceeds the plotter's safe bounds of ${plotterBounds.width_mm} x ${plotterBounds.height_mm} mm.`;
+    return `Drawable area exceeds the plotter's safe bounds of ${plotterBounds.width_mm} x ${plotterBounds.height_mm} mm. Increase the right or bottom margin.`;
   }
 
   return null;

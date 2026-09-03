@@ -114,4 +114,17 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added tight source-content bounds plus a comparison-frame version to preparation metadata and simplified the Workflow comparison view so Prepared and Normalized Result render directly from matching backend-owned page-frame artifacts
 - Added deterministic OpenCV regression coverage for confident paper detection, low-confidence best-effort output, and full-frame fallback plus a small result-variant selector in the workflow UI
 
+## Manual Capture Registration V2 Slice
+
+- Replaced unreliable automatic page detection with mandatory per-capture TL/TR/BR/BL registration for every non-skipped plot run
+- Added strict backend quad validation and a versioned `manual_corners_v2` contract whose complete forward and inverse homographies map raw capture pixels directly to top-left canonical page pixels
+- Preserved V1 JSON loading and legacy side-by-side display without rewriting existing artifacts or inactive review-memory files
+- Added a click, drag, keyboard-nudge, and reset registration editor that transforms pointer input through the SVG screen matrix before submitting raw-image coordinates; a live raw-pixel magnifier keeps fine corner placement visible without obscuring the active point
+- Added a V2-only prepared-versus-grayscale overlay with adjustable intended-art opacity, while visibly labeling V1 results as legacy registration
+- Removed the active detector modules, experiment configuration, replay helper, reuse-memory wiring, and accept-detected/reuse-last API and UI paths
+- Corrected paper validation so registration can use the true physical sheet dimensions while right and bottom margins keep prepared drawing coordinates inside operational plotter bounds
+- Removed the synthetic full-page white SVG rectangle that AxiDraw could trace as page-edge motion, retaining the white Prepared preview as frontend-only styling
+- Separated physical page pose from registration accuracy: the page-true overlay still exposes absolute placement, while hardware validation may remove translation and rotation—but not scale or deformation—before evaluating checkpoint residuals
+- Allowed completed V2 runs to refine confirmed corners and regenerate normalized derivatives from the same immutable raw capture without plotting or capturing again
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

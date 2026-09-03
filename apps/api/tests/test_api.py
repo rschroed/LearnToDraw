@@ -42,6 +42,14 @@ def wait_for_run_completion(client: TestClient, run_id: str):
         response = client.get(f"/api/plot-runs/{run_id}")
         assert response.status_code == 200
         payload = response.json()
+        if payload["status"] == "awaiting_capture_review":
+            review = payload["capture"]["review"]
+            confirm_response = client.post(
+                f"/api/plot-runs/{run_id}/capture-review/confirm",
+                json={"corners": review["proposed_corners"]},
+            )
+            assert confirm_response.status_code == 200
+            continue
         if payload["status"] in {"completed", "failed"}:
             return payload
         time.sleep(0.01)
@@ -57,17 +65,6 @@ def wait_for_run_status(client: TestClient, run_id: str, statuses: set[str]):
             return payload
         time.sleep(0.01)
     raise AssertionError(f"Plot run did not reach expected state: {statuses}")
-
-
-def wait_for_latest_capture_normalization(client: TestClient, capture_id: str):
-    for _ in range(200):
-        response = client.get("/api/captures/latest")
-        assert response.status_code == 200
-        capture = response.json()["capture"]
-        if capture and capture["id"] == capture_id and capture.get("normalized") is not None:
-            return capture
-        time.sleep(0.01)
-    raise AssertionError("Latest capture normalization did not finish in time.")
 
 
 def _jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
@@ -159,18 +156,14 @@ def test_status_reports_plot_capability_flags(tmp_path):
 def test_capture_and_latest_capture_endpoints(tmp_path):
     with create_test_client(tmp_path, camera=MockCamera(capture_delay_s=0)) as client:
         capture_response = client.post("/api/camera/capture")
-        latest_capture = wait_for_latest_capture_normalization(
-            client,
-            capture_response.json()["capture"]["id"],
-        )
+        latest_capture = client.get("/api/captures/latest").json()["capture"]
 
     assert capture_response.status_code == 200
     capture_payload = capture_response.json()
     assert capture_payload["capture"]["public_url"].startswith("/captures/")
     assert capture_payload["capture"]["normalized"] is None
     assert latest_capture["id"] == capture_payload["capture"]["id"]
-    assert latest_capture["normalized"]["metadata"]["target_frame_source"] == "workspace_drawable_area"
-    assert latest_capture["normalized"]["metadata"]["frame"]["kind"] == "page_aligned"
+    assert latest_capture["normalized"] is None
 
 
 class StubRealCamera:
@@ -299,10 +292,7 @@ def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
     with create_test_client(tmp_path, camera=StubRealCamera()) as client:
         status_before = client.get("/api/hardware/status")
         capture_response = client.post("/api/camera/capture")
-        latest_capture = wait_for_latest_capture_normalization(
-            client,
-            capture_response.json()["capture"]["id"],
-        )
+        latest_capture = client.get("/api/captures/latest").json()["capture"]
 
     assert status_before.status_code == 200
     assert status_before.json()["camera"]["details"]["readiness_state"] == "ready"
@@ -314,8 +304,7 @@ def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
     assert payload["capture"]["width"] == 640
     assert payload["capture"]["height"] == 480
     assert latest_capture["id"] == payload["capture"]["id"]
-    assert latest_capture["normalized"]["rectified_grayscale_url"].endswith(".png")
-    assert latest_capture["normalized"]["metadata"]["frame"]["kind"] == "page_aligned"
+    assert latest_capture["normalized"] is None
 
 
 def test_camera_device_endpoint_updates_selected_device(tmp_path):
@@ -624,12 +613,48 @@ def test_axidraw_workspace_endpoint_returns_invalid_state_when_defaults_exceed_e
     assert payload["is_valid"] is False
     assert (
         payload["validation_error"]
-        == "Configured page height exceeds the plotter bounds height."
+        == "Configured drawable area exceeds the plotter bounds height."
     )
     assert payload["page_size_mm"]["height_mm"] == 297.0
 
 
-def test_plotter_workspace_endpoint_rejects_page_larger_than_bounds(tmp_path):
+def test_plotter_workspace_endpoint_allows_letter_paper_when_margins_keep_drawing_in_bounds(
+    tmp_path,
+):
+    app = create_app(
+        AppConfig(
+            captures_dir=tmp_path / "captures",
+            plot_assets_dir=tmp_path / "plot_assets",
+            plot_runs_dir=tmp_path / "plot_runs",
+            calibration_dir=tmp_path / "calibration",
+            device_settings_dir=tmp_path / "device-settings",
+            workspace_dir=tmp_path / "workspace",
+            plotter_driver="axidraw",
+            axidraw_model=1,
+        ),
+        plotter=MockPlotter(),
+        camera=MockCamera(capture_delay_s=0),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/plotter/workspace",
+            json={
+                "page_width_mm": 279.4,
+                "page_height_mm": 215.9,
+                "margin_left_mm": 10,
+                "margin_top_mm": 10,
+                "margin_right_mm": 10,
+                "margin_bottom_mm": 10,
+            },
+        )
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["page_size_mm"] == {"width_mm": 279.4, "height_mm": 215.9}
+    assert workspace["drawable_area_mm"] == {"width_mm": 259.4, "height_mm": 195.9}
+
+
+def test_plotter_workspace_endpoint_rejects_drawable_area_larger_than_bounds(tmp_path):
     with create_test_client(tmp_path) as client:
         response = client.post(
             "/api/plotter/workspace",
@@ -644,7 +669,10 @@ def test_plotter_workspace_endpoint_rejects_page_larger_than_bounds(tmp_path):
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Configured page width exceeds the plotter bounds width."
+    assert (
+        response.json()["detail"]
+        == "Configured drawable area exceeds the plotter bounds width."
+    )
 
 
 def test_upload_plot_asset_endpoint(tmp_path):
@@ -699,7 +727,7 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
     assert completed["capture"]["normalized"] is not None
     assert completed["capture"]["normalized"]["metadata"]["target_frame_source"] == "prepared_svg"
     assert completed["capture"]["normalized"]["metadata"]["frame"]["kind"] == "page_aligned"
-    assert completed["capture"]["normalized"]["metadata"]["frame"]["version"] == 1
+    assert completed["capture"]["normalized"]["metadata"]["frame"]["version"] == 2
     assert completed["capture"]["normalized"]["metadata"]["frame"]["page_width_mm"] == 210.0
     assert completed["capture"]["normalized"]["metadata"]["frame"]["page_height_mm"] == 297.0
     assert completed["observed_result"]["capture"]["id"] == completed["capture"]["id"]
@@ -722,33 +750,6 @@ def test_pattern_asset_and_plot_run_endpoints(tmp_path):
     assert completed["plotter_run_details"]["preparation"]["preparation_audit"]["source_content_left_ratio"] == 0.083333
     assert latest.json()["run"]["id"] == run["id"]
     assert recent.json()["runs"][0]["id"] == run["id"]
-
-
-def test_plot_run_capture_review_accept_endpoint(tmp_path):
-    with create_test_client(
-        tmp_path,
-        plotter=MockPlotter(plot_delay_s=0),
-        camera=LowConfidenceCamera(),
-    ) as client:
-        asset_response = client.post(
-            "/api/plot-assets/patterns",
-            json={"pattern_id": "test-grid"},
-        )
-        run_response = client.post("/api/plot-runs", json={"asset_id": asset_response.json()["id"]})
-        pending = wait_for_run_status(client, run_response.json()["id"], {"awaiting_capture_review"})
-        review_response = client.get(f"/api/plot-runs/{pending['id']}/capture-review")
-        accept_response = client.post(f"/api/plot-runs/{pending['id']}/capture-review/accept")
-        completed = wait_for_run_completion(client, pending["id"])
-
-    assert review_response.status_code == 200
-    review_payload = review_response.json()
-    assert review_payload["review"]["review_status"] == "pending"
-    assert review_payload["capture"]["normalized"] is None
-    assert accept_response.status_code == 200
-    assert accept_response.json()["run"]["status"] == "capturing"
-    assert completed["status"] == "completed"
-    assert completed["capture"]["normalized"] is not None
-    assert completed["capture"]["review"]["confirmation_source"] == "auto"
 
 
 def test_plot_run_capture_review_confirm_endpoint_creates_v2_registration(tmp_path):
@@ -822,7 +823,61 @@ def test_plot_run_capture_review_confirm_rejects_invalid_quad_without_state_chan
     assert unchanged["capture"]["normalized"] is None
 
 
-def test_plot_run_capture_review_reuse_last_endpoint(tmp_path):
+def test_completed_v2_capture_review_can_be_refined_without_replotting(tmp_path):
+    plotter = MockPlotter(plot_delay_s=0)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        run_response = client.post(
+            "/api/plot-runs", json={"asset_id": asset_response.json()["id"]}
+        )
+        pending = wait_for_run_status(
+            client, run_response.json()["id"], {"awaiting_capture_review"}
+        )
+        initial_corners = pending["capture"]["review"]["proposed_corners"]
+        client.post(
+            f"/api/plot-runs/{pending['id']}/capture-review/confirm",
+            json={"corners": initial_corners},
+        )
+        completed = wait_for_run_completion(client, pending["id"])
+        revised_corners = {
+            "top_left": [initial_corners["top_left"][0] + 2, initial_corners["top_left"][1] + 1],
+            "top_right": [
+                initial_corners["top_right"][0] - 1,
+                initial_corners["top_right"][1] + 1,
+            ],
+            "bottom_right": [
+                initial_corners["bottom_right"][0] - 1,
+                initial_corners["bottom_right"][1] - 2,
+            ],
+            "bottom_left": [
+                initial_corners["bottom_left"][0] + 2,
+                initial_corners["bottom_left"][1] - 2,
+            ],
+        }
+
+        refine_response = client.post(
+            f"/api/plot-runs/{completed['id']}/capture-review/confirm",
+            json={"corners": revised_corners},
+        )
+        refined = wait_for_run_completion(client, completed["id"])
+
+    assert refine_response.status_code == 200
+    assert refine_response.json()["run"]["status"] == "capturing"
+    assert refined["status"] == "completed"
+    assert refined["capture"]["id"] == completed["capture"]["id"]
+    assert refined["capture"]["timestamp"] == completed["capture"]["timestamp"]
+    assert refined["capture"]["review"]["confirmed_corners"] == revised_corners
+    assert refined["capture"]["normalized"]["metadata"]["corners"] == revised_corners
+
+
+def test_completed_v2_capture_review_rejects_invalid_refinement_without_state_change(tmp_path):
     with create_test_client(
         tmp_path,
         plotter=MockPlotter(plot_delay_s=0),
@@ -832,29 +887,42 @@ def test_plot_run_capture_review_reuse_last_endpoint(tmp_path):
             "/api/plot-assets/patterns",
             json={"pattern_id": "test-grid"},
         )
-        asset_id = asset_response.json()["id"]
-
-        first_run = client.post("/api/plot-runs", json={"asset_id": asset_id}).json()
-        first_pending = wait_for_run_status(client, first_run["id"], {"awaiting_capture_review"})
-        first_corners = first_pending["capture"]["review"]["proposed_corners"]
-        adjust_response = client.post(
-            f"/api/plot-runs/{first_pending['id']}/capture-review/adjust",
-            json={"corners": first_corners},
+        run_response = client.post(
+            "/api/plot-runs", json={"asset_id": asset_response.json()["id"]}
         )
-        first_completed = wait_for_run_completion(client, first_pending["id"])
-
-        second_run = client.post("/api/plot-runs", json={"asset_id": asset_id}).json()
-        second_pending = wait_for_run_status(client, second_run["id"], {"awaiting_capture_review"})
-        reuse_response = client.post(
-            f"/api/plot-runs/{second_pending['id']}/capture-review/reuse-last"
+        pending = wait_for_run_status(
+            client, run_response.json()["id"], {"awaiting_capture_review"}
         )
-        second_completed = wait_for_run_completion(client, second_pending["id"])
+        initial_corners = pending["capture"]["review"]["proposed_corners"]
+        client.post(
+            f"/api/plot-runs/{pending['id']}/capture-review/confirm",
+            json={"corners": initial_corners},
+        )
+        completed = wait_for_run_completion(client, pending["id"])
+        invalid_corners = {
+            "top_left": [50.0, 50.0],
+            "top_right": [590.0, 430.0],
+            "bottom_right": [590.0, 50.0],
+            "bottom_left": [50.0, 430.0],
+        }
 
-    assert adjust_response.status_code == 200
-    assert first_completed["capture"]["review"]["confirmation_source"] == "adjusted"
-    assert second_pending["capture"]["review"]["reuse_last_available"] is True
-    assert reuse_response.status_code == 200
-    assert second_completed["capture"]["review"]["confirmation_source"] == "reused_last"
+        refine_response = client.post(
+            f"/api/plot-runs/{completed['id']}/capture-review/confirm",
+            json={"corners": invalid_corners},
+        )
+        unchanged = client.get(f"/api/plot-runs/{completed['id']}").json()
+
+    assert refine_response.status_code == 400
+    assert unchanged["status"] == "completed"
+    assert unchanged["capture"]["review"]["confirmed_corners"] == initial_corners
+    assert unchanged["capture"]["normalized"]["metadata"]["corners"] == initial_corners
+
+
+def test_legacy_capture_review_endpoints_are_removed(tmp_path):
+    with create_test_client(tmp_path) as client:
+        assert client.post("/api/plot-runs/run-1/capture-review/accept").status_code == 404
+        assert client.post("/api/plot-runs/run-1/capture-review/adjust").status_code == 404
+        assert client.post("/api/plot-runs/run-1/capture-review/reuse-last").status_code == 404
 
 
 def test_diagnostic_plot_run_skips_capture(tmp_path):

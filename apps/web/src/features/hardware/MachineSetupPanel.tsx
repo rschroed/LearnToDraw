@@ -676,6 +676,13 @@ export function MachineSetupPanel({
             {workspaceValidation}
           </div>
         ) : null}
+        {isAxiDraw ? (
+          <div className="inline-notice inline-notice-info machine-inline-notice">
+            Before plotting, place the physical page so the prepared artwork will remain on the
+            sheet. Exact alignment to the AxiDraw origin and axes is not required for capture
+            registration; it only affects the artwork&apos;s absolute position on the page.
+          </div>
+        ) : null}
 
         <div className="machine-paper-preview-wrap">
           <PlotterWorkspacePreview

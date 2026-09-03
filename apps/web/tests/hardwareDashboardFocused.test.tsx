@@ -302,6 +302,11 @@ describe("machine and camera focused behaviors", () => {
       ".machine-paper-panel",
     );
     expect(paperPanel).not.toBeNull();
+    expect(
+      within(paperPanel as HTMLElement).getByText(
+        /exact alignment to the axidraw origin and axes is not required/i,
+      ),
+    ).toBeInTheDocument();
     const safeBounds = within(paperPanel as HTMLElement)
       .getByText(/^safe bounds$/i)
       .closest(".machine-safe-bounds");
