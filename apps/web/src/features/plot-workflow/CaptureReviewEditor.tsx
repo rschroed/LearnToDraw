@@ -72,11 +72,11 @@ export function CaptureReviewEditor({
   const proposalSignature = JSON.stringify(review.proposed_corners);
 
   useEffect(() => {
-    setDraftCorners(cloneCorners(review.proposed_corners));
+    setDraftCorners(JSON.parse(proposalSignature) as NormalizationCorners);
     setSelectedCorner("top_left");
     setDraggingCorner(null);
     setIsAdjusting(false);
-  }, [capture.id, proposalSignature, review.proposed_corners]);
+  }, [capture.id, proposalSignature]);
 
   useEffect(() => {
     if (!isAdjusting || typeof document === "undefined") {

@@ -150,4 +150,41 @@ describe("manual capture registration editor", () => {
     expect(screen.getByRole("button", { name: /^reset$/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^top right$/i })).toBeDisabled();
   });
+
+  it("keeps the modal and draft open when polling returns equivalent review data", () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(
+      <CaptureReviewEditor
+        capture={capture}
+        review={review}
+        busy={false}
+        error={null}
+        onConfirm={onConfirm}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /register page/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^top left$/i }), {
+      key: "ArrowRight",
+    });
+
+    rerender(
+      <CaptureReviewEditor
+        capture={{ ...capture }}
+        review={{
+          ...review,
+          proposed_corners: structuredClone(proposedCorners),
+        }}
+        busy={false}
+        error={null}
+        onConfirm={onConfirm}
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: /register captured page/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /register capture/i }));
+    expect(onConfirm).toHaveBeenCalledWith({
+      ...proposedCorners,
+      top_left: [81, 60],
+    });
+  });
 });
