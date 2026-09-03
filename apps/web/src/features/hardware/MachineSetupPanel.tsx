@@ -676,6 +676,13 @@ export function MachineSetupPanel({
             {workspaceValidation}
           </div>
         ) : null}
+        {isAxiDraw ? (
+          <div className="inline-notice inline-notice-info machine-inline-notice">
+            Before plotting, place the physical page&apos;s top-left corner at the AxiDraw plot
+            origin and square its top edge to the plotter&apos;s X axis. Capture registration
+            measures this placement; it does not move the plotted artwork.
+          </div>
+        ) : null}
 
         <div className="machine-paper-preview-wrap">
           <PlotterWorkspacePreview
