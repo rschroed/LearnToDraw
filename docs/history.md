@@ -142,4 +142,13 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Persisted automatic confirmation provenance and kept completed-run corner refinement available as the recovery path
 - Preserved mock, diagnostic, capture-skip, legacy artifact, AxiDraw, and CameraBridge behavior without adding another hardware workflow
 
+## Bounded Iterative Drawing Session Slice
+
+- Added a persisted additive `DrawingSession` that groups existing normal PlotRuns around a text intent and a 2-to-10-pass limit
+- Added a read-only drawing-advisor boundary with disabled, deterministic mock, and optional OpenAI Responses API implementations
+- Sent registered grayscale observations to the advisor and treated interpretation plus proposed SVG as untrusted output
+- Required generated layers to match the drawable area in physical millimeters, rejected active or out-of-bounds SVG content, and reused normal preparation and workspace validation
+- Added dashboard controls for session creation, pass history, interpretation, proposal preview, and explicit approval before each additional physical plot
+- Kept provider failures retryable and left unattended plotting, erasure, separate-attempt layouts, and cross-session learning out of scope
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

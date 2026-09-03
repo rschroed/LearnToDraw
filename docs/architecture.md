@@ -14,7 +14,7 @@ The backend is the system of record for hardware access and workflow state.
 
 - exposes the HTTP API used by the local dashboard
 - reads hardware status and executes plotter/camera actions
-- persists captures, plot assets, plot runs, calibration, device settings, and workspace state
+- persists captures, plot assets, plot runs, drawing sessions, calibration, device settings, and workspace state
 - prepares normal plot runs into validated page coordinates before adapter execution
 - keeps diagnostic hardware actions narrow, fixed, and backend-owned
 
@@ -25,6 +25,8 @@ The current backend structure centers on:
 - `services/captures.py` for persisted raw capture storage, normalized-derivative metadata, and latest-capture lookup
 - `services/capture_service.py` and `services/capture_normalization/` for backend-owned manual page registration
 - `services/plot_workflow.py` for asset storage, run creation, preparation, plotting, and capture flow
+- `services/drawing_sessions.py` for bounded same-sheet iteration state and reuse of existing plot runs
+- `services/drawing_advisor.py` for the read-only visual-advisor boundary; provider output cannot invoke hardware
 - `services/plotter_calibration.py`, `services/plotter_device_settings.py`, and `services/plotter_workspace.py` for persisted plotter state
 
 ## Frontend Responsibilities
@@ -64,6 +66,7 @@ Local persisted state is organized by purpose:
 - `artifacts/captures`: saved raw capture metadata plus normalized derivative artifacts such as rectified grayscale and debug overlays
 - `artifacts/plot_assets`: uploaded or built-in plot sources
 - `artifacts/plot_runs`: run records and prepared output where applicable
+- `artifacts/drawing_sessions`: intent, ordered PlotRun references, interpretations, proposal provenance, and approval state
 - `artifacts/calibration`: persisted plotter calibration values
 - `artifacts/device_settings`: persisted plotter device settings such as safe-bounds overrides plus the selected CameraBridge device preference
 - `artifacts/workspace`: persisted page size and margin setup
@@ -81,6 +84,7 @@ The app currently supports a single backend-owned plotting workflow with a few n
 - `workspace`: physical page size and margins are persisted; the page may extend beyond machine travel, but its margin-bounded drawable coordinates must remain inside the current operational safe bounds
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides
 - `calibration`: persisted plotter calibration remains backend-owned and separate from transient runtime overrides
+- `drawing sessions`: a bounded additive sequence groups existing normal PlotRuns; an operator starts the first pass, may request read-only advice after a registered observation, previews the proposed SVG layer, and explicitly approves each later plot
 
 ## Manual Capture Registration V2
 
@@ -101,6 +105,16 @@ The AxiDraw Plot context treats the carriage position at plot start as that plot
 Prepared plot SVGs contain only intentional artwork geometry. Full-page source background rectangles are stripped and no synthetic page rectangle is added; the dashboard supplies its white Prepared canvas through presentation styling so page-edge preview treatment can never become plotter motion.
 
 V1 capture and run JSON remains readable without migration. Its detector fields and transforms are legacy evidence only: the dashboard labels V1 registration as legacy, keeps it side by side, and never enables the exact overlay for it. Existing persisted artifacts and former review-memory files are left untouched on disk, but no active runtime reads or rewrites them.
+
+## Bounded Iterative Drawing Sessions
+
+A `DrawingSession` records a text intent, additive mode, an iteration limit from 2 through 10, and an ordered list of iterations. Each iteration references a normal `PlotRun` and its exact asset; sessions do not own a second plotter executor. Existing active-run conflicts, preparation, workspace validation, capture, registration, and normalization therefore apply unchanged.
+
+After the current PlotRun completes with a registered observation, the operator may request advice. The backend sends the V2 rectified grayscale page, intent, pass number, drawable dimensions, and a bounded history of prior interpretations through the configured `DrawingAdvisor`. The default advisor is disabled. A deterministic mock supports local tests, and the optional OpenAI adapter uses image input plus strict structured output through the Responses API.
+
+Advisor output is untrusted. It is limited to interpretation text and an SVG proposal, never tools or commands. The backend rejects unsupported elements and active content, forces plot-safe stroke styling, requires physical dimensions and a viewBox exactly matching the current drawable area, and rejects marks outside that area. Only then is the proposal stored as a generated plot asset. It remains a preview until the operator explicitly approves it; approval starts the next normal PlotRun through the existing workflow.
+
+Additive mode reflects the physical constraint that ink cannot be erased. A proposed layer contains new marks only and is prepared at 1:1 drawable-area scale with the persisted page margins. Provider failure or invalid output leaves the completed observation intact and retryable. This first proof does not implement unattended plotting, separate-attempt grids, cross-session learning, or automatic paper handling.
 
 ## Extension Points
 

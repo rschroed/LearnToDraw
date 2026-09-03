@@ -28,3 +28,5 @@ artifacts/plot_runs/*
 !artifacts/plot_runs/.gitkeep
 artifacts/workspace/*
 !artifacts/workspace/.gitkeep
+artifacts/drawing_sessions/*
+!artifacts/drawing_sessions/.gitkeep

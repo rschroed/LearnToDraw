@@ -21,7 +21,8 @@ from learn_to_draw_api.models import (
 )
 
 
-def create_test_client(tmp_path, *, plotter=None, camera=None):
+def create_test_client(tmp_path, *, plotter=None, camera=None, config_overrides=None):
+    config_overrides = config_overrides or {}
     app = create_app(
         AppConfig(
             captures_dir=tmp_path / "captures",
@@ -30,6 +31,8 @@ def create_test_client(tmp_path, *, plotter=None, camera=None):
             calibration_dir=tmp_path / "calibration",
             device_settings_dir=tmp_path / "device-settings",
             workspace_dir=tmp_path / "workspace",
+            drawing_sessions_dir=tmp_path / "drawing-sessions",
+            **config_overrides,
         ),
         plotter=plotter,
         camera=camera,
@@ -929,6 +932,129 @@ def test_legacy_capture_review_endpoints_are_removed(tmp_path):
         assert client.post("/api/plot-runs/run-1/capture-review/accept").status_code == 404
         assert client.post("/api/plot-runs/run-1/capture-review/adjust").status_code == 404
         assert client.post("/api/plot-runs/run-1/capture-review/reuse-last").status_code == 404
+
+
+def test_drawing_session_runs_observes_proposes_and_approves_next_layer(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        asset = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        ).json()
+        created_response = client.post(
+            "/api/drawing-sessions",
+            json={
+                "intent": "Grow a lively field of flowers",
+                "initial_asset_id": asset["id"],
+                "iteration_limit": 2,
+                "mode": "additive",
+            },
+        )
+        assert created_response.status_code == 200
+        created = created_response.json()
+        first_run_id = created["iterations"][0]["run_id"]
+        wait_for_run_completion(client, first_run_id)
+
+        observed = client.get(f"/api/drawing-sessions/{created['id']}").json()
+        advice_response = client.post(
+            f"/api/drawing-sessions/{created['id']}/advice"
+        )
+        latest = client.get("/api/drawing-sessions/latest").json()["session"]
+
+        assert observed["status"] == "observed"
+        assert advice_response.status_code == 200
+        proposed = advice_response.json()
+        assert proposed["status"] == "proposal_ready"
+        proposal = proposed["iterations"][0]["next_proposal"]
+        assert proposal["advisor_driver"] == "mock"
+        assert proposal["asset"]["kind"] == "generated_svg"
+        assert "field of flowers" in proposal["interpretation"]
+        proposal_response = client.get(
+            f"/api/plot-assets/{proposal['asset']['id']}"
+        )
+        assert proposal_response.status_code == 200
+        assert latest["id"] == created["id"]
+
+        approve_response = client.post(
+            f"/api/drawing-sessions/{created['id']}/iterations"
+        )
+        assert approve_response.status_code == 200
+        approved = approve_response.json()
+        assert approved["status"] == "running"
+        assert len(approved["iterations"]) == 2
+        second_run_id = approved["iterations"][1]["run_id"]
+        assert proposal["asset"]["id"] == approved["iterations"][1]["asset"]["id"]
+        wait_for_run_completion(client, second_run_id)
+        completed = client.get(f"/api/drawing-sessions/{created['id']}").json()
+
+    assert completed["status"] == "completed"
+    assert len(completed["iterations"]) == 2
+    assert completed["iterations"][0]["next_proposal"]["approved_run_id"] == second_run_id
+
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as restarted_client:
+        reloaded = restarted_client.get(
+            f"/api/drawing-sessions/{created['id']}"
+        ).json()
+
+    assert reloaded["status"] == "completed"
+    assert [item["run_id"] for item in reloaded["iterations"]] == [
+        first_run_id,
+        second_run_id,
+    ]
+
+
+def test_drawing_session_disabled_advisor_leaves_observation_retryable(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        ).json()
+        created = client.post(
+            "/api/drawing-sessions",
+            json={
+                "intent": "A pelican riding a bicycle",
+                "initial_asset_id": asset["id"],
+                "iteration_limit": 3,
+            },
+        ).json()
+        wait_for_run_completion(client, created["iterations"][0]["run_id"])
+
+        advice_response = client.post(
+            f"/api/drawing-sessions/{created['id']}/advice"
+        )
+        unchanged = client.get(f"/api/drawing-sessions/{created['id']}").json()
+
+    assert advice_response.status_code == 503
+    assert "Drawing advisor is disabled" in advice_response.json()["detail"]
+    assert unchanged["status"] == "observed"
+    assert unchanged["iterations"][0]["next_proposal"] is None
+
+
+def test_drawing_session_rejects_iteration_limit_outside_safe_range(tmp_path):
+    with create_test_client(tmp_path) as client:
+        response = client.post(
+            "/api/drawing-sessions",
+            json={
+                "intent": "A field of flowers",
+                "initial_asset_id": "asset-id",
+                "iteration_limit": 11,
+            },
+        )
+
+    assert response.status_code == 422
 
 
 def test_diagnostic_plot_run_skips_capture(tmp_path):

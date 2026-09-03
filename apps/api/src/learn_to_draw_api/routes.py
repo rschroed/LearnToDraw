@@ -6,10 +6,13 @@ from learn_to_draw_api.models import (
     CameraCaptureResponse,
     CameraCommandResponse,
     CameraDeviceSelectionRequest,
+    DrawingSession,
+    DrawingSessionCreateRequest,
     HealthResponse,
     HardwareStatus,
     LatestPlotRunResponse,
     LatestCaptureResponse,
+    LatestDrawingSessionResponse,
     PlotterCalibration,
     PlotterCalibrationRequest,
     PlotterCalibrationResponse,
@@ -32,12 +35,14 @@ from learn_to_draw_api.models import (
     PlotterWorkspaceResponse,
 )
 from learn_to_draw_api.services.hardware import HardwareService
+from learn_to_draw_api.services.drawing_sessions import DrawingSessionService
 from learn_to_draw_api.services.plot_workflow import PlotWorkflowService
 
 
 def build_api_router(
     hardware_service: HardwareService,
     plot_workflow_service: PlotWorkflowService,
+    drawing_session_service: DrawingSessionService,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -160,5 +165,34 @@ def build_api_router(
         request: PlotRunCaptureReviewConfirmRequest,
     ) -> PlotRunCaptureReviewResponse:
         return plot_workflow_service.confirm_capture_review(run_id, request)
+
+    @router.post("/api/drawing-sessions", response_model=DrawingSession)
+    def post_drawing_session(request: DrawingSessionCreateRequest) -> DrawingSession:
+        return drawing_session_service.create(request)
+
+    @router.get(
+        "/api/drawing-sessions/latest",
+        response_model=LatestDrawingSessionResponse,
+    )
+    def get_latest_drawing_session() -> LatestDrawingSessionResponse:
+        return LatestDrawingSessionResponse(session=drawing_session_service.latest())
+
+    @router.get("/api/drawing-sessions/{session_id}", response_model=DrawingSession)
+    def get_drawing_session(session_id: str) -> DrawingSession:
+        return drawing_session_service.get(session_id)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/advice",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_advice(session_id: str) -> DrawingSession:
+        return drawing_session_service.request_advice(session_id)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/iterations",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_iteration(session_id: str) -> DrawingSession:
+        return drawing_session_service.approve_next_iteration(session_id)
 
     return router

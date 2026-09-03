@@ -34,6 +34,10 @@ class InvalidArtifactError(Exception):
     """Raised when provided artifact content is invalid."""
 
 
+class ServiceUnavailableError(Exception):
+    """Raised when an optional application service is not configured."""
+
+
 class DeviceStatus(BaseModel):
     available: bool
     connected: bool
@@ -317,7 +321,7 @@ PlotterWorkspaceSource = Literal["config_default", "persisted"]
 
 class PlotAsset(BaseModel):
     id: str
-    kind: Literal["uploaded_svg", "built_in_pattern"]
+    kind: Literal["uploaded_svg", "built_in_pattern", "generated_svg"]
     pattern_id: Optional[str] = None
     name: str
     timestamp: datetime
@@ -350,6 +354,65 @@ class PlotRun(BaseModel):
     camera_run_details: dict[str, Any] = Field(default_factory=dict)
 
 
+DrawingSessionStatus = Literal[
+    "running",
+    "awaiting_capture_review",
+    "observed",
+    "proposal_ready",
+    "completed",
+    "failed",
+]
+
+
+class DrawingAdvisorStatus(BaseModel):
+    driver: Literal["disabled", "mock", "openai"]
+    available: bool
+    model: Optional[str] = None
+    message: Optional[str] = None
+
+
+class DrawingIterationProposal(BaseModel):
+    interpretation: str
+    asset: PlotAsset
+    advisor_driver: str
+    advisor_model: Optional[str] = None
+    created_at: datetime
+    approved_at: Optional[datetime] = None
+    approved_run_id: Optional[str] = None
+
+
+class DrawingIteration(BaseModel):
+    number: int = Field(ge=1)
+    asset: PlotAsset
+    run_id: str
+    created_at: datetime
+    next_proposal: Optional[DrawingIterationProposal] = None
+
+
+class DrawingSession(BaseModel):
+    id: str
+    intent: str
+    mode: Literal["additive"] = "additive"
+    iteration_limit: int = Field(ge=2, le=10)
+    status: DrawingSessionStatus
+    created_at: datetime
+    updated_at: datetime
+    iterations: list[DrawingIteration]
+    advisor: DrawingAdvisorStatus
+    error: Optional[str] = None
+
+
+class DrawingSessionCreateRequest(BaseModel):
+    intent: str = Field(min_length=3, max_length=1000)
+    initial_asset_id: str = Field(min_length=1)
+    iteration_limit: int = Field(default=3, ge=2, le=10)
+    mode: Literal["additive"] = "additive"
+
+
+class LatestDrawingSessionResponse(BaseModel):
+    session: Optional[DrawingSession]
+
+
 class PlotRunSummary(BaseModel):
     id: str
     status: PlotRunStatus
@@ -358,7 +421,7 @@ class PlotRunSummary(BaseModel):
     updated_at: datetime
     asset_id: str
     asset_name: str
-    asset_kind: Literal["uploaded_svg", "built_in_pattern"]
+    asset_kind: Literal["uploaded_svg", "built_in_pattern", "generated_svg"]
     error: Optional[str] = None
 
     @classmethod

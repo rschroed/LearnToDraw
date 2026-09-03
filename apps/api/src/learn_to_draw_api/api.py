@@ -24,6 +24,11 @@ from learn_to_draw_api.services.camera_device_settings import (
     CameraDeviceSettingsStore,
 )
 from learn_to_draw_api.services.hardware import HardwareService
+from learn_to_draw_api.services.drawing_advisor import build_drawing_advisor
+from learn_to_draw_api.services.drawing_sessions import (
+    DrawingSessionService,
+    DrawingSessionStore,
+)
 from learn_to_draw_api.services.plot_workflow import (
     PlotAssetStore,
     PlotRunStore,
@@ -115,6 +120,12 @@ def create_app(
         device_settings_service=device_settings_service,
         workspace_service=workspace_service,
     )
+    drawing_session_service = DrawingSessionService(
+        store=DrawingSessionStore(app_config.drawing_sessions_dir),
+        plot_workflow_service=plot_workflow_service,
+        workspace_service=workspace_service,
+        advisor=build_drawing_advisor(app_config),
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -126,6 +137,7 @@ def create_app(
     app.state.config = app_config
     app.state.hardware_service = hardware_service
     app.state.plot_workflow_service = plot_workflow_service
+    app.state.drawing_session_service = drawing_session_service
     app.state.plotter_calibration_service = calibration_service
     app.state.plotter_device_settings_service = device_settings_service
     app.state.camera_device_settings_service = camera_settings_service
@@ -137,7 +149,13 @@ def create_app(
         allow_headers=["*"],
     )
     register_exception_handlers(app)
-    app.include_router(build_api_router(hardware_service, plot_workflow_service))
+    app.include_router(
+        build_api_router(
+            hardware_service,
+            plot_workflow_service,
+            drawing_session_service,
+        )
+    )
     app.mount(
         app_config.normalized_capture_url_prefix,
         StaticFiles(directory=app_config.captures_dir),
