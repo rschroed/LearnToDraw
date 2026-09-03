@@ -92,6 +92,8 @@ V2 metadata labels this contract with `method: manual_corners_v2` and `frame.ver
 
 The persisted workspace page size must match the physical sheet whose corners are registered. Machine travel constrains the drawable rectangle, not the sheet itself: right and bottom margins may reserve physical paper beyond the reachable safe bounds, while all prepared drawing coordinates remain inside those bounds.
 
+Prepared plot SVGs contain only intentional artwork geometry. Full-page source background rectangles are stripped and no synthetic page rectangle is added; the dashboard supplies its white Prepared canvas through presentation styling so page-edge preview treatment can never become plotter motion.
+
 V1 capture and run JSON remains readable without migration. Its detector fields and transforms are legacy evidence only: the dashboard labels V1 registration as legacy, keeps it side by side, and never enables the exact overlay for it. Existing persisted artifacts and former review-memory files are left untouched on disk, but no active runtime reads or rewrites them.
 
 ## Extension Points

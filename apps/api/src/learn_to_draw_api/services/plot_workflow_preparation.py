@@ -24,7 +24,6 @@ PATTERNS_DIR = Path(__file__).resolve().parent.parent / "assets" / "patterns"
 PREPARATION_EPSILON_MM = 0.001
 NORMAL_PREPARATION_STRATEGY = "fit_top_left"
 DIAGNOSTIC_PREPARATION_STRATEGY = "diagnostic_passthrough"
-PREPARED_PAGE_BACKGROUND_FILL = "#ffffff"
 
 ET.register_namespace("", "http://www.w3.org/2000/svg")
 
@@ -901,16 +900,6 @@ def build_prepared_svg(
     root_copy.attrib["viewBox"] = (
         f"0 0 {format_numeric(plot_area.page_width_mm)} {format_numeric(plot_area.page_height_mm)}"
     )
-    prepared_background = ET.Element(
-        qualify_svg_tag(root_copy.tag, "rect"),
-        {
-            "x": "0",
-            "y": "0",
-            "width": "100%",
-            "height": "100%",
-            "fill": PREPARED_PAGE_BACKGROUND_FILL,
-        },
-    )
     wrapper = ET.Element(
         qualify_svg_tag(root_copy.tag, "g"),
         {
@@ -928,7 +917,6 @@ def build_prepared_svg(
         root_copy.remove(child)
         if not is_full_page_background_rect(child, source_box=source_box):
             wrapper.append(child)
-    root_copy.append(prepared_background)
     root_copy.append(wrapper)
     return ET.tostring(root_copy, encoding="unicode")
 

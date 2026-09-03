@@ -130,7 +130,7 @@ def test_prepare_svg_for_plotting_rejects_non_finite_viewbox_math() -> None:
     assert str(exc_info.value) == "Prepared SVG math produced non-finite bounds or scale."
 
 
-def test_prepare_svg_for_plotting_hoists_full_page_background_rect() -> None:
+def test_prepare_svg_for_plotting_strips_full_page_background_rect() -> None:
     svg_text = (
         "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' "
         "viewBox='0 0 200 100'>"
@@ -151,17 +151,11 @@ def test_prepare_svg_for_plotting_hoists_full_page_background_rect() -> None:
     prepared_root = ET.fromstring(prepared_svg_text)
     children = list(prepared_root)
 
-    assert len(children) == 2
-    assert children[0].tag.endswith("rect")
-    assert children[0].attrib["x"] == "0"
-    assert children[0].attrib["y"] == "0"
-    assert children[0].attrib["width"] == "100%"
-    assert children[0].attrib["height"] == "100%"
-    assert children[0].attrib["fill"] == "#ffffff"
-    assert children[1].tag.endswith("g")
-    assert children[1].attrib["transform"].startswith("translate(")
-    assert len(list(children[1])) == 1
-    assert list(children[1])[0].tag.endswith("path")
+    assert len(children) == 1
+    assert children[0].tag.endswith("g")
+    assert children[0].attrib["transform"].startswith("translate(")
+    assert len(list(children[0])) == 1
+    assert list(children[0])[0].tag.endswith("path")
 
 
 def test_prepare_svg_for_plotting_records_tight_content_ratios_for_test_grid() -> None:

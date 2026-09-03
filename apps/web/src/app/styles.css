@@ -1986,6 +1986,10 @@ button {
   opacity: 0.92;
 }
 
+.artifact-card-prepared .artifact-frame {
+  background: #ffffff;
+}
+
 .artifact-card-result .artifact-frame {
   border-color: rgba(208, 161, 95, 0.28);
   box-shadow: inset 0 0 0 1px rgba(208, 161, 95, 0.08);
