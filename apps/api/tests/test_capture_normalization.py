@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import cv2
 import numpy as np
 import pytest
@@ -127,6 +130,76 @@ def test_manual_registration_preserves_selected_page_boundary():
     assert rectified[2, -3, 1] > 180
     assert rectified[-3, -3, 0] > 180
     assert rectified[-3, 2].mean() > 180
+
+
+def test_real_letter_capture_meets_rigid_aligned_checkpoint_acceptance():
+    fixture_directory = Path(__file__).parent / "fixtures" / "manual_registration_v2"
+    ground_truth = json.loads(
+        (fixture_directory / "us_letter_landscape_c930e.json").read_text()
+    )
+    source = ground_truth["source"]
+    capture = (fixture_directory / source["capture_file"]).read_bytes()
+    decoded = cv2.imdecode(np.frombuffer(capture, dtype=np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    assert decoded.shape[:2] == (
+        source["capture_height_px"],
+        source["capture_width_px"],
+    )
+
+    corners = NormalizationCorners.model_validate(
+        ground_truth["registration_corners_raw_px"]
+    )
+    page = ground_truth["page"]
+    result = CaptureNormalizationService().register_with_corners(
+        content=capture,
+        target=target_from_page_size(
+            page_width_mm=page["width_mm"],
+            page_height_mm=page["height_mm"],
+            source="prepared_svg",
+        ),
+        corners=corners,
+    )
+
+    matrix = np.array(result.metadata.transform.matrix, dtype=np.float64)
+    observed_raw = np.array(
+        [[checkpoint["observed_raw_px"] for checkpoint in ground_truth["checkpoints"]]],
+        dtype=np.float64,
+    )
+    observed_page_px = cv2.perspectiveTransform(observed_raw, matrix)[0]
+    pixels_per_mm = np.array(
+        [
+            result.metadata.transform.pixels_per_mm_x,
+            result.metadata.transform.pixels_per_mm_y,
+        ]
+    )
+    observed_page_mm = observed_page_px / pixels_per_mm
+    commanded_page_mm = np.array(
+        [checkpoint["commanded_page_mm"] for checkpoint in ground_truth["checkpoints"]],
+        dtype=np.float64,
+    )
+
+    commanded_centered = commanded_page_mm - commanded_page_mm.mean(axis=0)
+    observed_centered = observed_page_mm - observed_page_mm.mean(axis=0)
+    u, _, vt = np.linalg.svd(commanded_centered.T @ observed_centered)
+    rotation = u @ vt
+    assert np.linalg.det(rotation) == pytest.approx(1.0)
+    translation = (
+        observed_page_mm.mean(axis=0)
+        - commanded_page_mm.mean(axis=0) @ rotation
+    )
+    rigid_aligned = commanded_page_mm @ rotation + translation
+    checkpoint_errors_mm = np.linalg.norm(
+        observed_page_mm - rigid_aligned,
+        axis=1,
+    )
+
+    assert checkpoint_errors_mm == pytest.approx(
+        [1.148469, 1.080827, 0.545936, 1.97749, 1.287958],
+        abs=1e-3,
+    )
+    assert checkpoint_errors_mm.max() <= ground_truth["measurement"][
+        "maximum_checkpoint_error_mm"
+    ]
 
 
 def test_manual_registration_seeds_five_percent_inset_quad():

@@ -1,0 +1,54 @@
+{
+  "fixture_version": 1,
+  "source": {
+    "capture_file": "us_letter_landscape_c930e.jpg",
+    "capture_width_px": 1920,
+    "capture_height_px": 1080,
+    "camera": "Logitech Webcam C930e",
+    "capture_driver": "camerabridge",
+    "plotter": "AxiDraw V2/V3/SE A4",
+    "plotter_driver": "axidraw-pyapi"
+  },
+  "page": {
+    "width_mm": 279.4,
+    "height_mm": 215.9
+  },
+  "registration_corners_raw_px": {
+    "top_left": [381.5, 73.0],
+    "top_right": [1446.0, 42.6],
+    "bottom_right": [1790.8, 835.1],
+    "bottom_left": [68.5, 894.6]
+  },
+  "checkpoints": [
+    {
+      "name": "top_left",
+      "commanded_page_mm": [22.0, 22.0],
+      "observed_raw_px": [449.601245171, 123.392185006]
+    },
+    {
+      "name": "top_right",
+      "commanded_page_mm": [198.0, 22.0],
+      "observed_raw_px": [1155.695980095, 101.593657204]
+    },
+    {
+      "name": "center",
+      "commanded_page_mm": [110.0, 105.0],
+      "observed_raw_px": [792.841755388, 360.374207752]
+    },
+    {
+      "name": "bottom_left",
+      "commanded_page_mm": [22.0, 188.0],
+      "observed_raw_px": [254.90232286, 737.020976752]
+    },
+    {
+      "name": "bottom_right",
+      "commanded_page_mm": [198.0, 188.0],
+      "observed_raw_px": [1280.705044231, 692.825257572]
+    }
+  ],
+  "measurement": {
+    "checkpoint_center_method": "illumination-normalized multi-scale template match",
+    "alignment": "best-fit rigid translation and rotation; unit scale",
+    "maximum_checkpoint_error_mm": 2.0
+  }
+}
