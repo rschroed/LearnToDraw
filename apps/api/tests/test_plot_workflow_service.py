@@ -368,7 +368,7 @@ def test_plot_workflow_service_persists_real_camera_capture(tmp_path):
     assert completed.camera_run_details["resolution"] == "640x480"
 
 
-def test_plot_workflow_service_always_pauses_for_manual_capture_registration(tmp_path):
+def test_plot_workflow_service_pauses_when_automatic_registration_is_unavailable(tmp_path):
     service = _build_service(tmp_path, camera=LowConfidenceCamera())
     asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
 
@@ -391,31 +391,35 @@ def test_plot_workflow_service_always_pauses_for_manual_capture_registration(tmp
     assert pending.stage_states["capture_review"].status == "in_progress"
 
 
-def test_plot_workflow_service_seeds_manual_review_with_automatic_proposal(tmp_path):
+def test_plot_workflow_service_automatically_finalizes_stable_proposal(tmp_path):
     service = _build_service(tmp_path, camera=AutomaticProposalCamera())
     asset = service.create_pattern_asset(PatternAssetCreateRequest(pattern_id="test-grid"))
 
     run = service.create_run(asset.id)
-    pending = _wait_for_run_status(service, run.id, {"awaiting_capture_review"})
+    completed = _wait_for_run_status(service, run.id, {"completed", "failed"})
 
-    assert pending.capture is not None and pending.capture.review is not None
-    review = pending.capture.review
-    assert review.review_required is True
-    assert review.review_status == "pending"
+    assert completed.status == "completed"
+    assert completed.capture is not None and completed.capture.review is not None
+    review = completed.capture.review
+    assert review.review_required is False
+    assert review.review_status == "confirmed"
+    assert review.confirmed_corners == review.proposed_corners
+    assert review.confirmation_source == "auto"
     assert review.proposal is not None
     assert review.proposal.status == "suggested"
     assert review.proposal.method == "light_page_edges_v1"
     assert review.proposal.stability_max_px == pytest.approx(0.121, abs=0.02)
     assert review.proposal.fallback_reason is None
     assert review.proposed_corners.top_left == pytest.approx((89.535, 49.418), abs=0.1)
-
-    service.confirm_capture_review(
-        run.id,
-        PlotRunCaptureReviewConfirmRequest(corners=review.proposed_corners),
+    assert completed.capture.normalized is not None
+    assert completed.capture.normalized.metadata.corners == review.proposed_corners
+    assert completed.camera_run_details["capture_review_required"] is False
+    assert completed.camera_run_details["capture_registration_source"] == "automatic"
+    assert completed.stage_states["capture_review"].status == "completed"
+    assert (
+        completed.stage_states["capture_review"].message
+        == "Automatic page registration applied."
     )
-    completed = _wait_for_terminal_run(service, run.id)
-    assert completed.capture is not None and completed.capture.review is not None
-    assert completed.capture.review.confirmation_source == "manual"
 
 
 def test_plot_workflow_service_confirms_proposed_capture_review_and_completes(tmp_path):

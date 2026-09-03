@@ -135,4 +135,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Labeled suggestions and fallback reasons in the existing corner editor, including guidance to verify the intersection of straight page edges through curled tips
 - Covered synthetic success/failure cases, workflow fallback and confirmation behavior, legacy parsing, and the selected real C930e/AxiDraw fixture
 
+## Confidence-Gated Automatic Registration Slice
+
+- Automatically finalized stable `light_page_edges_v1` proposals through the existing V2 homography and normalization path
+- Kept missing, clipped, unstable, or invalid proposals in the existing manual corner-review flow
+- Persisted automatic confirmation provenance and kept completed-run corner refinement available as the recovery path
+- Preserved mock, diagnostic, capture-skip, legacy artifact, AxiDraw, and CameraBridge behavior without adding another hardware workflow
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

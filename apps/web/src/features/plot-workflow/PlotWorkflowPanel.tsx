@@ -211,7 +211,10 @@ function getResultFooter({
   run: PlotRun | null;
 }) {
   if (capture) {
-    return formatResultMeta({ capture, includeTimestamp: false });
+    const resultMeta = formatResultMeta({ capture, includeTimestamp: false });
+    return capture.review?.confirmation_source === "auto"
+      ? `${resultMeta} · Automatic registration`
+      : resultMeta;
   }
   if (run?.capture_mode === "skip") {
     return "Capture skipped";
