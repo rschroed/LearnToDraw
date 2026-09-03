@@ -15,7 +15,7 @@ import {
   getStepSummaryNote,
   isRecord,
 } from "./plotWorkflowFormatters";
-import { RunArtifactCompare } from "./RunArtifactCompare";
+import { isV2PageAlignedCapture, RunArtifactCompare } from "./RunArtifactCompare";
 import { RunCaptureReview } from "./RunCaptureReview";
 import type { PlotWorkflowController } from "./usePlotWorkflow";
 
@@ -403,18 +403,43 @@ function WorkflowRunSummary({
   sourceOpen: boolean;
   onToggleSource: () => void;
 }) {
+  const [adjustingCompletedRegistration, setAdjustingCompletedRegistration] = useState(false);
   const sourceAsset = displayRun?.asset ?? selectedAsset;
   const resultCapture = displayRun?.observed_result?.capture ?? displayRun?.capture ?? latestCapture;
   const preparedImageUrl = displayRun?.prepared_artifact
     ? resolvePreparedArtifactUrl(displayRun.prepared_artifact.public_url)
     : null;
   const preparedPageAspectRatio = getPreparedPageAspectRatio(displayRun);
-  const review =
+  const pendingReview =
     displayRun?.status === "awaiting_capture_review" &&
     pendingCaptureReview?.run_id === displayRun.id &&
     pendingCaptureReview.capture.review
       ? pendingCaptureReview.capture.review
       : null;
+  const completedReview =
+    displayRun?.status === "completed" &&
+    resultCapture?.review?.registration_version === 2 &&
+    resultCapture.review.review_mode === "manual_corners" &&
+    resultCapture.review.review_status === "confirmed" &&
+    resultCapture.review.confirmed_corners &&
+    isV2PageAlignedCapture(resultCapture)
+      ? resultCapture.review
+      : null;
+  const revisingCompletedRegistration = Boolean(
+    adjustingCompletedRegistration && completedReview,
+  );
+  const review = pendingReview ?? (revisingCompletedRegistration ? completedReview : null);
+  const reviewCapture = revisingCompletedRegistration ? resultCapture : displayRun?.capture;
+
+  useEffect(() => {
+    setAdjustingCompletedRegistration(false);
+  }, [displayRun?.id]);
+
+  useEffect(() => {
+    if (displayRun?.status !== "completed") {
+      setAdjustingCompletedRegistration(false);
+    }
+  }, [displayRun?.status]);
 
   return (
     <section className="panel comparison-panel">
@@ -437,15 +462,21 @@ function WorkflowRunSummary({
         </div>
       </header>
 
-      {displayRun?.status === "awaiting_capture_review" && displayRun.capture && review ? (
+      {displayRun && reviewCapture && review ? (
         <RunCaptureReview
           run={displayRun}
           preparedImageUrl={preparedImageUrl}
           preparedPageAspectRatio={preparedPageAspectRatio}
-          reviewCapture={displayRun.capture}
+          reviewCapture={reviewCapture}
           review={review}
           reviewBusy={reviewBusy}
           reviewError={reviewError}
+          revision={revisingCompletedRegistration}
+          onCancel={
+            revisingCompletedRegistration
+              ? () => setAdjustingCompletedRegistration(false)
+              : undefined
+          }
           onConfirm={(corners) => onConfirmCaptureReview(displayRun.id, corners)}
         />
       ) : (
@@ -486,6 +517,9 @@ function WorkflowRunSummary({
               : "No saved result yet."
           }
           preparedPageAspectRatio={preparedPageAspectRatio}
+          onAdjustRegistration={
+            completedReview ? () => setAdjustingCompletedRegistration(true) : undefined
+          }
         />
       )}
 

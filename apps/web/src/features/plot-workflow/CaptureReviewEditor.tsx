@@ -30,6 +30,8 @@ interface CaptureReviewEditorProps {
   review: CaptureReview;
   busy: boolean;
   error: string | null;
+  revision?: boolean;
+  onCancel?: () => void;
   onConfirm: (corners: NormalizationCorners) => Promise<void>;
 }
 
@@ -70,23 +72,26 @@ export function CaptureReviewEditor({
   review,
   busy,
   error,
+  revision = false,
+  onCancel,
   onConfirm,
 }: CaptureReviewEditorProps) {
+  const startingCorners = review.confirmed_corners ?? review.proposed_corners;
   const [draftCorners, setDraftCorners] = useState<NormalizationCorners>(() =>
-    cloneCorners(review.proposed_corners),
+    cloneCorners(startingCorners),
   );
   const [selectedCorner, setSelectedCorner] = useState<CornerKey>("top_left");
   const [draggingCorner, setDraggingCorner] = useState<CornerKey | null>(null);
   const [isAdjusting, setIsAdjusting] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const proposalSignature = JSON.stringify(review.proposed_corners);
+  const startingCornersSignature = JSON.stringify(startingCorners);
 
   useEffect(() => {
-    setDraftCorners(JSON.parse(proposalSignature) as NormalizationCorners);
+    setDraftCorners(JSON.parse(startingCornersSignature) as NormalizationCorners);
     setSelectedCorner("top_left");
     setDraggingCorner(null);
     setIsAdjusting(false);
-  }, [capture.id, proposalSignature]);
+  }, [capture.id, startingCornersSignature]);
 
   useEffect(() => {
     if (!isAdjusting || typeof document === "undefined") {
@@ -178,7 +183,7 @@ export function CaptureReviewEditor({
   }
 
   function resetDraftCorners() {
-    setDraftCorners(cloneCorners(review.proposed_corners));
+    setDraftCorners(cloneCorners(startingCorners));
     setSelectedCorner("top_left");
     setDraggingCorner(null);
   }
@@ -344,7 +349,7 @@ export function CaptureReviewEditor({
       <div className="capture-review-modal-panel">
         <header className="capture-review-modal-header">
           <div>
-            <h3>Register captured page</h3>
+            <h3>{revision ? "Adjust captured page" : "Register captured page"}</h3>
             <p>Choose a corner, then click or drag it onto the physical paper corner.</p>
           </div>
           <button
@@ -406,7 +411,7 @@ export function CaptureReviewEditor({
               disabled={busy}
               onClick={() => void onConfirm(draftCorners)}
             >
-              {busy ? "Registering…" : "Register capture"}
+              {busy ? "Registering…" : revision ? "Save registration" : "Register capture"}
             </button>
           </div>
         </div>
@@ -419,19 +424,31 @@ export function CaptureReviewEditor({
       <div className="capture-review-shell">
         {renderCaptureCanvas(false)}
         <div className="capture-review-meta">
-          <p className="capture-review-caption">Manual page registration required.</p>
+          <p className="capture-review-caption">
+            {revision ? "Refine the saved manual page registration." : "Manual page registration required."}
+          </p>
           <p className="capture-review-caption">
             Place each labeled point on the matching physical paper corner.
           </p>
         </div>
         <div className="capture-review-actions">
+          {revision && onCancel ? (
+            <button
+              type="button"
+              className="artifact-variant-button"
+              disabled={busy}
+              onClick={onCancel}
+            >
+              Back to comparison
+            </button>
+          ) : null}
           <button
             type="button"
             className="artifact-variant-button artifact-variant-button-active"
             disabled={busy}
             onClick={() => setIsAdjusting(true)}
           >
-            Register page
+            {revision ? "Adjust corners" : "Register page"}
           </button>
         </div>
       </div>

@@ -15,6 +15,8 @@ interface RunCaptureReviewProps {
   review: CaptureReview;
   reviewBusy: boolean;
   reviewError: string | null;
+  revision?: boolean;
+  onCancel?: () => void;
   onConfirm: (corners: NormalizationCorners) => Promise<void>;
 }
 
@@ -26,6 +28,8 @@ export function RunCaptureReview({
   review,
   reviewBusy,
   reviewError,
+  revision = false,
+  onCancel,
   onConfirm,
 }: RunCaptureReviewProps) {
   const preparedFrameStyle =
@@ -44,7 +48,7 @@ export function RunCaptureReview({
       />
       <article className="artifact-card artifact-card-result">
         <header className="artifact-card-header">
-          <h3>Review capture</h3>
+          <h3>{revision ? "Adjust registration" : "Review capture"}</h3>
         </header>
         <div className="artifact-frame artifact-frame-review">
           <CaptureReviewEditor
@@ -52,10 +56,16 @@ export function RunCaptureReview({
             review={review}
             busy={reviewBusy}
             error={reviewError}
+            revision={revision}
+            onCancel={onCancel}
             onConfirm={onConfirm}
           />
         </div>
-        <p className="artifact-footer">Processing continues after you confirm all four page corners.</p>
+        <p className="artifact-footer">
+          {revision
+            ? "Saving regenerates this capture's page-aligned artifacts without plotting again."
+            : "Processing continues after you confirm all four page corners."}
+        </p>
       </article>
     </div>
   );

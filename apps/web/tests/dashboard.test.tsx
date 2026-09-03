@@ -480,6 +480,67 @@ describe("workflow-first dashboard", () => {
     });
   });
 
+  it("refines a completed V2 registration from its confirmed corners", async () => {
+    const confirmedCorners = {
+      top_left: [105, 125] as [number, number],
+      top_right: [1405, 115] as [number, number],
+      bottom_right: [1455, 1075] as [number, number],
+      bottom_left: [85, 1085] as [number, number],
+    };
+    const completedReview: CaptureReview = {
+      registration_version: 2,
+      review_mode: "manual_corners",
+      review_required: true,
+      review_status: "confirmed",
+      proposed_corners: {
+        top_left: [80, 60],
+        top_right: [1520, 60],
+        bottom_right: [1520, 1140],
+        bottom_left: [80, 1140],
+      },
+      confirmed_corners: confirmedCorners,
+      confirmation_source: "manual",
+    };
+    const completedRun = buildRun({
+      id: "run-refine-001",
+      name: "Refine registration",
+      createdAt: "2026-03-15T20:19:00Z",
+      observedCaptureId: "capture-refine-001",
+      includeNormalized: true,
+      status: "completed",
+      review: completedReview,
+    });
+    const harness = createHardwareDashboardHarness({
+      latestRun: completedRun,
+      plotRunsById: { [completedRun.id]: completedRun },
+    });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^adjust registration$/i }));
+    expect(screen.getByRole("heading", { name: /^adjust registration$/i })).toBeInTheDocument();
+    expect(screen.getByText(/without plotting again/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^adjust corners$/i }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^top left$/i }), {
+      key: "ArrowRight",
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save registration$/i }));
+
+    await waitFor(() => {
+      expect(harness.captureReviewActions).toEqual([
+        {
+          runId: "run-refine-001",
+          action: "confirm",
+          corners: {
+            ...confirmedCorners,
+            top_left: [106, 125],
+          },
+        },
+      ]);
+    });
+  });
+
   it("keeps the source hidden by default and reveals it on demand in the Workflow view", async () => {
     const latestRun = buildRun({
       id: "run-010",

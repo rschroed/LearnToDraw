@@ -22,6 +22,7 @@ interface RunArtifactCompareProps {
   preparedEmptyMessage: string;
   resultEmptyMessage: string;
   preparedPageAspectRatio: number | null;
+  onAdjustRegistration?: () => void;
 }
 
 export function isV2PageAlignedCapture(capture: CaptureMetadata | null): boolean {
@@ -116,6 +117,7 @@ export function RunArtifactCompare({
   preparedEmptyMessage,
   resultEmptyMessage,
   preparedPageAspectRatio,
+  onAdjustRegistration,
 }: RunArtifactCompareProps) {
   const variantOptions = useMemo(
     () => getCaptureVariantOptions(resultCapture),
@@ -188,6 +190,15 @@ export function RunArtifactCompare({
               />
               <span>{preparedOpacity}%</span>
             </label>
+          ) : null}
+          {onAdjustRegistration ? (
+            <button
+              type="button"
+              className="artifact-variant-button"
+              onClick={onAdjustRegistration}
+            >
+              Adjust registration
+            </button>
           ) : null}
         </div>
       ) : null}

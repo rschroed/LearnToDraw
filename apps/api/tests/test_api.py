@@ -823,6 +823,101 @@ def test_plot_run_capture_review_confirm_rejects_invalid_quad_without_state_chan
     assert unchanged["capture"]["normalized"] is None
 
 
+def test_completed_v2_capture_review_can_be_refined_without_replotting(tmp_path):
+    plotter = MockPlotter(plot_delay_s=0)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        run_response = client.post(
+            "/api/plot-runs", json={"asset_id": asset_response.json()["id"]}
+        )
+        pending = wait_for_run_status(
+            client, run_response.json()["id"], {"awaiting_capture_review"}
+        )
+        initial_corners = pending["capture"]["review"]["proposed_corners"]
+        client.post(
+            f"/api/plot-runs/{pending['id']}/capture-review/confirm",
+            json={"corners": initial_corners},
+        )
+        completed = wait_for_run_completion(client, pending["id"])
+        revised_corners = {
+            "top_left": [initial_corners["top_left"][0] + 2, initial_corners["top_left"][1] + 1],
+            "top_right": [
+                initial_corners["top_right"][0] - 1,
+                initial_corners["top_right"][1] + 1,
+            ],
+            "bottom_right": [
+                initial_corners["bottom_right"][0] - 1,
+                initial_corners["bottom_right"][1] - 2,
+            ],
+            "bottom_left": [
+                initial_corners["bottom_left"][0] + 2,
+                initial_corners["bottom_left"][1] - 2,
+            ],
+        }
+
+        refine_response = client.post(
+            f"/api/plot-runs/{completed['id']}/capture-review/confirm",
+            json={"corners": revised_corners},
+        )
+        refined = wait_for_run_completion(client, completed["id"])
+
+    assert refine_response.status_code == 200
+    assert refine_response.json()["run"]["status"] == "capturing"
+    assert refined["status"] == "completed"
+    assert refined["capture"]["id"] == completed["capture"]["id"]
+    assert refined["capture"]["timestamp"] == completed["capture"]["timestamp"]
+    assert refined["capture"]["review"]["confirmed_corners"] == revised_corners
+    assert refined["capture"]["normalized"]["metadata"]["corners"] == revised_corners
+
+
+def test_completed_v2_capture_review_rejects_invalid_refinement_without_state_change(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset_response = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "test-grid"},
+        )
+        run_response = client.post(
+            "/api/plot-runs", json={"asset_id": asset_response.json()["id"]}
+        )
+        pending = wait_for_run_status(
+            client, run_response.json()["id"], {"awaiting_capture_review"}
+        )
+        initial_corners = pending["capture"]["review"]["proposed_corners"]
+        client.post(
+            f"/api/plot-runs/{pending['id']}/capture-review/confirm",
+            json={"corners": initial_corners},
+        )
+        completed = wait_for_run_completion(client, pending["id"])
+        invalid_corners = {
+            "top_left": [50.0, 50.0],
+            "top_right": [590.0, 430.0],
+            "bottom_right": [590.0, 50.0],
+            "bottom_left": [50.0, 430.0],
+        }
+
+        refine_response = client.post(
+            f"/api/plot-runs/{completed['id']}/capture-review/confirm",
+            json={"corners": invalid_corners},
+        )
+        unchanged = client.get(f"/api/plot-runs/{completed['id']}").json()
+
+    assert refine_response.status_code == 400
+    assert unchanged["status"] == "completed"
+    assert unchanged["capture"]["review"]["confirmed_corners"] == initial_corners
+    assert unchanged["capture"]["normalized"]["metadata"]["corners"] == initial_corners
+
+
 def test_legacy_capture_review_endpoints_are_removed(tmp_path):
     with create_test_client(tmp_path) as client:
         assert client.post("/api/plot-runs/run-1/capture-review/accept").status_code == 404

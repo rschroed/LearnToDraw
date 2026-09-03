@@ -125,5 +125,6 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Corrected paper validation so registration can use the true physical sheet dimensions while right and bottom margins keep prepared drawing coordinates inside operational plotter bounds
 - Removed the synthetic full-page white SVG rectangle that AxiDraw could trace as page-edge motion, retaining the white Prepared preview as frontend-only styling
 - Made the AxiDraw page-pose prerequisite explicit: the physical top-left corner and top edge define the plot origin and X-axis alignment that post-capture registration evaluates but does not compensate
+- Allowed completed V2 runs to refine confirmed corners and regenerate normalized derivatives from the same immutable raw capture without plotting or capturing again
 
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

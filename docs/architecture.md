@@ -88,6 +88,8 @@ Automatic paper detection is not part of the active capture path. Each non-skipp
 
 Confirmation uses `POST /api/plot-runs/{run_id}/capture-review/confirm`. The existing asynchronous executor then maps the confirmed raw-capture pixels directly to the full canonical page with one homography. The canonical raster keeps the prepared page aspect ratio, uses a 2048-pixel long side, has a top-left origin, and is not trimmed, rotated, or resized again.
 
+The same confirmation operation may refine a completed, confirmed V2 run. It validates the replacement quad before changing state, then reuses the immutable raw capture to regenerate page-aligned derivatives through the existing `capturing` to `completed` finalization path. This does not plot again, take a new camera image, or make V1 captures editable.
+
 V2 metadata labels this contract with `method: manual_corners_v2` and `frame.version: 2`. `transform.matrix` maps `raw_capture_px` to `page_px`; `inverse_matrix` maps back to the raw capture. Horizontal and vertical pixels-per-millimeter are explicit. Prepared SVG coordinates and registered capture coordinates therefore describe the same page frame, which enables a no-crop intended-versus-observed overlay.
 
 The persisted workspace page size must match the physical sheet whose corners are registered. Machine travel constrains the drawable rectangle, not the sheet itself: right and bottom margins may reserve physical paper beyond the reachable safe bounds, while all prepared drawing coordinates remain inside those bounds.

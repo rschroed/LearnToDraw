@@ -214,11 +214,25 @@ class PlotWorkflowService:
     ) -> PlotRun:
         with self._lock:
             run = self._run_store.get(run_id)
-            if run.status != "awaiting_capture_review":
+            is_initial_confirmation = run.status == "awaiting_capture_review"
+            is_completed_revision = run.status == "completed"
+            if not is_initial_confirmation and not is_completed_revision:
                 raise AppConflictError("This plot run is not awaiting capture review.")
             if run.capture is None or run.capture.review is None:
                 raise AppConflictError("This plot run does not have a capture review payload.")
             review = run.capture.review
+            if is_completed_revision and (
+                review.registration_version != 2
+                or review.review_mode != "manual_corners"
+                or review.review_status != "confirmed"
+                or review.confirmed_corners is None
+            ):
+                raise AppConflictError(
+                    "Only completed runs with confirmed V2 manual registration can be adjusted."
+                )
+            active_run = self._get_active_run_locked()
+            if active_run is not None and active_run.id != run.id:
+                raise AppConflictError("A plot run is already active.")
             confirmed_corners = corners or review.proposed_corners
             self._capture_service.validate_registration_corners(
                 corners=confirmed_corners,
@@ -251,6 +265,7 @@ class PlotWorkflowService:
                 completed_at=None,
                 message="Applying confirmed capture quad.",
             )
+            self._active_run_id = run.id
             self._run_store.save(run)
             worker = Thread(target=self._finalize_capture_review_in_thread, args=(run.id,), daemon=True)
             worker.start()
@@ -271,6 +286,16 @@ class PlotWorkflowService:
                 message=str(exc),
             )
             self._run_store.save(run)
+        finally:
+            with self._lock:
+                if self._active_run_id == run_id:
+                    try:
+                        run = self._run_store.get(run_id)
+                    except AppNotFoundError:
+                        self._active_run_id = None
+                    else:
+                        if run.status not in ACTIVE_RUN_STATUSES:
+                            self._active_run_id = None
 
 
 __all__ = ["PlotAssetStore", "PlotRunStore", "PlotWorkflowService"]
