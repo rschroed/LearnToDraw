@@ -94,7 +94,7 @@ V2 metadata labels this contract with `method: manual_corners_v2` and `frame.ver
 
 The persisted workspace page size must match the physical sheet whose corners are registered. Machine travel constrains the drawable rectangle, not the sheet itself: right and bottom margins may reserve physical paper beyond the reachable safe bounds, while all prepared drawing coordinates remain inside those bounds.
 
-The AxiDraw Plot context treats the carriage position at plot start as that plot's origin. Because LearnToDraw disables AxiDraw auto-rotation, the operator must place the physical page's top-left corner at that origin and square its top edge to the machine X axis. Post-capture corner registration measures the physical page frame for comparison; it does not retroactively compensate plot placement or motion.
+The AxiDraw Plot context treats the carriage position at plot start as that plot's origin. Post-capture corner registration measures the physical page frame but does not move artwork relative to that frame, so exact sheet placement affects the absolute page position shown by the page-true overlay. It is not a registration prerequisite: hardware validation may remove one best-fit rigid transform (translation and rotation only) that represents page-to-plotter pose before evaluating checkpoint residuals. Scale, shear, projective warping, lens distortion, and local error remain part of that measurement.
 
 Prepared plot SVGs contain only intentional artwork geometry. Full-page source background rectangles are stripped and no synthetic page rectangle is added; the dashboard supplies its white Prepared canvas through presentation styling so page-edge preview treatment can never become plotter motion.
 

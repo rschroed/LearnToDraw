@@ -303,7 +303,9 @@ describe("machine and camera focused behaviors", () => {
     );
     expect(paperPanel).not.toBeNull();
     expect(
-      within(paperPanel as HTMLElement).getByText(/top-left corner at the axidraw plot origin/i),
+      within(paperPanel as HTMLElement).getByText(
+        /exact alignment to the axidraw origin and axes is not required/i,
+      ),
     ).toBeInTheDocument();
     const safeBounds = within(paperPanel as HTMLElement)
       .getByText(/^safe bounds$/i)
