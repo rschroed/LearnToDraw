@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   CaptureMetadata,
@@ -245,6 +246,90 @@ export function CaptureReviewEditor({
     );
   }
 
+  const registrationModal = isAdjusting ? (
+    <div
+      className="capture-review-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Register captured page"
+    >
+      <div
+        className="capture-review-modal-backdrop"
+        onClick={() => {
+          if (!busy) {
+            setIsAdjusting(false);
+          }
+        }}
+      />
+      <div className="capture-review-modal-panel">
+        <header className="capture-review-modal-header">
+          <div>
+            <h3>Register captured page</h3>
+            <p>Choose a corner, then click or drag it onto the physical paper corner.</p>
+          </div>
+          <button
+            type="button"
+            className="button-ghost"
+            onClick={() => setIsAdjusting(false)}
+            disabled={busy}
+          >
+            Close
+          </button>
+        </header>
+        <div className="capture-review-corner-controls" aria-label="Selected corner">
+          {CORNER_OPTIONS.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={
+                key === selectedCorner
+                  ? "artifact-variant-button artifact-variant-button-active"
+                  : "artifact-variant-button"
+              }
+              aria-pressed={key === selectedCorner}
+              disabled={busy}
+              onClick={() => setSelectedCorner(key)}
+              onKeyDown={(event) => handleCornerKeyDown(event, key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="capture-review-modal-stage">{renderCaptureCanvas(true)}</div>
+        <div className="capture-review-modal-footer">
+          <div>
+            <p className="capture-review-caption">
+              Arrow keys nudge the selected corner by 1 raw pixel; hold Shift for 10.
+            </p>
+            {error ? (
+              <p className="capture-review-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </div>
+          <div className="capture-review-actions">
+            <button
+              type="button"
+              className="artifact-variant-button"
+              disabled={busy}
+              onClick={resetDraftCorners}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              className="artifact-variant-button artifact-variant-button-active"
+              disabled={busy}
+              onClick={() => void onConfirm(draftCorners)}
+            >
+              {busy ? "Registering…" : "Register capture"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <>
       <div className="capture-review-shell">
@@ -266,89 +351,9 @@ export function CaptureReviewEditor({
           </button>
         </div>
       </div>
-      {isAdjusting ? (
-        <div
-          className="capture-review-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Register captured page"
-        >
-          <div
-            className="capture-review-modal-backdrop"
-            onClick={() => {
-              if (!busy) {
-                setIsAdjusting(false);
-              }
-            }}
-          />
-          <div className="capture-review-modal-panel">
-            <header className="capture-review-modal-header">
-              <div>
-                <h3>Register captured page</h3>
-                <p>Choose a corner, then click or drag it onto the physical paper corner.</p>
-              </div>
-              <button
-                type="button"
-                className="button-ghost"
-                onClick={() => setIsAdjusting(false)}
-                disabled={busy}
-              >
-                Close
-              </button>
-            </header>
-            <div className="capture-review-corner-controls" aria-label="Selected corner">
-              {CORNER_OPTIONS.map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={
-                    key === selectedCorner
-                      ? "artifact-variant-button artifact-variant-button-active"
-                      : "artifact-variant-button"
-                  }
-                  aria-pressed={key === selectedCorner}
-                  disabled={busy}
-                  onClick={() => setSelectedCorner(key)}
-                  onKeyDown={(event) => handleCornerKeyDown(event, key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="capture-review-modal-stage">{renderCaptureCanvas(true)}</div>
-            <div className="capture-review-modal-footer">
-              <div>
-                <p className="capture-review-caption">
-                  Arrow keys nudge the selected corner by 1 raw pixel; hold Shift for 10.
-                </p>
-                {error ? (
-                  <p className="capture-review-error" role="alert">
-                    {error}
-                  </p>
-                ) : null}
-              </div>
-              <div className="capture-review-actions">
-                <button
-                  type="button"
-                  className="artifact-variant-button"
-                  disabled={busy}
-                  onClick={resetDraftCorners}
-                >
-                  Reset
-                </button>
-                <button
-                  type="button"
-                  className="artifact-variant-button artifact-variant-button-active"
-                  disabled={busy}
-                  onClick={() => void onConfirm(draftCorners)}
-                >
-                  {busy ? "Registering…" : "Register capture"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {registrationModal && typeof document !== "undefined"
+        ? createPortal(registrationModal, document.body)
+        : null}
     </>
   );
 }

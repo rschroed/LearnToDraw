@@ -188,15 +188,17 @@ describe("manual capture registration editor", () => {
     });
   });
 
-  it("keeps footer actions inside the modal panel scroll container", () => {
-    render(
-      <CaptureReviewEditor
-        capture={capture}
-        review={review}
-        busy={false}
-        error={null}
-        onConfirm={vi.fn().mockResolvedValue(undefined)}
-      />,
+  it("ports the scrollable modal outside layout-containing ancestors", () => {
+    const { container } = render(
+      <div style={{ transform: "translateZ(0)" }}>
+        <CaptureReviewEditor
+          capture={capture}
+          review={review}
+          busy={false}
+          error={null}
+          onConfirm={vi.fn().mockResolvedValue(undefined)}
+        />
+      </div>,
     );
     fireEvent.click(screen.getByRole("button", { name: /register page/i }));
 
@@ -204,6 +206,8 @@ describe("manual capture registration editor", () => {
     const panel = dialog.querySelector(".capture-review-modal-panel");
     const confirmButton = screen.getByRole("button", { name: /register capture/i });
 
+    expect(container).not.toContainElement(dialog);
+    expect(dialog.parentElement).toBe(document.body);
     expect(panel).not.toBeNull();
     expect(panel).toHaveClass("capture-review-modal-panel");
     expect(panel).toContainElement(confirmButton);
