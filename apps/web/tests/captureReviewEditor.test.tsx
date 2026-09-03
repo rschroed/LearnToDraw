@@ -187,4 +187,25 @@ describe("manual capture registration editor", () => {
       top_left: [81, 60],
     });
   });
+
+  it("keeps footer actions inside the modal panel scroll container", () => {
+    render(
+      <CaptureReviewEditor
+        capture={capture}
+        review={review}
+        busy={false}
+        error={null}
+        onConfirm={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /register page/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /register captured page/i });
+    const panel = dialog.querySelector(".capture-review-modal-panel");
+    const confirmButton = screen.getByRole("button", { name: /register capture/i });
+
+    expect(panel).not.toBeNull();
+    expect(panel).toHaveClass("capture-review-modal-panel");
+    expect(panel).toContainElement(confirmButton);
+  });
 });
