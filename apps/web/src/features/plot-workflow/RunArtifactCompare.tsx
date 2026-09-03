@@ -48,7 +48,9 @@ function getSelectedVariantFooter({
     const output = capture?.normalized?.metadata.output;
     const outputSize = output ? `${output.width} × ${output.height}` : null;
     const registrationLabel = isV2PageAlignedCapture(capture)
-      ? "Page aligned"
+      ? capture?.review?.confirmation_source === "auto"
+        ? "Automatic registration"
+        : "Page aligned"
       : "Legacy registration";
     return [selectedVariant.label, registrationLabel, outputSize].filter(Boolean).join(" · ");
   }

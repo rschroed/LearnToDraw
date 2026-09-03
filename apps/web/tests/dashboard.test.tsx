@@ -406,6 +406,48 @@ describe("workflow-first dashboard", () => {
     expect(screen.queryByRole("button", { name: /^overlay$/i })).not.toBeInTheDocument();
   });
 
+  it("labels a completed automatically registered capture", async () => {
+    const automaticReview: CaptureReview = {
+      registration_version: 2,
+      review_mode: "manual_corners",
+      review_required: false,
+      review_status: "confirmed",
+      proposed_corners: {
+        top_left: [100, 120],
+        top_right: [1400, 110],
+        bottom_right: [1450, 1080],
+        bottom_left: [80, 1090],
+      },
+      confirmed_corners: {
+        top_left: [100, 120],
+        top_right: [1400, 110],
+        bottom_right: [1450, 1080],
+        bottom_left: [80, 1090],
+      },
+      confirmation_source: "auto",
+      proposal: {
+        status: "suggested",
+        method: "light_page_edges_v1",
+        stability_max_px: 0.7,
+      },
+    };
+    const completedRun = buildRun({
+      id: "run-auto-registration-001",
+      name: "Automatically aligned study",
+      createdAt: "2026-03-15T20:17:00Z",
+      observedCaptureId: "capture-auto-registration-001",
+      includeNormalized: true,
+      review: automaticReview,
+    });
+    const harness = createHardwareDashboardHarness({ latestRun: completedRun });
+    installHardwareDashboardFetchMock(harness);
+
+    render(<App />);
+
+    expect(await screen.findByText(/normalized · automatic registration/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^adjust registration$/i })).toBeInTheDocument();
+  });
+
   it("shows the capture review UI for a run awaiting corner confirmation", async () => {
     const pendingRun = buildRun({
       id: "run-review-001",

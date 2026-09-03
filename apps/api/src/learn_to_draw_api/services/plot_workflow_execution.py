@@ -135,14 +135,21 @@ class PlotRunExecutor:
                     image_width=capture_metadata.width,
                     image_height=capture_metadata.height,
                 )
+                automatically_confirmed = proposal.status == "suggested"
+                if automatically_confirmed:
+                    self._capture_service.validate_registration_corners(
+                        corners=initial_corners,
+                        image_width=capture_metadata.width,
+                        image_height=capture_metadata.height,
+                    )
                 review = CaptureReview(
                     registration_version=2,
                     review_mode="manual_corners",
-                    review_required=True,
-                    review_status="pending",
+                    review_required=not automatically_confirmed,
+                    review_status="confirmed" if automatically_confirmed else "pending",
                     proposed_corners=initial_corners,
-                    confirmed_corners=None,
-                    confirmation_source=None,
+                    confirmed_corners=initial_corners if automatically_confirmed else None,
+                    confirmation_source="auto" if automatically_confirmed else None,
                     proposal=proposal,
                 )
                 capture_metadata = self._capture_service.save_capture_review(
@@ -169,12 +176,34 @@ class PlotRunExecutor:
                     status="completed",
                     message="Capture completed.",
                 )
-                run.status = "awaiting_capture_review"
-                run.updated_at = datetime.now(timezone.utc)
                 run.camera_run_details = {
                     **run.camera_run_details,
-                    "capture_review_required": True,
+                    "capture_review_required": not automatically_confirmed,
+                    "capture_registration_source": (
+                        "automatic" if automatically_confirmed else "manual"
+                    ),
                 }
+                if automatically_confirmed:
+                    current_stage = "capture_review"
+                    run = self._set_stage_state(
+                        run,
+                        stage="capture_review",
+                        status="in_progress",
+                        message="Applying stable automatic page registration.",
+                    )
+                    normalization_target = target_from_page_size(
+                        page_width_mm=preparation.page_width_mm,
+                        page_height_mm=preparation.page_height_mm,
+                        source="prepared_svg",
+                    )
+                    self._finalize_capture_review(
+                        run,
+                        normalization_target=normalization_target,
+                    )
+                    return
+
+                run.status = "awaiting_capture_review"
+                run.updated_at = datetime.now(timezone.utc)
                 self._set_stage_state(
                     run,
                     stage="capture_review",
@@ -259,11 +288,16 @@ class PlotRunExecutor:
             run.observed_result = run.observed_result.model_copy(
                 update={"capture": updated_capture}
             )
+        completion_message = (
+            "Automatic page registration applied."
+            if review.confirmation_source == "auto"
+            else "Capture review confirmed."
+        )
         run = self._set_stage_state(
             run,
             stage="capture_review",
             status="completed",
-            message="Capture review confirmed.",
+            message=completion_message,
         )
         run.status = "completed"
         run.error = None
