@@ -54,6 +54,9 @@ class AxiDrawPlotExecution:
     native_res_factor: Optional[float]
     motion_scale: Optional[float]
     details: dict[str, Any]
+    interrupted: bool = False
+    interruption_reason: Optional[str] = None
+    progress_svg: Optional[str] = None
 
 
 class PyAxiDrawClient:
@@ -104,6 +107,25 @@ class PyAxiDrawClient:
             "config_source": self._config_source,
             "calibration_source": self._resolve_calibration_source(),
             "native_res_factor": self._effective_native_res_factor,
+            "motion_scale": self._motion_scale,
+        }
+
+    def worker_settings(self) -> dict[str, Any]:
+        return {
+            "port": self._port,
+            "speed_pendown": self._speed_pendown,
+            "speed_penup": self._speed_penup,
+            "model": self._model,
+            "pen_pos_up": self._pen_pos_up,
+            "pen_pos_down": self._pen_pos_down,
+            "pen_rate_raise": self._pen_rate_raise,
+            "pen_rate_lower": self._pen_rate_lower,
+            "pen_delay_up": self._pen_delay_up,
+            "pen_delay_down": self._pen_delay_down,
+            "penlift": self._penlift,
+            "config_path": str(self._config_path) if self._config_path is not None else None,
+            "native_res_factor": self._native_res_factor_override,
+            "calibration_source": self._explicit_calibration_source,
             "motion_scale": self._motion_scale,
         }
 
@@ -251,7 +273,12 @@ class PyAxiDrawClient:
         finally:
             _safe_disconnect(ad)
 
-    def run_plot_document(self, svg_text: str) -> AxiDrawPlotExecution:
+    def run_plot_document(
+        self,
+        svg_text: str,
+        *,
+        interruptible: bool = False,
+    ) -> AxiDrawPlotExecution:
         ad = None
         try:
             ad, api_surface, plot_api_supported, manual_api_supported = self._new_axidraw()
@@ -262,7 +289,16 @@ class PyAxiDrawClient:
                     "AxiDraw API package with 'pip install .' and retry."
                 )
             self._apply_common_options(ad)
-            self._run_documented_plot(ad, svg_text)
+            output_svg, error_code = self._run_documented_plot(
+                ad,
+                svg_text,
+                interruptible=interruptible,
+            )
+            interrupted = error_code in {102, 103}
+            if error_code not in {0, 102, 103}:
+                raise PyAxiDrawClientError(
+                    f"AxiDraw plot_run() stopped with error code {error_code}."
+                )
             return AxiDrawPlotExecution(
                 port=self._port,
                 api_surface=api_surface,
@@ -272,7 +308,14 @@ class PyAxiDrawClient:
                 calibration_source=self._resolve_calibration_source(),
                 native_res_factor=self._effective_native_res_factor,
                 motion_scale=self._motion_scale,
-                details={"result": "plot_run"},
+                details={"result": "plot_run", "error_code": error_code},
+                interrupted=interrupted,
+                interruption_reason=(
+                    "physical_pause" if error_code == 102 else "keyboard_interrupt"
+                )
+                if interrupted
+                else None,
+                progress_svg=output_svg if interrupted else None,
             )
         except ImportError as exc:
             raise PyAxiDrawClientError(
@@ -313,15 +356,28 @@ class PyAxiDrawClient:
         config_path = self._resolve_config_path()
         ad.load_config(str(config_path))
 
-    def _run_documented_plot(self, ad: Any, svg_text: str) -> None:
+    def _run_documented_plot(
+        self,
+        ad: Any,
+        svg_text: str,
+        *,
+        interruptible: bool,
+    ) -> tuple[Optional[str], int]:
         # Official Plot context: plot_setup(svg_input) -> set options -> plot_run().
         ad.plot_setup(svg_text)
         ad.options.mode = "plot"
         if hasattr(ad.options, "auto_rotate"):
             ad.options.auto_rotate = False
-        result = ad.plot_run(output=False)
+        if interruptible:
+            ad.keyboard_pause = True
+            errors = getattr(ad, "errors", None)
+            if errors is not None and hasattr(errors, "keyboard"):
+                errors.keyboard = False
+        result = ad.plot_run(output=interruptible)
         if result is False:
             raise PyAxiDrawClientError("AxiDraw plot_run() reported failure.")
+        error_code = getattr(getattr(ad, "errors", None), "code", 0)
+        return (result if isinstance(result, str) else None, int(error_code or 0))
 
     def _run_documented_manual(self, ad: Any, manual_cmd: str) -> None:
         # Official Plot context: plot_setup() -> options.mode/manual_cmd -> plot_run().

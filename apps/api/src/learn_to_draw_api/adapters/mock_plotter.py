@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
+from threading import Event
 from typing import Optional
 
 from learn_to_draw_api.models import (
@@ -58,6 +59,7 @@ class MockPlotter:
             "last_test_action_status": None,
         }
         self._last_updated = datetime.now(timezone.utc)
+        self._stop_requested = Event()
 
     def connect(self) -> None:
         if not self.available:
@@ -154,9 +156,10 @@ class MockPlotter:
         self._details["last_action_status"] = "in_progress"
         self._details["last_plotted_asset_id"] = document.asset_id
         started_at = datetime.now(timezone.utc)
+        self._stop_requested.clear()
         self._touch()
         try:
-            time.sleep(self._plot_delay_s)
+            interrupted = self._stop_requested.wait(self._plot_delay_s)
             if self._fail_on_plot:
                 self._error = "Mock plotter failed while plotting."
                 self._details["last_action_status"] = "failed"
@@ -175,10 +178,21 @@ class MockPlotter:
                     "svg_width": document.width,
                     "svg_height": document.height,
                 },
+                interrupted=interrupted,
+                interruption_reason="operator_emergency_stop" if interrupted else None,
+                progress_svg=document.svg_text if interrupted else None,
             )
         finally:
             self._busy = False
             self._touch()
+
+    def request_stop(self) -> bool:
+        if not self._busy:
+            return False
+        self._stop_requested.set()
+        self._details["last_action_status"] = "stopping"
+        self._touch()
+        return True
 
     def _touch(self) -> None:
         self._last_updated = datetime.now(timezone.utc)

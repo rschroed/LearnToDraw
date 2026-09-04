@@ -10,6 +10,10 @@ from learn_to_draw_api.adapters.axidraw_client import (
     PyAxiDrawClient,
     PyAxiDrawClientError,
 )
+from learn_to_draw_api.adapters.axidraw_plot_worker import (
+    AxiDrawProcessPlotRunner,
+    InlineAxiDrawPlotRunner,
+)
 from learn_to_draw_api.models import (
     DeviceStatus,
     HardwareBusyError,
@@ -29,8 +33,17 @@ class AxiDrawPlotter:
         *,
         client: Optional[PyAxiDrawClient] = None,
         port: Optional[str] = None,
+        plot_runner=None,
     ) -> None:
         self._client = client or PyAxiDrawClient(port=port)
+        if plot_runner is not None:
+            self._plot_runner = plot_runner
+        elif hasattr(self._client, "worker_settings"):
+            self._plot_runner = AxiDrawProcessPlotRunner(
+                settings_provider=self._client.worker_settings
+            )
+        else:
+            self._plot_runner = InlineAxiDrawPlotRunner(self._client)
         self._port = port
         config_details = self._client.config_details()
         self._connected = False
@@ -168,10 +181,13 @@ class AxiDrawPlotter:
         started_at = datetime.now(timezone.utc)
         self._touch()
         try:
-            execution = self._client.run_plot_document(document.svg_text)
+            execution = self._plot_runner.run(document.svg_text)
             completed_at = datetime.now(timezone.utc)
             self._apply_plot_execution(execution)
-            self._details["last_action_status"] = "succeeded"
+            interrupted = bool(getattr(execution, "interrupted", False))
+            self._details["last_action_status"] = (
+                "cancelled" if interrupted else "succeeded"
+            )
             self._touch()
             return PlotResult(
                 started_at=started_at,
@@ -182,6 +198,9 @@ class AxiDrawPlotter:
                     "port": execution.port or self._details["port"],
                     **execution.details,
                 },
+                interrupted=interrupted,
+                interruption_reason=getattr(execution, "interruption_reason", None),
+                progress_svg=getattr(execution, "progress_svg", None),
             )
         except PyAxiDrawClientError as exc:
             self._error = str(exc)
@@ -191,6 +210,15 @@ class AxiDrawPlotter:
         finally:
             self._busy = False
             self._touch()
+
+    def request_stop(self) -> bool:
+        if not self._busy:
+            return False
+        requested = self._plot_runner.request_stop()
+        if requested:
+            self._details["last_action_status"] = "stopping"
+            self._touch()
+        return requested
 
     def _ensure_ready(self) -> None:
         if self._busy:

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+import signal
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
 
 import learn_to_draw_api.adapters.axidraw_client as axidraw_client_module
-from learn_to_draw_api.adapters.axidraw_client import PyAxiDrawClient, PyAxiDrawClientError
+from learn_to_draw_api.adapters.axidraw_client import (
+    AxiDrawPlotExecution,
+    PyAxiDrawClient,
+    PyAxiDrawClientError,
+)
+from learn_to_draw_api.adapters.axidraw_plot_worker import AxiDrawProcessPlotRunner
 from learn_to_draw_api.adapters.axidraw_plotter import AxiDrawPlotter
 from learn_to_draw_api.adapters.factory import build_plotter_adapter
 from learn_to_draw_api.config import AppConfig
@@ -37,8 +44,11 @@ class FakeDocumentedAxiDraw:
             resolution=None,
         )
         self.fw_version_string = "FW-1.2.3"
+        self.keyboard_pause = False
+        self.errors = SimpleNamespace(code=0, keyboard=True)
         self.plot_setup_inputs: list[str | None] = []
         self.plot_run_calls: list[tuple[str | None, str | None]] = []
+        self.plot_run_outputs: list[bool] = []
         self.load_config_calls: list[str] = []
         self.plot_run_result = True
         self.disconnect_called = False
@@ -51,6 +61,7 @@ class FakeDocumentedAxiDraw:
 
     def plot_run(self, output: bool = False):
         self.plot_run_calls.append((self.options.mode, self.options.manual_cmd))
+        self.plot_run_outputs.append(output)
         return self.plot_run_result
 
     def load_config(self, config_ref: str) -> None:
@@ -195,6 +206,28 @@ def test_pyaxidraw_client_uses_generated_native_res_override(fake_vendor_axidraw
     generated_path = Path(plot_instance.load_config_calls[0])
     assert generated_path.exists()
     assert "native_res_factor = 1905.0" in generated_path.read_text()
+
+
+def test_pyaxidraw_client_collects_progress_for_documented_keyboard_pause(
+    fake_vendor_axidraw_conf,
+):
+    plot_instance = FakeDocumentedAxiDraw()
+    plot_instance.plot_run_result = "<svg data-paused='true' />"
+    plot_instance.errors.code = 103
+    client = PyAxiDrawClient(module_loader=module_loader_with([plot_instance]))
+
+    execution = client.run_plot_document(
+        "<svg xmlns='http://www.w3.org/2000/svg' />",
+        interruptible=True,
+    )
+
+    assert plot_instance.keyboard_pause is True
+    assert plot_instance.errors.keyboard is False
+    assert plot_instance.plot_run_outputs == [True]
+    assert execution.interrupted is True
+    assert execution.interruption_reason == "keyboard_interrupt"
+    assert execution.progress_svg == "<svg data-paused='true' />"
+    assert execution.details["error_code"] == 103
 
 
 def test_pyaxidraw_client_prefers_explicit_config_path(tmp_path):
@@ -359,6 +392,36 @@ class FakeClient:
         )
 
 
+class BlockingPlotRunner:
+    def __init__(self) -> None:
+        self.started = Event()
+        self.release = Event()
+        self.stop_requests = 0
+
+    def run(self, svg_text: str):
+        self.started.set()
+        self.release.wait(timeout=1)
+        return AxiDrawPlotExecution(
+            port="usb-a",
+            api_surface="documented_pyaxidraw",
+            plot_api_supported=True,
+            manual_api_supported=True,
+            config_source="vendor_default",
+            calibration_source="vendor_default",
+            native_res_factor=1016.0,
+            motion_scale=1.0,
+            details={"error_code": 103},
+            interrupted=True,
+            interruption_reason="keyboard_interrupt",
+            progress_svg=svg_text,
+        )
+
+    def request_stop(self) -> bool:
+        self.stop_requests += 1
+        self.release.set()
+        return True
+
+
 def test_axidraw_plotter_reports_status_and_maps_operations():
     plotter = AxiDrawPlotter(
         client=FakeClient(plot_api_supported=True, manual_api_supported=True),
@@ -396,6 +459,58 @@ def test_axidraw_plotter_reports_status_and_maps_operations():
     assert plot_result.document_id == "asset-1"
     assert plot_result.details["port"] == "usb-a"
     assert plotter.get_status().details["pen_tuning"] == {"pen_pos_up": 62, "pen_pos_down": 24}
+
+
+def test_axidraw_plotter_requests_stop_only_from_active_runner():
+    runner = BlockingPlotRunner()
+    plotter = AxiDrawPlotter(
+        client=FakeClient(plot_api_supported=True, manual_api_supported=True),
+        port="usb-a",
+        plot_runner=runner,
+    )
+    plotter.connect()
+    result_holder = {}
+
+    worker = Thread(
+        target=lambda: result_holder.update(
+            result=plotter.plot(
+                PlotDocument(
+                    asset_id="asset-1",
+                    name="Interruptible asset",
+                    svg_text="<svg xmlns='http://www.w3.org/2000/svg' />",
+                    width=10,
+                    height=10,
+                    prepared_width_mm=10.0,
+                    prepared_height_mm=10.0,
+                )
+            )
+        )
+    )
+    worker.start()
+    assert runner.started.wait(timeout=1)
+
+    assert plotter.request_stop() is True
+    worker.join(timeout=1)
+
+    assert runner.stop_requests == 1
+    assert result_holder["result"].interrupted is True
+    assert plotter.get_status().details["last_action_status"] == "cancelled"
+
+
+def test_process_plot_runner_signals_only_its_active_worker():
+    signalled = []
+    runner = AxiDrawProcessPlotRunner(
+        settings_provider=dict,
+        signal_sender=lambda pid, sig: signalled.append((pid, sig)),
+    )
+    runner._active_process = SimpleNamespace(
+        pid=4242,
+        is_alive=lambda: True,
+    )
+
+    assert runner.request_stop() is True
+    assert runner.request_stop() is True
+    assert signalled == [(4242, signal.SIGINT)]
 
 
 def test_axidraw_plotter_applies_persisted_calibration_to_client():

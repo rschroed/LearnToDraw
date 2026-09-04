@@ -75,6 +75,19 @@ class PlotRunExecutor:
             )
 
             current_stage = "plot"
+            if run.status == "stopping":
+                run.status = "cancelled"
+                run.interruption_reason = (
+                    run.interruption_reason or "operator_emergency_stop"
+                )
+                run = self._set_stage_state(
+                    run,
+                    stage="plot",
+                    status="cancelled",
+                    message="Plot cancelled before motion began.",
+                )
+                self._run_store.save(run)
+                return
             run.status = "plotting"
             run.updated_at = datetime.now(timezone.utc)
             run = self._set_stage_state(
@@ -99,6 +112,27 @@ class PlotRunExecutor:
                 ),
                 "details": plot_result.details,
             }
+            if plot_result.interrupted or run.status == "stopping":
+                if plot_result.progress_svg:
+                    run.progress_artifact = self._run_store.save_progress_svg(
+                        run.id,
+                        plot_result.progress_svg,
+                    )
+                run.status = "cancelled"
+                run.interruption_reason = (
+                    run.interruption_reason
+                    or plot_result.interruption_reason
+                    or "plot_interrupted"
+                )
+                run.error = None
+                run = self._set_stage_state(
+                    run,
+                    stage="plot",
+                    status="cancelled",
+                    message="Plot paused after its current line segment.",
+                )
+                self._run_store.save(run)
+                return
             run = self._set_stage_state(
                 run,
                 stage="plot",
@@ -348,7 +382,7 @@ class PlotRunExecutor:
         run.stage_states[stage] = PlotStageState(
             status=status,
             started_at=previous.started_at or (now if status == "in_progress" else None),
-            completed_at=now if status in {"completed", "failed"} else None,
+            completed_at=now if status in {"completed", "failed", "cancelled"} else None,
             message=message,
         )
         run.updated_at = now

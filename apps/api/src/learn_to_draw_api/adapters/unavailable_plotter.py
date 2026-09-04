@@ -66,5 +66,8 @@ class UnavailablePlotter:
     def plot(self, document: PlotDocument) -> PlotResult:
         raise HardwareUnavailableError(self._message)
 
+    def request_stop(self) -> bool:
+        raise HardwareUnavailableError(self._message)
+
     def _touch(self) -> None:
         self._last_updated = datetime.now(timezone.utc)

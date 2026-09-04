@@ -167,4 +167,12 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added capture-only retry after a completed plot and preserved ordered immutable capture attempts while keeping the existing current-capture contract
 - Kept manual registration, active-run exclusion, normal PlotRuns, mock adapters, and backend-only hardware ownership as the safety boundaries
 
+## Interruptible AxiDraw Plot Worker Slice
+
+- Moved real AxiDraw Plot-context execution into a dedicated spawned process so documented keyboard-pause signal handling is isolated from API server threads
+- Added a generic active-plot stop capability, process-scoped SIGINT, AxiDraw output-SVG collection, and explicit error-code interpretation for keyboard and physical pauses
+- Added stopping and terminal cancelled run states, persisted paused-progress SVG evidence, and guaranteed that an interrupted plot cannot continue to capture or agent assessment
+- Added deterministic mock interruption plus fake-client and process-runner coverage without adding partial-plot resume or undocumented AxiDraw calls
+- Kept the physical Pause button as the hardware fallback and documented that software pause occurs only after the current line segment
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

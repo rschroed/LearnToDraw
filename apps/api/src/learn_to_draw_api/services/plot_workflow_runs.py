@@ -14,7 +14,13 @@ from learn_to_draw_api.models import (
 )
 
 
-ACTIVE_RUN_STATUSES = {"pending", "plotting", "capturing", "awaiting_capture_review"}
+ACTIVE_RUN_STATUSES = {
+    "pending",
+    "plotting",
+    "stopping",
+    "capturing",
+    "awaiting_capture_review",
+}
 
 
 class PlotRunStore:
@@ -44,6 +50,15 @@ class PlotRunStore:
         return PreparedArtifactRecord(
             file_path=str(prepared_path),
             public_url=f"{self._artifacts_url_prefix}/{quote(prepared_path.name)}",
+        )
+
+    def save_progress_svg(self, run_id: str, svg_text: str) -> PreparedArtifactRecord:
+        with self._lock:
+            progress_path = self._runs_dir / f"{run_id}-paused-progress.svg"
+            progress_path.write_text(svg_text, encoding="utf-8")
+        return PreparedArtifactRecord(
+            file_path=str(progress_path),
+            public_url=f"{self._artifacts_url_prefix}/{quote(progress_path.name)}",
         )
 
     def get(self, run_id: str) -> PlotRun:

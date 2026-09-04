@@ -39,6 +39,7 @@ from learn_to_draw_api.services.plotter_workspace import PlotterWorkspaceService
 ACTIVE_PLOT_RUN_STATUSES = {
     "pending",
     "plotting",
+    "stopping",
     "capturing",
     "awaiting_capture_review",
 }
@@ -310,10 +311,6 @@ class DrawingSessionService:
         session_id: str,
         request: DrawingSessionStopRequest,
     ) -> DrawingSession:
-        if request.mode == "emergency":
-            raise AppConflictError(
-                "Emergency plot interruption is not available until the interruptible worker is enabled."
-            )
         with self._lock:
             session = self._sync(self._store.get(session_id))
             if session.session_version != 2:
@@ -336,6 +333,16 @@ class DrawingSessionService:
                     session,
                     "Stopped before plotting began.",
                 )
+            elif request.mode == "emergency":
+                run = self._plot_workflow.request_stop(session.current_run_id)
+                if run.status in {"cancelled", "completed", "failed"}:
+                    self._pause_session(
+                        session,
+                        "Emergency stop completed. Inspect the machine before resuming.",
+                        run_id=run.id,
+                    )
+                else:
+                    session.status = "stopping"
             else:
                 run = self._plot_workflow.get_run(session.current_run_id)
                 if run.status in ACTIVE_PLOT_RUN_STATUSES:
@@ -528,6 +535,13 @@ class DrawingSessionService:
                     run.error or "The current plot run failed.",
                     run_id=run.id,
                 )
+        elif run.status == "cancelled":
+            if session.status != "paused":
+                self._pause_session(
+                    session,
+                    "Emergency stop completed. Inspect the machine before resuming.",
+                    run_id=run.id,
+                )
         elif (
             run.status == "completed"
             and session.status == "awaiting_capture_review"
@@ -595,6 +609,14 @@ class DrawingSessionService:
                 self._pause_session(
                     session,
                     run.error or "The current plot run failed.",
+                    run_id=run.id,
+                )
+                self._store.save(session)
+                return
+            if run.status == "cancelled":
+                self._pause_session(
+                    session,
+                    "Emergency stop completed. Inspect the machine before resuming.",
                     run_id=run.id,
                 )
                 self._store.save(session)

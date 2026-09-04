@@ -213,6 +213,35 @@ class PlotWorkflowService:
             worker.start()
             return run
 
+    def request_stop(self, run_id: str) -> PlotRun:
+        with self._lock:
+            run = self._run_store.get(run_id)
+            if run.status in {"cancelled", "completed", "failed"}:
+                return run
+            if run.status not in {"pending", "plotting", "stopping"}:
+                raise AppConflictError(
+                    "Emergency stop is available only before or during plotting."
+                )
+            if run.status == "stopping":
+                return run
+            was_plotting = run.status == "plotting"
+            run.status = "stopping"
+            run.interruption_reason = "operator_emergency_stop"
+            run.updated_at = datetime.now(timezone.utc)
+            if "plot" in run.stage_states:
+                plot_stage = run.stage_states["plot"]
+                run.stage_states["plot"] = plot_stage.model_copy(
+                    update={"message": "Emergency stop requested."}
+                )
+            self._run_store.save(run)
+            if was_plotting:
+                try:
+                    self._plotter.request_stop()
+                except Exception as exc:
+                    run.error = f"Emergency stop request failed: {exc}"
+                    self._run_store.save(run)
+            return run
+
     def _execute_run_in_thread(self, run_id: str) -> None:
         try:
             self._executor.execute_run(run_id)

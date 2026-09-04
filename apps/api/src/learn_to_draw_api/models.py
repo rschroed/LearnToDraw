@@ -294,6 +294,9 @@ class PlotResult(BaseModel):
     completed_at: datetime
     document_id: str
     details: dict[str, Any] = Field(default_factory=dict)
+    interrupted: bool = False
+    interruption_reason: Optional[str] = None
+    progress_svg: Optional[str] = None
 
 
 PlotRunPurpose = Literal["normal", "diagnostic"]
@@ -301,8 +304,10 @@ PlotRunCaptureMode = Literal["auto", "skip"]
 PlotRunStatus = Literal[
     "pending",
     "plotting",
+    "stopping",
     "capturing",
     "awaiting_capture_review",
+    "cancelled",
     "completed",
     "failed",
 ]
@@ -331,7 +336,7 @@ class PlotAsset(BaseModel):
 
 
 class PlotStageState(BaseModel):
-    status: Literal["pending", "in_progress", "completed", "failed"]
+    status: Literal["pending", "in_progress", "completed", "failed", "cancelled"]
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     message: Optional[str] = None
@@ -349,6 +354,8 @@ class PlotRun(BaseModel):
     capture: Optional[CaptureMetadata] = None
     capture_attempts: list[CaptureMetadata] = Field(default_factory=list)
     observed_result: Optional[ObservedResultRecord] = None
+    progress_artifact: Optional[PreparedArtifactRecord] = None
+    interruption_reason: Optional[str] = None
     error: Optional[str] = None
     stage_states: dict[str, PlotStageState] = Field(default_factory=dict)
     plotter_run_details: dict[str, Any] = Field(default_factory=dict)
