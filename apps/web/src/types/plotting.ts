@@ -12,7 +12,7 @@ export interface PlotAsset {
 }
 
 export interface PlotStageState {
-  status: "pending" | "in_progress" | "completed" | "failed";
+  status: "pending" | "in_progress" | "completed" | "failed" | "cancelled";
   started_at: string | null;
   completed_at: string | null;
   message: string | null;
@@ -23,8 +23,10 @@ export interface PlotRun {
   status:
     | "pending"
     | "plotting"
+    | "stopping"
     | "capturing"
     | "awaiting_capture_review"
+    | "cancelled"
     | "completed"
     | "failed";
   purpose: "normal" | "diagnostic";
@@ -38,12 +40,19 @@ export interface PlotRun {
     mime_type: string;
   } | null;
   capture: CaptureMetadata | null;
+  capture_attempts: CaptureMetadata[];
   observed_result?: {
     capture: CaptureMetadata;
     camera_driver: string;
     captured_at: string;
     duration_ms: number;
   } | null;
+  progress_artifact: {
+    file_path: string;
+    public_url: string;
+    mime_type: string;
+  } | null;
+  interruption_reason: string | null;
   error: string | null;
   stage_states: Record<"prepare" | "plot" | "capture" | "capture_review", PlotStageState>;
   plotter_run_details: Record<string, unknown>;
@@ -73,5 +82,5 @@ export interface PlotRunListResponse {
 export interface PlotRunCaptureReviewPayload {
   run_id: string;
   capture: CaptureMetadata;
-  review: CaptureMetadata["review"];
+  review: NonNullable<CaptureMetadata["review"]>;
 }

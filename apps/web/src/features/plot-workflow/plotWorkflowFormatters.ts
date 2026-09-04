@@ -40,6 +40,9 @@ export function getStageLabel(run: PlotRun | null) {
   if (run.status === "plotting") {
     return "Plotting";
   }
+  if (run.status === "stopping") {
+    return "Stopping";
+  }
   if (run.status === "capturing") {
     return "Capturing";
   }
@@ -52,6 +55,9 @@ export function getStageLabel(run: PlotRun | null) {
   if (run.status === "failed") {
     return "Failed";
   }
+  if (run.status === "cancelled") {
+    return "Cancelled";
+  }
   return "Preparing";
 }
 
@@ -63,12 +69,13 @@ export function getRunStatusTone(status: PlotRun["status"] | "idle") {
   if (
     status === "pending" ||
     status === "plotting" ||
+    status === "stopping" ||
     status === "capturing" ||
     status === "awaiting_capture_review"
   ) {
     return "warn";
   }
-  if (status === "failed") {
+  if (status === "failed" || status === "cancelled") {
     return "warn";
   }
   return "ok";
@@ -151,7 +158,7 @@ export function getStepSummaryItems(run: PlotRun | null): RunStepSummaryItem[] {
     label:
       plotState.status === "completed"
         ? "Plotted ✓"
-        : plotState.status === "failed"
+        : plotState.status === "failed" || plotState.status === "cancelled"
           ? "Plot !"
           : plotState.status === "in_progress"
             ? "Plotting…"
@@ -159,7 +166,7 @@ export function getStepSummaryItems(run: PlotRun | null): RunStepSummaryItem[] {
     tone:
       plotState.status === "completed"
         ? "ok"
-        : plotState.status === "failed"
+        : plotState.status === "failed" || plotState.status === "cancelled"
           ? "error"
           : plotState.status === "in_progress"
             ? "warn"
@@ -241,6 +248,9 @@ export function getStepSummaryNote(run: PlotRun | null) {
   }
   if (run.status === "completed" && run.capture_mode === "skip") {
     return "Capture skipped for this run.";
+  }
+  if (run.status === "cancelled") {
+    return run.stage_states.plot?.message ?? "The plot was cancelled before capture.";
   }
   const failedStage = Object.values(run.stage_states).find((stage) => stage.status === "failed");
   if (failedStage?.message) {

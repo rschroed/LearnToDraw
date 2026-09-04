@@ -1037,10 +1037,12 @@ def test_drawing_session_runs_observes_proposes_and_approves_next_layer(tmp_path
         assert proposal["asset"]["id"] == approved["iterations"][1]["asset"]["id"]
         wait_for_run_completion(client, second_run_id)
         completed = client.get(f"/api/drawing-sessions/{created['id']}").json()
+        gallery_summary = client.get("/api/drawing-sessions").json()["sessions"][0]
 
     assert completed["status"] == "completed"
     assert len(completed["iterations"]) == 2
     assert completed["iterations"][0]["next_proposal"]["approved_run_id"] == second_run_id
+    assert gallery_summary["preview_url"].endswith("-rectified-grayscale.png")
 
     with create_test_client(
         tmp_path,

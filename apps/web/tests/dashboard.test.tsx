@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { App } from "../src/app/App";
+import { HardwareDashboard as App } from "../src/features/hardware/HardwareDashboard";
 import type { CaptureReview } from "../src/types/hardware";
 import type { PlotRun } from "../src/types/plotting";
 import {
@@ -99,6 +99,7 @@ function buildRun({
           normalized,
         }
       : null,
+    capture_attempts: [],
     observed_result: observedCaptureId
       ? {
           capture: {
@@ -117,6 +118,8 @@ function buildRun({
           duration_ms: 900,
         }
       : null,
+    progress_artifact: null,
+    interruption_reason: null,
     error: null,
     stage_states: {
       prepare: {

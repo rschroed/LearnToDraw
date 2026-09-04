@@ -132,6 +132,12 @@ function getStatusLabel(status: PlotRun["status"]) {
   if (status === "plotting") {
     return "Plotting";
   }
+  if (status === "stopping") {
+    return "Stopping";
+  }
+  if (status === "cancelled") {
+    return "Cancelled";
+  }
   return "Preparing";
 }
 
