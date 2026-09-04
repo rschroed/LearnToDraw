@@ -144,7 +144,7 @@ The conversation records user guidance, agent plans, interpretations, decisions,
 
 The creative screen posts heartbeats only while visible and on an active authorized session. Closing or hiding it therefore allows the current physical pass to finish but prevents another pass after the backend grace period. Stop-after-pass preserves that same safe boundary. Emergency stop is confirmation-protected and is offered only while the current run is pending or plotting; its copy states that interruption occurs after the current path segment.
 
-Paused capture failures offer a camera-only retake, which cannot create a replacement plot run. Manual registration remains in-context on the canvas. Resume is explicit and rechecks backend readiness. Advisor configuration stays server-side: the browser exposes provider availability and recovery guidance but never accepts, stores, or displays an API key.
+Paused capture failures and questionable frames awaiting manual registration offer a camera-only retake, which cannot create a replacement plot run. Manual registration remains in-context on the canvas after the replacement capture. Resume is explicit and rechecks backend readiness. Advisor configuration stays server-side: the browser exposes provider availability and recovery guidance but never accepts, stores, or displays an API key.
 
 ## Extension Points
 

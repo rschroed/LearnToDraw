@@ -13,8 +13,10 @@ interface StudioCanvasProps {
   runs: Record<string, PlotRun>;
   captureReview: PlotRunCaptureReviewPayload | null;
   busy: boolean;
+  retryingCapture: boolean;
   error: string | null;
   onConfirmRegistration: (runId: string, corners: NormalizationCorners) => Promise<void>;
+  onRetryCapture: (runId: string) => Promise<void>;
 }
 
 function readFinite(value: unknown): number | null {
@@ -41,8 +43,10 @@ export function StudioCanvas({
   runs,
   captureReview,
   busy,
+  retryingCapture,
   error,
   onConfirmRegistration,
+  onRetryCapture,
 }: StudioCanvasProps) {
   const currentRun = session.current_run_id ? runs[session.current_run_id] ?? null : null;
   const latestObservedRun = useMemo(
@@ -145,6 +149,20 @@ export function StudioCanvas({
 
       {mode === "registration" && captureReview ? (
         <div className="studio-registration-wrap">
+          <div className="studio-registration-recovery">
+            <p>
+              If the page is blocked, blurred, or overexposed, take another photograph before
+              placing its corners. The drawing will not be plotted again.
+            </p>
+            <button
+              type="button"
+              className="button-secondary"
+              disabled={busy}
+              onClick={() => void onRetryCapture(captureReview.run_id)}
+            >
+              {retryingCapture ? "Retaking photo…" : "Retake photo only"}
+            </button>
+          </div>
           <CaptureReviewEditor
             capture={captureReview.capture}
             review={captureReview.review}
