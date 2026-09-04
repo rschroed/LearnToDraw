@@ -1,20 +1,21 @@
 # LearnToDraw
 
-LearnToDraw is a local-first control panel for a pen-plotter workflow. The backend owns hardware access, plot execution, and artifact persistence; the frontend is a lightweight localhost dashboard for monitoring and safe control.
+LearnToDraw is a local-first creative studio for a pen plotter that can draw, photograph its work, interpret the result, and add another pass. The backend owns hardware access, plot execution, and artifact persistence; the frontend stays a lightweight localhost interface.
 
 ## What It Does
 
 - Runs a FastAPI backend that stays responsible for plotter and camera access
-- Provides a React/Vite operator UI with focused Workflow, Machine, and History views
+- Provides a prompt-first React/Vite studio with an artwork canvas and compact agent conversation
+- Keeps session history in Gallery and machine setup, diagnostics, capture tools, and manual SVG plotting in Controls
 - Supports tracked plot runs from uploaded SVGs or built-in patterns
-- Persists captures, plot assets, plot runs, bounded iterative drawing sessions, calibration, and workspace/device settings locally
+- Persists captures, plot assets, plot runs, versioned drawing sessions, calibration, and workspace/device settings locally
 - Supports both mock adapters for development and a real AxiDraw-backed plotter path
 - Supports both mock camera capture and a CameraBridge-backed real camera path
 
 ## Architecture At A Glance
 
 - `apps/api` is the system of record for hardware status, commands, plot workflow orchestration, and artifact persistence
-- `apps/web` is a localhost dashboard that polls backend HTTP endpoints and never talks to hardware directly
+- `apps/web` is a localhost creative interface that polls backend HTTP endpoints and never talks to hardware directly
 - `artifacts/` stores local captures, prepared plot assets, plot-run records, calibration data, and workspace/device state
 - AxiDraw-specific behavior stays isolated in backend adapters and wrappers
 
@@ -74,7 +75,7 @@ CameraBridge is not assumed to be running just because it is installed. Start `C
 
 ## Optional Drawing Advisor
 
-Iterative drawing sessions are additive, use the existing backend-owned plot-run path, and require explicit operator approval before every plotted pass. The visual drawing advisor is disabled by default. To enable the OpenAI Responses API adapter, set:
+Agentic drawing sessions begin with a plan and safe first-pass preview before motion. One explicit approval authorizes an attended sequence of additive plot, capture, and assessment cycles; stop, heartbeat, registration, and recovery boundaries remain backend-enforced. The visual drawing advisor is disabled by default. To enable the OpenAI Responses API adapter, set:
 
 ```bash
 export LEARN_TO_DRAW_DRAWING_ADVISOR=openai
