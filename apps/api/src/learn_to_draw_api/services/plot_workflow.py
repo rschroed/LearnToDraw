@@ -185,6 +185,34 @@ class PlotWorkflowService:
             run=run,
         )
 
+    def retry_capture(self, run_id: str) -> PlotRun:
+        with self._lock:
+            run = self._run_store.get(run_id)
+            plot_stage = run.stage_states.get("plot")
+            if plot_stage is None or plot_stage.status != "completed":
+                raise AppConflictError(
+                    "A capture can be retaken only after plotting has completed."
+                )
+            if run.capture_mode == "skip":
+                raise AppConflictError("Capture is disabled for this plot run.")
+            if run.status not in {"completed", "failed", "awaiting_capture_review"}:
+                raise AppConflictError("This plot run is not ready for a capture retry.")
+            active_run = self._get_active_run_locked()
+            if active_run is not None and active_run.id != run.id:
+                raise AppConflictError("A plot run is already active.")
+            if run.capture is not None and all(
+                item.id != run.capture.id for item in run.capture_attempts
+            ):
+                run.capture_attempts.append(run.capture)
+            run.status = "capturing"
+            run.error = None
+            run.updated_at = datetime.now(timezone.utc)
+            self._active_run_id = run.id
+            self._run_store.save(run)
+            worker = Thread(target=self._retry_capture_in_thread, args=(run.id,), daemon=True)
+            worker.start()
+            return run
+
     def _execute_run_in_thread(self, run_id: str) -> None:
         try:
             self._executor.execute_run(run_id)
@@ -290,6 +318,32 @@ class PlotWorkflowService:
             run.stage_states["capture_review"] = PlotStageState(
                 status="failed",
                 started_at=run.stage_states["capture_review"].started_at,
+                completed_at=datetime.now(timezone.utc),
+                message=str(exc),
+            )
+            self._run_store.save(run)
+        finally:
+            with self._lock:
+                if self._active_run_id == run_id:
+                    try:
+                        run = self._run_store.get(run_id)
+                    except AppNotFoundError:
+                        self._active_run_id = None
+                    else:
+                        if run.status not in ACTIVE_RUN_STATUSES:
+                            self._active_run_id = None
+
+    def _retry_capture_in_thread(self, run_id: str) -> None:
+        try:
+            self._executor.retry_capture(run_id)
+        except Exception as exc:
+            run = self._run_store.get(run_id)
+            run.status = "failed"
+            run.error = str(exc)
+            run.updated_at = datetime.now(timezone.utc)
+            run.stage_states["capture"] = PlotStageState(
+                status="failed",
+                started_at=run.stage_states["capture"].started_at,
                 completed_at=datetime.now(timezone.utc),
                 message=str(exc),
             )

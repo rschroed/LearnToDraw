@@ -25,7 +25,7 @@ The current backend structure centers on:
 - `services/captures.py` for persisted raw capture storage, normalized-derivative metadata, and latest-capture lookup
 - `services/capture_service.py` and `services/capture_normalization/` for backend-owned manual page registration
 - `services/plot_workflow.py` for asset storage, run creation, preparation, plotting, and capture flow
-- `services/drawing_sessions.py` for versioned creative-session state and reuse of existing plot runs
+- `services/drawing_sessions.py` for versioned creative-session state, attended autonomous coordination, and reuse of existing plot runs
 - `services/drawing_advisor.py` for prompt-first planning and read-only visual assessment; provider output cannot invoke hardware
 - `services/plotter_calibration.py`, `services/plotter_device_settings.py`, and `services/plotter_workspace.py` for persisted plotter state
 
@@ -84,7 +84,7 @@ The app currently supports a single backend-owned plotting workflow with a few n
 - `workspace`: physical page size and margins are persisted; the page may extend beyond machine travel, but its margin-bounded drawable coordinates must remain inside the current operational safe bounds
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides
 - `calibration`: persisted plotter calibration remains backend-owned and separate from transient runtime overrides
-- `drawing sessions`: V2 begins from creative intent, persists an agent-authored plan and safe first-pass preview before motion, and requires explicit authorization before creating its first normal PlotRun; V1 bounded sessions remain readable
+- `drawing sessions`: V2 begins from creative intent, requires explicit authorization for an attended open-ended session, then serially observes and decides whether to continue, complete, or pause; V1 bounded sessions remain readable
 
 ## Manual Capture Registration V2
 
@@ -110,9 +110,15 @@ V1 capture and run JSON remains readable without migration. Its detector fields 
 
 V2 `DrawingSession` records begin from intent alone. Creation persists `planning` state and dispatches provider work without moving hardware. The drawing advisor returns a concise plan, paper strategy, completion intent, and first-pass SVG. That SVG is untrusted: the backend validates its exact drawable-area canvas, supported passive elements, direct coordinates, safe stroke styling, and in-bounds geometry before storing it as a generated asset and exposing `awaiting_approval`.
 
-Guidance submitted before approval is appended to the session event timeline, invalidates the current proposal, and starts a newer planning generation. A stale provider response cannot replace the latest generation. Approval is the first operation that creates a normal PlotRun; all existing preparation, active-run exclusion, hardware adapters, capture registration, and persistence remain authoritative. The current contract slice pauses after the registered first observation rather than starting an unattended next pass.
+Guidance submitted before approval is appended to the session event timeline, invalidates the current proposal, and starts a newer planning generation. A stale provider response cannot replace the latest generation. Approval is the first operation that creates a normal PlotRun; all existing preparation, active-run exclusion, hardware adapters, capture registration, and persistence remain authoritative.
 
 V2 persistence adds an append-only typed event timeline, plan and proposal references, authorization timestamps, current-run identity, pass count, and queued guidance. SVGs and images remain separate stored artifacts. Session-list responses expose compact gallery summaries without embedding artifact data. Provider calls remain read-only and receive no hardware tools.
+
+After a registered observation completes, a single backend coordinator sends the rectified grayscale page, current plan, bounded interpretation history, and atomically consumed guidance through `assess_iteration`. `continue` requires a validated incremental SVG and creates exactly one next normal PlotRun. `complete` ends the session. `pause` records its reason and any requested human action. Provider, hardware, registration, and artifact failures pause rather than permitting another physical pass.
+
+Authorization remains attended. The creative client posts a heartbeat; if it is absent for 30 seconds, the current physical pass and its capture may finish, but another pass cannot begin. Stop-after-pass uses the same boundary. Backend startup converts persisted active V2 sessions to a paused recovery state, so process restart never restarts hardware automatically. Resume refreshes attendance, clears the soft-stop request, and re-enters coordination only after normal readiness checks.
+
+A plot run may retake its capture after plotting completed. The run retains an ordered `capture_attempts` history, keeps `capture` as the selected current attempt for compatibility, and sends only that current attempt through registration and normalization. Retake never invokes the plotter. Earlier capture files and metadata remain immutable evidence.
 
 Existing session JSON without `session_version` parses as V1. Its bounded two-to-ten-pass, request-advice, and approve-next-iteration behavior remains available through the legacy endpoints and is not migrated or proactively rewritten.
 
