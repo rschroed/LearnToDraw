@@ -4,12 +4,18 @@ from abc import ABC, abstractmethod
 import base64
 from dataclasses import dataclass
 import json
+from threading import RLock
 from typing import Literal, Optional
 
 import httpx
 
 from learn_to_draw_api.config import AppConfig
-from learn_to_draw_api.models import DrawingAdvisorStatus, ServiceUnavailableError
+from learn_to_draw_api.models import (
+    DrawingAdvisorRuntimeStatus,
+    DrawingAdvisorStatus,
+    InvalidArtifactError,
+    ServiceUnavailableError,
+)
 
 
 @dataclass(frozen=True)
@@ -82,6 +88,65 @@ class DrawingAdvisor(ABC):
         prior_interpretations: list[str],
     ) -> DrawingAdviceDraft:
         raise NotImplementedError
+
+
+class RuntimeDrawingAdvisor(DrawingAdvisor):
+    """Thread-safe advisor delegate with an optional process-memory override."""
+
+    def __init__(self, startup_advisor: DrawingAdvisor) -> None:
+        self._startup_advisor = startup_advisor
+        self._active_advisor = startup_advisor
+        self._source: Literal["startup", "runtime"] = "startup"
+        self._lock = RLock()
+
+    @property
+    def status(self) -> DrawingAdvisorStatus:
+        return self._snapshot().status
+
+    @property
+    def runtime_status(self) -> DrawingAdvisorRuntimeStatus:
+        with self._lock:
+            advisor = self._active_advisor
+            source = self._source
+        return DrawingAdvisorRuntimeStatus(advisor=advisor.status, source=source)
+
+    def configure_openai(self, *, api_key: str, model: str) -> DrawingAdvisorRuntimeStatus:
+        normalized_key = api_key.strip()
+        normalized_model = model.strip()
+        if not normalized_key:
+            raise InvalidArtifactError("Enter an OpenAI API key.")
+        if len(normalized_key) > 4096:
+            raise InvalidArtifactError("The OpenAI API key is too long.")
+        if not normalized_model:
+            raise InvalidArtifactError("Enter an OpenAI model.")
+
+        candidate = OpenAIDrawingAdvisor(
+            api_key=normalized_key,
+            model=normalized_model,
+        )
+        with self._lock:
+            self._active_advisor = candidate
+            self._source = "runtime"
+        return self.runtime_status
+
+    def clear_runtime_configuration(self) -> DrawingAdvisorRuntimeStatus:
+        with self._lock:
+            self._active_advisor = self._startup_advisor
+            self._source = "startup"
+        return self.runtime_status
+
+    def plan_initial(self, **kwargs) -> InitialDrawingPlanDraft:
+        return self._snapshot().plan_initial(**kwargs)
+
+    def assess_iteration(self, **kwargs) -> DrawingAssessmentDraft:
+        return self._snapshot().assess_iteration(**kwargs)
+
+    def propose_next_layer(self, **kwargs) -> DrawingAdviceDraft:
+        return self._snapshot().propose_next_layer(**kwargs)
+
+    def _snapshot(self) -> DrawingAdvisor:
+        with self._lock:
+            return self._active_advisor
 
 
 class DisabledDrawingAdvisor(DrawingAdvisor):

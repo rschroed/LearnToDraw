@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 
 class HardwareError(Exception):
@@ -381,6 +381,18 @@ class DrawingAdvisorStatus(BaseModel):
     available: bool
     model: Optional[str] = None
     message: Optional[str] = None
+
+
+class DrawingAdvisorConfigurationRequest(BaseModel):
+    api_key: SecretStr
+    model: str = Field(min_length=1, max_length=200)
+
+
+class DrawingAdvisorRuntimeStatus(BaseModel):
+    advisor: DrawingAdvisorStatus
+    source: Literal["startup", "runtime"]
+    persistence: Literal["process_memory"] = "process_memory"
+    clears_on_restart: bool = True
 
 
 class DrawingIterationProposal(BaseModel):

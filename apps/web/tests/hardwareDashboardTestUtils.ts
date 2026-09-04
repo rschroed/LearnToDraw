@@ -14,6 +14,7 @@ import type {
   PlotterWorkspace,
 } from "../src/types/hardware";
 import type { HelperStatus } from "../src/types/helper";
+import type { DrawingAdvisorRuntimeStatus } from "../src/types/drawing";
 import type { PlotRun, PlotRunSummary } from "../src/types/plotting";
 
 export const defaultHardwareStatus: HardwareStatus = {
@@ -218,6 +219,9 @@ export interface HardwareDashboardHarness {
     action: "confirm";
     corners: NormalizationCorners;
   }>;
+  advisorConfiguration: DrawingAdvisorRuntimeStatus;
+  advisorConfigurationRequests: Array<{ api_key: string; model: string }>;
+  advisorConfigurationClears: number;
 }
 
 function jsonResponse(body: unknown) {
@@ -280,6 +284,19 @@ export function createHardwareDashboardHarness(
     safeBoundsRequests: [],
     workspaceRequests: [],
     captureReviewActions: [],
+    advisorConfiguration: {
+      advisor: {
+        driver: "mock",
+        available: true,
+        model: "mock-advisor-v1",
+        message: null,
+      },
+      source: "startup",
+      persistence: "process_memory",
+      clears_on_restart: true,
+    },
+    advisorConfigurationRequests: [],
+    advisorConfigurationClears: 0,
     ...overrides,
   };
 }
@@ -396,6 +413,41 @@ export function installHardwareDashboardFetchMock(
 
       if (url === "/api/hardware/status") {
         return jsonResponse(harness.currentHardwareStatus);
+      }
+
+      if (url === "/api/drawing-advisor/configuration") {
+        if (method === "POST") {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            api_key: string;
+            model: string;
+          };
+          harness.advisorConfigurationRequests.push(body);
+          harness.advisorConfiguration = {
+            advisor: {
+              driver: "openai",
+              available: true,
+              model: body.model,
+              message: null,
+            },
+            source: "runtime",
+            persistence: "process_memory",
+            clears_on_restart: true,
+          };
+        } else if (method === "DELETE") {
+          harness.advisorConfigurationClears += 1;
+          harness.advisorConfiguration = {
+            advisor: {
+              driver: "disabled",
+              available: false,
+              model: null,
+              message: "Drawing advisor is disabled on the local backend.",
+            },
+            source: "startup",
+            persistence: "process_memory",
+            clears_on_restart: true,
+          };
+        }
+        return jsonResponse(harness.advisorConfiguration);
       }
 
       if (url === "/api/captures/latest") {

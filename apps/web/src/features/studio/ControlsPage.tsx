@@ -4,6 +4,7 @@ import { MachineSetupPanel } from "../hardware/MachineSetupPanel";
 import { useHardwareDashboard } from "../hardware/useHardwareDashboard";
 import { PlotWorkflowPanel } from "../plot-workflow/PlotWorkflowPanel";
 import { usePlotWorkflow } from "../plot-workflow/usePlotWorkflow";
+import { AdvisorSetupPanel } from "./AdvisorSetupPanel";
 
 export function ControlsPage() {
   const hardware = useHardwareDashboard();
@@ -45,6 +46,8 @@ export function ControlsPage() {
       </header>
 
       {hardware.error ? <div className="banner" role="alert">{hardware.error}</div> : null}
+
+      <AdvisorSetupPanel />
 
       <section className="controls-section">
         <div className="controls-section-heading">

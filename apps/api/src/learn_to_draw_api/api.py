@@ -24,7 +24,10 @@ from learn_to_draw_api.services.camera_device_settings import (
     CameraDeviceSettingsStore,
 )
 from learn_to_draw_api.services.hardware import HardwareService
-from learn_to_draw_api.services.drawing_advisor import build_drawing_advisor
+from learn_to_draw_api.services.drawing_advisor import (
+    RuntimeDrawingAdvisor,
+    build_drawing_advisor,
+)
 from learn_to_draw_api.services.drawing_sessions import (
     DrawingSessionService,
     DrawingSessionStore,
@@ -120,11 +123,12 @@ def create_app(
         device_settings_service=device_settings_service,
         workspace_service=workspace_service,
     )
+    drawing_advisor = RuntimeDrawingAdvisor(build_drawing_advisor(app_config))
     drawing_session_service = DrawingSessionService(
         store=DrawingSessionStore(app_config.drawing_sessions_dir),
         plot_workflow_service=plot_workflow_service,
         workspace_service=workspace_service,
-        advisor=build_drawing_advisor(app_config),
+        advisor=drawing_advisor,
     )
 
     @asynccontextmanager
@@ -140,6 +144,7 @@ def create_app(
     app.state.hardware_service = hardware_service
     app.state.plot_workflow_service = plot_workflow_service
     app.state.drawing_session_service = drawing_session_service
+    app.state.drawing_advisor = drawing_advisor
     app.state.plotter_calibration_service = calibration_service
     app.state.plotter_device_settings_service = device_settings_service
     app.state.camera_device_settings_service = camera_settings_service
@@ -156,6 +161,7 @@ def create_app(
             hardware_service,
             plot_workflow_service,
             drawing_session_service,
+            drawing_advisor,
         )
     )
     app.mount(

@@ -77,13 +77,17 @@ CameraBridge is not assumed to be running just because it is installed. Start `C
 
 Agentic drawing sessions begin with a plan and safe first-pass preview before motion. One explicit approval authorizes an attended sequence of additive plot, capture, and assessment cycles; stop, heartbeat, registration, and recovery boundaries remain backend-enforced. The visual drawing advisor is disabled by default. To enable the OpenAI Responses API adapter, set:
 
+For a temporary local setup, open **Controls → Creative advisor**. The key is submitted to the loopback backend, held only in process memory, cleared from the form after submission, and discarded when the API stops. It is never stored in browser storage or LearnToDraw artifacts.
+
+For startup-time server configuration instead, set:
+
 ```bash
 export LEARN_TO_DRAW_DRAWING_ADVISOR=openai
 export OPENAI_API_KEY=YOUR_API_KEY
 export LEARN_TO_DRAW_OPENAI_MODEL=YOUR_IMAGE_CAPABLE_MODEL
 ```
 
-The configured model must accept image input and structured JSON output. The adapter sends the registered grayscale observation and drawing intent, then accepts only interpretation text and a bounded SVG layer. API credentials are read from the environment and are never persisted in artifacts. For local contract testing without an external request, use `LEARN_TO_DRAW_DRAWING_ADVISOR=mock`.
+The configured model must accept image input and structured JSON output. The adapter sends the registered grayscale observation and drawing intent, then accepts only interpretation text and a bounded SVG layer. Runtime and environment credentials remain server-side and are never persisted in artifacts. For local contract testing without an external request, use `LEARN_TO_DRAW_DRAWING_ADVISOR=mock`.
 
 The implementation uses the official [Responses API](https://platform.openai.com/docs/api-reference/responses/create) contract. Model availability and billing depend on the OpenAI API project associated with the supplied key.
 

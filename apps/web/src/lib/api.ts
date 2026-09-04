@@ -20,6 +20,7 @@ import type {
 } from "../types/plotting";
 import type { HelperStatus } from "../types/helper";
 import type {
+  DrawingAdvisorRuntimeStatus,
   DrawingSession,
   DrawingSessionListResponse,
   LatestDrawingSessionResponse,
@@ -134,6 +135,24 @@ async function requestJson<T>(
 
 export function fetchHardwareStatus() {
   return requestJson<HardwareStatus>("/api/hardware/status");
+}
+
+export function fetchDrawingAdvisorConfiguration() {
+  return requestJson<DrawingAdvisorRuntimeStatus>("/api/drawing-advisor/configuration");
+}
+
+export function configureDrawingAdvisor(apiKey: string, model: string) {
+  return requestJson<DrawingAdvisorRuntimeStatus>("/api/drawing-advisor/configuration", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey, model }),
+  });
+}
+
+export function clearDrawingAdvisorConfiguration() {
+  return requestJson<DrawingAdvisorRuntimeStatus>("/api/drawing-advisor/configuration", {
+    method: "DELETE",
+  });
 }
 
 export function fetchLatestCapture() {

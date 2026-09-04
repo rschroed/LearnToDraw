@@ -185,4 +185,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added a session gallery whose preview follows the latest or final camera observation, while retaining machine setup, capture, diagnostics, manual SVG plotting, and legacy session tools under Controls
 - Kept provider secrets entirely backend-configured and preserved the existing polling, PlotRun, capture, registration, hardware-adapter, and V1 compatibility boundaries
 
+## Runtime Drawing Advisor Setup Slice
+
+- Added a Controls form that submits an OpenAI key and model to the localhost backend without using browser storage or persisted artifacts
+- Added a thread-safe runtime advisor delegate so existing drawing-session orchestration uses the configured provider without restarting the API
+- Kept runtime credentials only in backend process memory, returned redacted status only, and made clear/restart restore startup configuration
+- Left environment-based advisor configuration available for operators who prefer startup-time setup
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

@@ -19,6 +19,13 @@ export interface DrawingAdvisorStatus {
   message: string | null;
 }
 
+export interface DrawingAdvisorRuntimeStatus {
+  advisor: DrawingAdvisorStatus;
+  source: "startup" | "runtime";
+  persistence: "process_memory";
+  clears_on_restart: boolean;
+}
+
 export interface DrawingIterationProposal {
   interpretation: string;
   asset: PlotAsset;

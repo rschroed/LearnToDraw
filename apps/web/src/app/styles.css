@@ -3552,6 +3552,73 @@ button {
   margin-bottom: 22px;
 }
 
+.advisor-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
+  gap: 28px;
+  padding: 24px;
+  margin-bottom: 22px;
+  border: 1px solid rgba(208, 161, 95, 0.34);
+  border-radius: 26px;
+  background: linear-gradient(135deg, rgba(55, 46, 35, 0.94), rgba(28, 27, 25, 0.94));
+  box-shadow: var(--shadow);
+}
+
+.advisor-setup-copy h2 {
+  margin: 0;
+  font-size: clamp(1.5rem, 2vw, 2.1rem);
+  letter-spacing: -0.035em;
+}
+
+.advisor-setup-copy > p:not(.eyebrow) {
+  max-width: 62ch;
+  color: var(--text-muted);
+}
+
+.advisor-status {
+  display: grid;
+  gap: 5px;
+  padding: 13px 15px;
+  border-radius: 15px;
+  background: rgba(255, 248, 238, 0.06);
+  color: var(--text-muted);
+}
+
+.advisor-status strong {
+  color: var(--text);
+}
+
+.advisor-setup-form {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.advisor-setup-form .field-group input {
+  border-color: rgba(255, 248, 238, 0.16);
+  background: rgba(10, 10, 9, 0.54);
+  color: var(--text);
+}
+
+.advisor-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.advisor-setup-feedback,
+.advisor-setup-error {
+  margin: 0;
+}
+
+.advisor-setup-feedback {
+  color: #b9d9bf;
+}
+
+.advisor-setup-error {
+  color: #ffb7a7;
+}
+
 .controls-section-heading {
   margin-bottom: 18px;
 }
@@ -3587,6 +3654,7 @@ button {
   }
 
   .studio-plan-card,
+  .advisor-setup,
   .controls-section > .machine-setup-layout {
     grid-template-columns: 1fr;
   }
