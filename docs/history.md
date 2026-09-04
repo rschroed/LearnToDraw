@@ -151,4 +151,12 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added dashboard controls for session creation, pass history, interpretation, proposal preview, and explicit approval before each additional physical plot
 - Kept provider failures retryable and left unattended plotting, erasure, separate-attempt layouts, and cross-session learning out of scope
 
+## Prompt-First Agentic Session Contract Slice
+
+- Added a versioned V2 drawing-session contract that starts from creative intent and produces an agent-authored plan plus safe first-pass SVG before any plotter motion
+- Added asynchronous planning, pre-approval conversational revisions with stale-response protection, a compact session-list contract, and one-time first-pass approval
+- Split the advisor boundary into prompt-first planning and structured observation assessment while retaining the legacy V1 advice method
+- Added typed append-only session events, proposal and authorization metadata, and open-ended V2 persistence while keeping V1 bounded session JSON readable without migration
+- Kept all provider output behind the existing SVG safety validator and reused normal PlotRuns only after explicit approval
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

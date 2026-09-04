@@ -355,10 +355,14 @@ class PlotRun(BaseModel):
 
 
 DrawingSessionStatus = Literal[
+    "planning",
+    "awaiting_approval",
     "running",
     "awaiting_capture_review",
     "observed",
     "proposal_ready",
+    "paused",
+    "stopping",
     "completed",
     "failed",
 ]
@@ -389,24 +393,103 @@ class DrawingIteration(BaseModel):
     next_proposal: Optional[DrawingIterationProposal] = None
 
 
+DrawingSessionEventType = Literal[
+    "session_created",
+    "user_guidance",
+    "plan_ready",
+    "plan_failed",
+    "session_approved",
+    "plot_started",
+    "observation_ready",
+    "agent_decision",
+    "session_paused",
+    "session_resumed",
+    "stop_requested",
+    "session_completed",
+    "session_failed",
+]
+
+
+class DrawingSessionEvent(BaseModel):
+    id: str
+    type: DrawingSessionEventType
+    created_at: datetime
+    message: str
+    asset_id: Optional[str] = None
+    run_id: Optional[str] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class DrawingSessionPlan(BaseModel):
+    summary: str
+    paper_strategy: str
+    completion_intent: str
+
+
+class DrawingSessionProposal(BaseModel):
+    asset: PlotAsset
+    created_at: datetime
+    advisor_driver: str
+    advisor_model: Optional[str] = None
+
+
+class DrawingSessionAuthorization(BaseModel):
+    approved_at: Optional[datetime] = None
+    stop_requested: bool = False
+    last_heartbeat_at: Optional[datetime] = None
+
+
 class DrawingSession(BaseModel):
     id: str
+    session_version: Literal[1, 2] = 1
     intent: str
     mode: Literal["additive"] = "additive"
-    iteration_limit: int = Field(ge=2, le=10)
+    iteration_limit: Optional[int] = Field(default=None, ge=2, le=10)
     status: DrawingSessionStatus
     created_at: datetime
     updated_at: datetime
-    iterations: list[DrawingIteration]
+    iterations: list[DrawingIteration] = Field(default_factory=list)
     advisor: DrawingAdvisorStatus
     error: Optional[str] = None
+    plan: Optional[DrawingSessionPlan] = None
+    current_proposal: Optional[DrawingSessionProposal] = None
+    current_run_id: Optional[str] = None
+    pass_count: int = Field(default=0, ge=0)
+    planning_generation: int = Field(default=0, ge=0)
+    authorization: DrawingSessionAuthorization = Field(
+        default_factory=DrawingSessionAuthorization
+    )
+    queued_guidance: list[str] = Field(default_factory=list)
+    events: list[DrawingSessionEvent] = Field(default_factory=list)
+    approved_at: Optional[datetime] = None
+    paused_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
 
 class DrawingSessionCreateRequest(BaseModel):
     intent: str = Field(min_length=3, max_length=1000)
-    initial_asset_id: str = Field(min_length=1)
-    iteration_limit: int = Field(default=3, ge=2, le=10)
+    initial_asset_id: Optional[str] = Field(default=None, min_length=1)
+    iteration_limit: Optional[int] = Field(default=None, ge=2, le=10)
     mode: Literal["additive"] = "additive"
+
+
+class DrawingSessionMessageRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class DrawingSessionSummary(BaseModel):
+    id: str
+    session_version: Literal[1, 2]
+    intent: str
+    status: DrawingSessionStatus
+    pass_count: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+    preview_url: Optional[str] = None
+
+
+class DrawingSessionListResponse(BaseModel):
+    sessions: list[DrawingSessionSummary]
 
 
 class LatestDrawingSessionResponse(BaseModel):

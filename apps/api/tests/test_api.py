@@ -70,6 +70,17 @@ def wait_for_run_status(client: TestClient, run_id: str, statuses: set[str]):
     raise AssertionError(f"Plot run did not reach expected state: {statuses}")
 
 
+def wait_for_session_status(client: TestClient, session_id: str, statuses: set[str]):
+    for _ in range(200):
+        response = client.get(f"/api/drawing-sessions/{session_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] in statuses:
+            return payload
+        time.sleep(0.01)
+    raise AssertionError(f"Drawing session did not reach expected state: {statuses}")
+
+
 def _jpeg_bytes(width: int = 640, height: int = 480) -> bytes:
     image = np.full((height, width, 3), 245, dtype=np.uint8)
     cv2.rectangle(image, (80, 60), (width - 80, height - 60), (32, 32, 32), 6)
@@ -1010,6 +1021,76 @@ def test_drawing_session_runs_observes_proposes_and_approves_next_layer(tmp_path
         first_run_id,
         second_run_id,
     ]
+    assert reloaded["session_version"] == 1
+
+
+def test_v2_drawing_session_plans_revises_and_approves_without_early_motion(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created_response = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A curious pelican riding a bicycle"},
+        )
+        assert created_response.status_code == 200
+        created = created_response.json()
+        assert created["session_version"] == 2
+        assert created["iterations"] == []
+        assert client.get("/api/plot-runs").json()["runs"] == []
+
+        planned = wait_for_session_status(
+            client,
+            created["id"],
+            {"awaiting_approval"},
+        )
+        first_asset_id = planned["current_proposal"]["asset"]["id"]
+        assert planned["plan"]["paper_strategy"]
+        assert planned["iteration_limit"] is None
+        assert client.get("/api/plot-runs").json()["runs"] == []
+
+        message_response = client.post(
+            f"/api/drawing-sessions/{created['id']}/messages",
+            json={"text": "Make the pose feel less formal."},
+        )
+        assert message_response.status_code == 200
+        revised = wait_for_session_status(
+            client,
+            created["id"],
+            {"awaiting_approval"},
+        )
+        assert revised["planning_generation"] == 2
+        assert revised["current_proposal"]["asset"]["id"] != first_asset_id
+        assert revised["queued_guidance"] == ["Make the pose feel less formal."]
+
+        summaries = client.get("/api/drawing-sessions").json()["sessions"]
+        assert summaries[0]["id"] == created["id"]
+        assert summaries[0]["preview_url"] == revised["current_proposal"]["asset"]["public_url"]
+
+        approved_response = client.post(
+            f"/api/drawing-sessions/{created['id']}/approve"
+        )
+        assert approved_response.status_code == 200
+        approved = approved_response.json()
+        assert approved["status"] == "running"
+        assert approved["authorization"]["approved_at"] is not None
+        assert approved["pass_count"] == 1
+        assert len(approved["iterations"]) == 1
+
+
+def test_v2_drawing_session_disabled_advisor_pauses_without_motion(tmp_path):
+    with create_test_client(tmp_path) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A quiet field of flowers"},
+        ).json()
+        paused = wait_for_session_status(client, created["id"], {"paused"})
+
+        assert "Drawing advisor is disabled" in paused["error"]
+        assert paused["current_proposal"] is None
+        assert client.get("/api/plot-runs").json()["runs"] == []
 
 
 def test_drawing_session_disabled_advisor_leaves_observation_retryable(tmp_path):
