@@ -104,3 +104,84 @@ def test_openai_advisor_sends_registered_image_and_parses_structured_output(monk
     image_input = captured["json"]["input"][0]["content"][1]
     assert image_input["image_url"].startswith("data:image/png;base64,")
     assert "secret" not in json.dumps(captured["json"])
+
+
+def test_openai_advisor_plans_first_pass_without_an_image(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output_text": json.dumps(
+                    {
+                        "summary": "Begin with the pelican and bicycle silhouette.",
+                        "paper_strategy": "Keep the same sheet in place.",
+                        "completion_intent": "Stop when the gesture reads clearly.",
+                        "svg": _svg(),
+                    }
+                )
+            }
+
+    def fake_post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    advisor = OpenAIDrawingAdvisor(api_key="secret", model="vision-model")
+
+    result = advisor.plan_initial(
+        intent="A pelican riding a bicycle",
+        guidance=["Keep it loose."],
+        drawable_width_mm=170,
+        drawable_height_mm=257,
+    )
+
+    assert result.summary.startswith("Begin with")
+    assert captured["json"]["text"]["format"]["name"] == "initial_drawing_plan"
+    assert captured["json"]["input"][0]["content"] == [
+        {
+            "type": "input_text",
+            "text": captured["json"]["input"][0]["content"][0]["text"],
+        }
+    ]
+
+
+def test_openai_advisor_assessment_requires_svg_for_continue(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output_text": json.dumps(
+                    {
+                        "assessment": "The composition needs one more gesture.",
+                        "decision": "continue",
+                        "reason": "The bicycle does not read yet.",
+                        "svg": _svg(),
+                        "requested_human_action": None,
+                    }
+                )
+            }
+
+    monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: Response())
+    advisor = OpenAIDrawingAdvisor(api_key="secret", model="vision-model")
+
+    result = advisor.assess_iteration(
+        intent="A pelican riding a bicycle",
+        plan_summary="Start with the silhouette.",
+        observed_image=b"png-bytes",
+        observed_media_type="image/png",
+        iteration_number=1,
+        drawable_width_mm=170,
+        drawable_height_mm=257,
+        prior_interpretations=[],
+        guidance=["Make it playful."],
+    )
+
+    assert result.decision == "continue"
+    assert result.svg_text == _svg()

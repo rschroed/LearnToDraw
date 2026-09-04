@@ -8,6 +8,8 @@ from learn_to_draw_api.models import (
     CameraDeviceSelectionRequest,
     DrawingSession,
     DrawingSessionCreateRequest,
+    DrawingSessionListResponse,
+    DrawingSessionMessageRequest,
     HealthResponse,
     HardwareStatus,
     LatestPlotRunResponse,
@@ -170,6 +172,10 @@ def build_api_router(
     def post_drawing_session(request: DrawingSessionCreateRequest) -> DrawingSession:
         return drawing_session_service.create(request)
 
+    @router.get("/api/drawing-sessions", response_model=DrawingSessionListResponse)
+    def get_drawing_sessions() -> DrawingSessionListResponse:
+        return drawing_session_service.list()
+
     @router.get(
         "/api/drawing-sessions/latest",
         response_model=LatestDrawingSessionResponse,
@@ -180,6 +186,23 @@ def build_api_router(
     @router.get("/api/drawing-sessions/{session_id}", response_model=DrawingSession)
     def get_drawing_session(session_id: str) -> DrawingSession:
         return drawing_session_service.get(session_id)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/messages",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_message(
+        session_id: str,
+        request: DrawingSessionMessageRequest,
+    ) -> DrawingSession:
+        return drawing_session_service.add_message(session_id, request)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/approve",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_approve(session_id: str) -> DrawingSession:
+        return drawing_session_service.approve(session_id)
 
     @router.post(
         "/api/drawing-sessions/{session_id}/advice",
