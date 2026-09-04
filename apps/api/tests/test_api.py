@@ -1198,6 +1198,51 @@ def test_v2_stop_after_pass_prevents_another_plot(tmp_path):
     assert plotter.plot_count == 1
 
 
+def test_v2_emergency_stop_cancels_plot_without_capture_or_continuation(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=1)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A drawing that can be interrupted"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve"
+        ).json()
+        active_run = wait_for_run_status(
+            client,
+            approved["current_run_id"],
+            {"plotting"},
+        )
+
+        stop_response = client.post(
+            f"/api/drawing-sessions/{approved['id']}/stop",
+            json={"mode": "emergency"},
+        )
+        assert stop_response.status_code == 200
+        cancelled = wait_for_run_status(
+            client,
+            active_run["id"],
+            {"cancelled"},
+        )
+        paused = wait_for_session_status(client, approved["id"], {"paused"})
+
+    assert cancelled["capture"] is None
+    assert cancelled["interruption_reason"] == "operator_emergency_stop"
+    assert cancelled["progress_artifact"]["public_url"].endswith(
+        "-paused-progress.svg"
+    )
+    assert cancelled["stage_states"]["plot"]["status"] == "cancelled"
+    assert paused["pass_count"] == 1
+    assert paused["authorization"]["stop_requested"] is True
+    assert plotter.plot_count == 1
+
+
 def test_v2_attention_timeout_pauses_before_a_second_plot(tmp_path, monkeypatch):
     monkeypatch.setattr(drawing_sessions_module, "ATTENTION_GRACE_SECONDS", 0)
     plotter = CountingPlotter(plot_delay_s=0)

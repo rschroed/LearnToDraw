@@ -28,3 +28,6 @@ class PlotterAdapter(Protocol):
 
     def plot(self, document: PlotDocument) -> PlotResult:
         ...
+
+    def request_stop(self) -> bool:
+        ...

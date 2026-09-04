@@ -58,6 +58,7 @@ Hardware integration stays behind backend interfaces.
 - mock adapters remain available for development and tests
 - the AxiDraw adapter path lives behind the same backend-owned interface
 - undocumented or version-sensitive AxiDraw behavior should stay isolated in the wrapper/client layer rather than leaking into services or routes
+- real Plot-context execution runs in a dedicated process so documented keyboard-pause signal handling never installs inside the API server's worker thread
 
 ## Persistence Under `artifacts/`
 
@@ -119,6 +120,14 @@ After a registered observation completes, a single backend coordinator sends the
 Authorization remains attended. The creative client posts a heartbeat; if it is absent for 30 seconds, the current physical pass and its capture may finish, but another pass cannot begin. Stop-after-pass uses the same boundary. Backend startup converts persisted active V2 sessions to a paused recovery state, so process restart never restarts hardware automatically. Resume refreshes attendance, clears the soft-stop request, and re-enters coordination only after normal readiness checks.
 
 A plot run may retake its capture after plotting completed. The run retains an ordered `capture_attempts` history, keeps `capture` as the selected current attempt for compatibility, and sends only that current attempt through registration and normalization. Retake never invokes the plotter. Earlier capture files and metadata remain immutable evidence.
+
+### Emergency plot interruption
+
+The generic plotter adapter exposes a narrow active-plot stop request. The real AxiDraw implementation launches [documented Plot context](https://axidraw.com/doc/py_api/) in a dedicated spawned process, enables `keyboard_pause`, and requests SVG output from `plot_run(True)`. Emergency stop sends SIGINT only to that child. AxiDraw finishes the current line segment and returns error code 103 plus an updated SVG when its documented pause path succeeds.
+
+The executor stores returned progress as a diagnostic `progress_artifact`, transitions the plot stage and run through `stopping` to terminal `cancelled`, and never begins capture or another drawing-session assessment. The creative session pauses with an inspection instruction. Partial-plot resume is intentionally unsupported; the progress SVG is evidence rather than an executable recovery path. Error code 102 from the physical Pause button receives the same terminal treatment.
+
+Mock plotting uses a deterministic stop event but preserves the same result contract. Compatibility-only and unavailable adapters do not grow undocumented interruption behavior. The physical AxiDraw Pause control remains the fallback if process signalling cannot be confirmed.
 
 Existing session JSON without `session_version` parses as V1. Its bounded two-to-ten-pass, request-advice, and approve-next-iteration behavior remains available through the legacy endpoints and is not migrated or proactively rewritten.
 
