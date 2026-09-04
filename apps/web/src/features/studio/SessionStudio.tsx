@@ -134,9 +134,14 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
             session={session}
             runs={controller.runs}
             captureReview={controller.captureReview}
-            busy={controller.busyAction === "register"}
+            busy={
+              controller.busyAction === "register" ||
+              controller.busyAction === "retry-capture"
+            }
+            retryingCapture={controller.busyAction === "retry-capture"}
             error={controller.captureReview ? controller.error : null}
             onConfirmRegistration={controller.confirmRegistration}
+            onRetryCapture={controller.retryCapture}
           />
 
           {session.status === "planning" ? (

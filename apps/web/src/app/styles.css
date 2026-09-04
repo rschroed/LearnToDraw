@@ -3138,6 +3138,25 @@ button {
   background: #121110;
 }
 
+.studio-registration-recovery {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 248, 238, 0.05);
+}
+
+.studio-registration-recovery p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
 .studio-conversation {
   position: sticky;
   top: 18px;
@@ -3606,7 +3625,8 @@ button {
   .studio-canvas-toolbar,
   .studio-recovery,
   .studio-complete,
-  .studio-stop-dock {
+  .studio-stop-dock,
+  .studio-registration-recovery {
     align-items: stretch;
     flex-direction: column;
   }

@@ -181,6 +181,7 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Made cumulative intended artwork, the latest registered observation, exact V2 overlay, and in-context manual corner registration the primary visual surface
 - Added a compact typed conversation for plan revisions, queued guidance, agent interpretations, decisions, human-action requests, and consequential machine events
 - Added attended heartbeat behavior, stop-after-pass, confirmation-protected emergency stop, capture-only retake, paused recovery, and accessible live-state treatment to the creative interface
+- Exposed capture-only retake directly beside manual registration so a blocked, blurred, or overexposed frame can be replaced before its corners are confirmed, without replotting
 - Added a session gallery whose preview follows the latest or final camera observation, while retaining machine setup, capture, diagnostics, manual SVG plotting, and legacy session tools under Controls
 - Kept provider secrets entirely backend-configured and preserved the existing polling, PlotRun, capture, registration, hardware-adapter, and V1 compatibility boundaries
 

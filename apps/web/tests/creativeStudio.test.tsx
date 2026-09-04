@@ -407,6 +407,25 @@ it("offers capture-only recovery and never creates a replacement plot run", asyn
   ).toBe(false);
 });
 
+it("retakes a questionable registration frame without replotting", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const pendingRun = buildRun("awaiting_capture_review", buildCapture("pending"));
+  const harness = installStudioMock(buildSession("awaiting_capture_review"), pendingRun);
+  render(<App />);
+
+  expect(await screen.findByText(/manual page registration required/i)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /retake photo only/i }));
+
+  await waitFor(() => {
+    expect(harness.requests.some((request) => request.url.endsWith("/capture/retry"))).toBe(true);
+  });
+  expect(
+    harness.requests.some(
+      (request) => request.url === "/api/plot-runs" && request.method === "POST",
+    ),
+  ).toBe(false);
+});
+
 it("renders a true V2 overlay and exposes manual registration when required", async () => {
   const observedCapture = buildCapture("confirmed");
   const completedRun = buildRun("completed", observedCapture);
@@ -425,8 +444,10 @@ it("renders a true V2 overlay and exposes manual registration when required", as
       runs={{ "run-1": completedRun }}
       captureReview={null}
       busy={false}
+      retryingCapture={false}
       error={null}
       onConfirmRegistration={async () => undefined}
+      onRetryCapture={async () => undefined}
     />,
   );
 
@@ -438,18 +459,23 @@ it("renders a true V2 overlay and exposes manual registration when required", as
 
   const pendingCapture = buildCapture("pending");
   const pendingRun = buildRun("awaiting_capture_review", pendingCapture);
+  const retryCapture = vi.fn(async () => undefined);
   rerender(
     <StudioCanvas
       session={buildSession("awaiting_capture_review")}
       runs={{ "run-1": pendingRun }}
       captureReview={{ run_id: "run-1", capture: pendingCapture, review: pendingCapture.review! }}
       busy={false}
+      retryingCapture={false}
       error={null}
       onConfirmRegistration={async () => undefined}
+      onRetryCapture={retryCapture}
     />,
   );
   expect(await screen.findByText(/manual page registration required/i)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /register page/i })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /retake photo only/i }));
+  expect(retryCapture).toHaveBeenCalledWith("run-1");
 });
 
 it("lists session-level work in Gallery and keeps the full operator surface in Controls", async () => {
