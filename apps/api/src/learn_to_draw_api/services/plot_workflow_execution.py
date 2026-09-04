@@ -118,97 +118,11 @@ class PlotRunExecutor:
                     message="Capture skipped for diagnostic run.",
                 )
             else:
-                run.status = "capturing"
-                run.updated_at = datetime.now(timezone.utc)
-                run = self._set_stage_state(
+                self._capture_run(
                     run,
-                    stage="capture",
-                    status="in_progress",
+                    page_width_mm=preparation.page_width_mm,
+                    page_height_mm=preparation.page_height_mm,
                     message="Capturing plotted page.",
-                )
-                capture_started = datetime.now(timezone.utc)
-                capture_artifact = self._camera.capture()
-                capture_completed = datetime.now(timezone.utc)
-                capture_metadata = self._capture_service.persist_raw_capture(capture_artifact)
-                initial_corners, proposal = self._capture_service.propose_registration_corners(
-                    content=capture_artifact.content,
-                    image_width=capture_metadata.width,
-                    image_height=capture_metadata.height,
-                )
-                automatically_confirmed = proposal.status == "suggested"
-                if automatically_confirmed:
-                    self._capture_service.validate_registration_corners(
-                        corners=initial_corners,
-                        image_width=capture_metadata.width,
-                        image_height=capture_metadata.height,
-                    )
-                review = CaptureReview(
-                    registration_version=2,
-                    review_mode="manual_corners",
-                    review_required=not automatically_confirmed,
-                    review_status="confirmed" if automatically_confirmed else "pending",
-                    proposed_corners=initial_corners,
-                    confirmed_corners=initial_corners if automatically_confirmed else None,
-                    confirmation_source="auto" if automatically_confirmed else None,
-                    proposal=proposal,
-                )
-                capture_metadata = self._capture_service.save_capture_review(
-                    capture_metadata.id,
-                    review=review,
-                )
-                run.capture = capture_metadata
-                capture_duration_ms = duration_ms(capture_started, capture_completed)
-                run.observed_result = ObservedResultRecord(
-                    capture=capture_metadata,
-                    camera_driver=self._camera.driver,
-                    captured_at=capture_metadata.timestamp,
-                    duration_ms=capture_duration_ms,
-                )
-                run.camera_run_details = {
-                    "driver": self._camera.driver,
-                    "capture_id": capture_metadata.id,
-                    "resolution": f"{capture_metadata.width}x{capture_metadata.height}",
-                    "duration_ms": capture_duration_ms,
-                }
-                run = self._set_stage_state(
-                    run,
-                    stage="capture",
-                    status="completed",
-                    message="Capture completed.",
-                )
-                run.camera_run_details = {
-                    **run.camera_run_details,
-                    "capture_review_required": not automatically_confirmed,
-                    "capture_registration_source": (
-                        "automatic" if automatically_confirmed else "manual"
-                    ),
-                }
-                if automatically_confirmed:
-                    current_stage = "capture_review"
-                    run = self._set_stage_state(
-                        run,
-                        stage="capture_review",
-                        status="in_progress",
-                        message="Applying stable automatic page registration.",
-                    )
-                    normalization_target = target_from_page_size(
-                        page_width_mm=preparation.page_width_mm,
-                        page_height_mm=preparation.page_height_mm,
-                        source="prepared_svg",
-                    )
-                    self._finalize_capture_review(
-                        run,
-                        normalization_target=normalization_target,
-                    )
-                    return
-
-                run.status = "awaiting_capture_review"
-                run.updated_at = datetime.now(timezone.utc)
-                self._set_stage_state(
-                    run,
-                    stage="capture_review",
-                    status="in_progress",
-                    message="Place the four page corners to register this capture.",
                 )
                 return
 
@@ -250,6 +164,118 @@ class PlotRunExecutor:
             else:
                 self._run_store.save(run)
 
+    def retry_capture(self, run_id: str) -> PlotRun:
+        run = self._run_store.get(run_id)
+        preparation = run.plotter_run_details.get("preparation", {})
+        return self._capture_run(
+            run,
+            page_width_mm=float(preparation["page_width_mm"]),
+            page_height_mm=float(preparation["page_height_mm"]),
+            message="Retaking the plotted-page observation without plotting again.",
+        )
+
+    def _capture_run(
+        self,
+        run: PlotRun,
+        *,
+        page_width_mm: float,
+        page_height_mm: float,
+        message: str,
+    ) -> PlotRun:
+        run.status = "capturing"
+        run.error = None
+        run.updated_at = datetime.now(timezone.utc)
+        run = self._set_stage_state(
+            run,
+            stage="capture",
+            status="in_progress",
+            message=message,
+        )
+        capture_started = datetime.now(timezone.utc)
+        capture_artifact = self._camera.capture()
+        capture_completed = datetime.now(timezone.utc)
+        capture_metadata = self._capture_service.persist_raw_capture(capture_artifact)
+        initial_corners, proposal = self._capture_service.propose_registration_corners(
+            content=capture_artifact.content,
+            image_width=capture_metadata.width,
+            image_height=capture_metadata.height,
+        )
+        automatically_confirmed = proposal.status == "suggested"
+        if automatically_confirmed:
+            self._capture_service.validate_registration_corners(
+                corners=initial_corners,
+                image_width=capture_metadata.width,
+                image_height=capture_metadata.height,
+            )
+        review = CaptureReview(
+            registration_version=2,
+            review_mode="manual_corners",
+            review_required=not automatically_confirmed,
+            review_status="confirmed" if automatically_confirmed else "pending",
+            proposed_corners=initial_corners,
+            confirmed_corners=initial_corners if automatically_confirmed else None,
+            confirmation_source="auto" if automatically_confirmed else None,
+            proposal=proposal,
+        )
+        capture_metadata = self._capture_service.save_capture_review(
+            capture_metadata.id,
+            review=review,
+        )
+        run.capture = capture_metadata
+        if all(item.id != capture_metadata.id for item in run.capture_attempts):
+            run.capture_attempts.append(capture_metadata)
+        capture_duration_ms = duration_ms(capture_started, capture_completed)
+        run.observed_result = ObservedResultRecord(
+            capture=capture_metadata,
+            camera_driver=self._camera.driver,
+            captured_at=capture_metadata.timestamp,
+            duration_ms=capture_duration_ms,
+        )
+        run.camera_run_details = {
+            "driver": self._camera.driver,
+            "capture_id": capture_metadata.id,
+            "capture_attempt_count": len(run.capture_attempts),
+            "resolution": f"{capture_metadata.width}x{capture_metadata.height}",
+            "duration_ms": capture_duration_ms,
+        }
+        run = self._set_stage_state(
+            run,
+            stage="capture",
+            status="completed",
+            message="Capture completed.",
+        )
+        run.camera_run_details = {
+            **run.camera_run_details,
+            "capture_review_required": not automatically_confirmed,
+            "capture_registration_source": (
+                "automatic" if automatically_confirmed else "manual"
+            ),
+        }
+        run = self._set_stage_state(
+            run,
+            stage="capture_review",
+            status="in_progress",
+            message=(
+                "Applying stable automatic page registration."
+                if automatically_confirmed
+                else "Place the four page corners to register this capture."
+            ),
+        )
+        if automatically_confirmed:
+            normalization_target = target_from_page_size(
+                page_width_mm=page_width_mm,
+                page_height_mm=page_height_mm,
+                source="prepared_svg",
+            )
+            return self._finalize_capture_review(
+                run,
+                normalization_target=normalization_target,
+            )
+        run.status = "awaiting_capture_review"
+        run.updated_at = datetime.now(timezone.utc)
+        self._run_store.save(run)
+        return run
+
     def finalize_capture_review(self, run_id: str) -> PlotRun:
         run = self._run_store.get(run_id)
         preparation = run.plotter_run_details.get("preparation", {})
@@ -284,6 +310,10 @@ class PlotRunExecutor:
             review=review,
         )
         run.capture = updated_capture
+        run.capture_attempts = [
+            updated_capture if item.id == updated_capture.id else item
+            for item in run.capture_attempts
+        ]
         if run.observed_result is not None:
             run.observed_result = run.observed_result.model_copy(
                 update={"capture": updated_capture}

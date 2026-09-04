@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import math
 from pathlib import Path
-from threading import RLock, Thread
+from threading import Event, RLock, Thread
 from typing import Optional
 import xml.etree.ElementTree as ET
 from uuid import uuid4
@@ -19,11 +19,11 @@ from learn_to_draw_api.models import (
     DrawingSessionMessageRequest,
     DrawingSessionPlan,
     DrawingSessionProposal,
+    DrawingSessionStopRequest,
     DrawingSessionSummary,
     DrawingSession,
     DrawingSessionCreateRequest,
     InvalidArtifactError,
-    ServiceUnavailableError,
 )
 from learn_to_draw_api.services.drawing_advisor import DrawingAdvisor
 from learn_to_draw_api.services.plot_workflow import PlotWorkflowService
@@ -44,6 +44,9 @@ ACTIVE_PLOT_RUN_STATUSES = {
 }
 ALLOWED_ADVISOR_SVG_TAGS = SVG_SHAPE_TAGS | {"svg", "g", "title", "desc"}
 DIMENSION_EPSILON_MM = 0.01
+ATTENTION_GRACE_SECONDS = 30
+COORDINATOR_POLL_SECONDS = 0.05
+ACTIVE_SESSION_STATUSES = {"running", "awaiting_capture_review", "stopping"}
 
 
 class DrawingSessionStore:
@@ -97,6 +100,28 @@ class DrawingSessionService:
         self._workspace_service = workspace_service
         self._advisor = advisor
         self._lock = RLock()
+        self._coordinator_stop = Event()
+        self._coordinator_thread: Optional[Thread] = None
+
+    def start(self) -> None:
+        with self._lock:
+            if self._coordinator_thread is not None and self._coordinator_thread.is_alive():
+                return
+            self._recover_after_restart()
+            self._coordinator_stop.clear()
+            self._coordinator_thread = Thread(
+                target=self._run_coordinator,
+                daemon=True,
+                name="drawing-session-coordinator",
+            )
+            self._coordinator_thread.start()
+
+    def stop(self) -> None:
+        self._coordinator_stop.set()
+        thread = self._coordinator_thread
+        if thread is not None:
+            thread.join(timeout=1)
+        self._coordinator_thread = None
 
     def create(self, request: DrawingSessionCreateRequest) -> DrawingSession:
         intent = request.intent.strip()
@@ -231,11 +256,13 @@ class DrawingSessionService:
                 raise AppConflictError("This drawing session has no first pass ready to approve.")
             if session.authorization.approved_at is not None:
                 raise AppConflictError("This drawing session has already been approved.")
+            self._assert_no_other_active_session(session.id)
             asset = self._plot_workflow.get_asset(session.current_proposal.asset.id)
             run = self._plot_workflow.create_run(asset.id)
             now = datetime.now(timezone.utc)
             session.authorization.approved_at = now
             session.authorization.stop_requested = False
+            session.authorization.last_heartbeat_at = now
             session.approved_at = now
             session.current_run_id = run.id
             session.pass_count = 1
@@ -265,6 +292,91 @@ class DrawingSessionService:
             session.updated_at = now
             session.error = None
             return self._store.save(session)
+
+    def heartbeat(self, session_id: str) -> DrawingSession:
+        with self._lock:
+            session = self._store.get(session_id)
+            if session.session_version != 2:
+                raise AppConflictError("Heartbeat is available only for V2 drawing sessions.")
+            if session.status in {"completed", "failed"}:
+                return session
+            now = datetime.now(timezone.utc)
+            session.authorization.last_heartbeat_at = now
+            session.updated_at = now
+            return self._store.save(session)
+
+    def stop_session(
+        self,
+        session_id: str,
+        request: DrawingSessionStopRequest,
+    ) -> DrawingSession:
+        if request.mode == "emergency":
+            raise AppConflictError(
+                "Emergency plot interruption is not available until the interruptible worker is enabled."
+            )
+        with self._lock:
+            session = self._sync(self._store.get(session_id))
+            if session.session_version != 2:
+                raise AppConflictError("Stop control is available only for V2 drawing sessions.")
+            if session.status in {"completed", "failed"}:
+                return session
+            now = datetime.now(timezone.utc)
+            session.authorization.stop_requested = True
+            session.updated_at = now
+            session.events.append(
+                self._event(
+                    "stop_requested",
+                    "Stop requested. No additional pass will begin.",
+                    run_id=session.current_run_id,
+                    details={"mode": request.mode},
+                )
+            )
+            if session.current_run_id is None:
+                self._pause_session(
+                    session,
+                    "Stopped before plotting began.",
+                )
+            else:
+                run = self._plot_workflow.get_run(session.current_run_id)
+                if run.status in ACTIVE_PLOT_RUN_STATUSES:
+                    session.status = "stopping"
+                else:
+                    self._pause_session(
+                        session,
+                        "Stopped after the current pass.",
+                        run_id=run.id,
+                    )
+            return self._store.save(session)
+
+    def resume(self, session_id: str) -> DrawingSession:
+        with self._lock:
+            session = self._sync(self._store.get(session_id))
+            if session.session_version != 2:
+                raise AppConflictError("Resume is available only for V2 drawing sessions.")
+            if session.status != "paused":
+                raise AppConflictError("This drawing session is not paused.")
+            self._assert_no_other_active_session(session.id)
+            now = datetime.now(timezone.utc)
+            session.authorization.stop_requested = False
+            session.authorization.last_heartbeat_at = now
+            session.paused_at = None
+            session.error = None
+            session.requested_human_action = None
+            session.assessing_run_id = None
+            session.updated_at = now
+            session.events.append(
+                self._event("session_resumed", "The attended drawing session resumed.")
+            )
+            if session.authorization.approved_at is None:
+                session.status = "planning"
+                session.planning_generation += 1
+                generation = session.planning_generation
+                self._store.save(session)
+                self._dispatch_plan(session.id, generation)
+            else:
+                session.status = "running"
+                self._store.save(session)
+            return session
 
     def request_advice(self, session_id: str) -> DrawingSession:
         with self._lock:
@@ -406,34 +518,382 @@ class DrawingSessionService:
         if run.status == "awaiting_capture_review":
             session.status = "awaiting_capture_review"
         elif run.status in ACTIVE_PLOT_RUN_STATUSES:
-            session.status = "running"
+            session.status = (
+                "stopping" if session.authorization.stop_requested else "running"
+            )
         elif run.status == "failed":
-            session.status = "failed"
-            session.error = run.error
-        elif session.status not in {"completed", "failed"}:
-            session.status = "paused"
-            session.paused_at = datetime.now(timezone.utc)
-            session.error = None
-            if previous_status != "paused":
-                session.events.append(
-                    self._event(
-                        "observation_ready",
-                        "The registered first-pass observation is ready.",
-                        run_id=run.id,
-                    )
+            if session.status != "paused":
+                self._pause_session(
+                    session,
+                    run.error or "The current plot run failed.",
+                    run_id=run.id,
                 )
-                session.events.append(
-                    self._event(
-                        "session_paused",
-                        "Automatic continuation is not enabled in this contract slice.",
-                        run_id=run.id,
-                    )
-                )
+        elif (
+            run.status == "completed"
+            and session.status == "awaiting_capture_review"
+        ):
+            session.status = (
+                "stopping" if session.authorization.stop_requested else "running"
+            )
         session.advisor = self._advisor.status
         if session.status != previous_status:
             session.updated_at = datetime.now(timezone.utc)
             self._store.save(session)
         return session
+
+    def _run_coordinator(self) -> None:
+        while not self._coordinator_stop.wait(COORDINATOR_POLL_SECONDS):
+            try:
+                session_ids = [
+                    session.id
+                    for session in self._store.list()
+                    if session.session_version == 2
+                    and session.authorization.approved_at is not None
+                    and session.status in ACTIVE_SESSION_STATUSES
+                ]
+                for session_id in session_ids:
+                    self._coordinate_session(session_id)
+            except Exception:
+                # A single malformed persisted record must not terminate coordination for
+                # every other local session. Individual session failures are handled below.
+                continue
+
+    def _coordinate_session(self, session_id: str) -> None:
+        with self._lock:
+            session = self._store.get(session_id)
+            if (
+                session.session_version != 2
+                or session.authorization.approved_at is None
+                or session.status not in ACTIVE_SESSION_STATUSES
+                or session.current_run_id is None
+            ):
+                return
+            run = self._plot_workflow.get_run(session.current_run_id)
+            if run.status == "awaiting_capture_review":
+                if session.status != "awaiting_capture_review":
+                    session.status = "awaiting_capture_review"
+                    session.updated_at = datetime.now(timezone.utc)
+                    session.events.append(
+                        self._event(
+                            "session_paused",
+                            "Place the four physical page corners to continue.",
+                            run_id=run.id,
+                        )
+                    )
+                    self._store.save(session)
+                return
+            if run.status in ACTIVE_PLOT_RUN_STATUSES:
+                next_status = (
+                    "stopping" if session.authorization.stop_requested else "running"
+                )
+                if session.status != next_status:
+                    session.status = next_status
+                    session.updated_at = datetime.now(timezone.utc)
+                    self._store.save(session)
+                return
+            if run.status == "failed":
+                self._pause_session(
+                    session,
+                    run.error or "The current plot run failed.",
+                    run_id=run.id,
+                )
+                self._store.save(session)
+                return
+            if run.status != "completed":
+                return
+            if session.authorization.stop_requested:
+                self._pause_session(
+                    session,
+                    "Stopped after the current pass.",
+                    run_id=run.id,
+                )
+                self._store.save(session)
+                return
+            if not self._has_recent_heartbeat(session):
+                self._pause_session(
+                    session,
+                    "Creative screen disconnected. Resume when an operator is present.",
+                    run_id=run.id,
+                )
+                self._store.save(session)
+                return
+            if session.assessing_run_id == run.id:
+                return
+            capture = run.observed_result.capture if run.observed_result else run.capture
+            if (
+                capture is None
+                or capture.normalized is None
+                or capture.review is None
+                or capture.review.review_status != "confirmed"
+            ):
+                session.status = "awaiting_capture_review"
+                session.updated_at = datetime.now(timezone.utc)
+                self._store.save(session)
+                return
+            image_path = Path(capture.file_path).with_name(
+                f"{capture.id}-rectified-grayscale.png"
+            )
+            if not image_path.exists():
+                self._pause_session(
+                    session,
+                    "The registered observed image is unavailable. Retake the capture.",
+                    run_id=run.id,
+                )
+                self._store.save(session)
+                return
+            guidance = list(session.queued_guidance)
+            session.queued_guidance = []
+            session.assessing_run_id = run.id
+            session.status = "running"
+            session.updated_at = datetime.now(timezone.utc)
+            if not self._event_exists(session, "observation_ready", run.id):
+                session.events.append(
+                    self._event(
+                        "observation_ready",
+                        f"Registered observation for pass {session.pass_count} is ready.",
+                        run_id=run.id,
+                        details={
+                            "capture_id": capture.id,
+                            "normalized_url": capture.normalized.rectified_grayscale_url,
+                        },
+                    )
+                )
+            self._store.save(session)
+            intent = session.intent
+            plan_summary = session.plan.summary if session.plan else session.intent
+            iteration_number = session.pass_count
+            workspace = self._workspace_service.current_validated()
+            plot_area = workspace.to_plot_area()
+            prior_interpretations = [
+                str(event.details.get("assessment"))
+                for event in session.events
+                if event.type == "agent_decision" and event.details.get("assessment")
+            ]
+
+        try:
+            assessment = self._advisor.assess_iteration(
+                intent=intent,
+                plan_summary=plan_summary,
+                observed_image=image_path.read_bytes(),
+                observed_media_type="image/png",
+                iteration_number=iteration_number,
+                drawable_width_mm=plot_area.draw_width_mm,
+                drawable_height_mm=plot_area.draw_height_mm,
+                prior_interpretations=prior_interpretations,
+                guidance=guidance,
+            )
+            safe_svg = None
+            if assessment.decision == "continue":
+                if not assessment.svg_text:
+                    raise InvalidArtifactError(
+                        "A continue decision did not include a drawing layer."
+                    )
+                safe_svg = validate_and_normalize_advisor_svg(
+                    assessment.svg_text,
+                    drawable_width_mm=plot_area.draw_width_mm,
+                    drawable_height_mm=plot_area.draw_height_mm,
+                )
+            self._apply_assessment(
+                session_id=session_id,
+                run_id=run.id,
+                assessment=assessment,
+                safe_svg=safe_svg,
+                consumed_guidance=guidance,
+            )
+        except Exception as exc:
+            self._pause_assessment_failure(
+                session_id=session_id,
+                run_id=run.id,
+                consumed_guidance=guidance,
+                message=str(exc),
+            )
+
+    def _apply_assessment(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        assessment,
+        safe_svg: Optional[str],
+        consumed_guidance: list[str],
+    ) -> None:
+        asset = None
+        if assessment.decision == "continue" and safe_svg is not None:
+            with self._lock:
+                session = self._store.get(session_id)
+                next_number = session.pass_count + 1
+                asset_name = f"{session.intent[:48]} — pass {next_number}"
+            asset = self._plot_workflow.create_generated_asset(
+                name=asset_name,
+                svg_text=safe_svg,
+            )
+        with self._lock:
+            session = self._store.get(session_id)
+            if session.assessing_run_id != run_id or session.current_run_id != run_id:
+                return
+            now = datetime.now(timezone.utc)
+            session.assessing_run_id = None
+            session.events.append(
+                self._event(
+                    "agent_decision",
+                    assessment.reason,
+                    asset_id=asset.id if asset is not None else None,
+                    run_id=run_id,
+                    details={
+                        "assessment": assessment.assessment,
+                        "decision": assessment.decision,
+                        "reason": assessment.reason,
+                        "guidance": consumed_guidance,
+                        "requested_human_action": assessment.requested_human_action,
+                    },
+                )
+            )
+            if assessment.decision == "complete":
+                session.status = "completed"
+                session.completed_at = now
+                session.error = None
+                session.events.append(
+                    self._event(
+                        "session_completed",
+                        assessment.reason,
+                        run_id=run_id,
+                    )
+                )
+            elif assessment.decision == "pause":
+                session.requested_human_action = assessment.requested_human_action
+                self._pause_session(session, assessment.reason, run_id=run_id)
+            elif asset is not None:
+                if session.authorization.stop_requested:
+                    self._pause_session(
+                        session,
+                        "Stopped after the current pass.",
+                        run_id=run_id,
+                    )
+                elif not self._has_recent_heartbeat(session):
+                    self._pause_session(
+                        session,
+                        "Creative screen disconnected. Resume when an operator is present.",
+                        run_id=run_id,
+                    )
+                else:
+                    self._assert_no_other_active_session(session.id)
+                    next_run = self._plot_workflow.create_run(asset.id)
+                    previous_iteration = session.iterations[-1]
+                    previous_iteration.next_proposal = DrawingIterationProposal(
+                        interpretation=assessment.assessment,
+                        asset=asset,
+                        advisor_driver=self._advisor.status.driver,
+                        advisor_model=self._advisor.status.model,
+                        created_at=now,
+                        approved_at=now,
+                        approved_run_id=next_run.id,
+                    )
+                    session.iterations.append(
+                        DrawingIteration(
+                            number=session.pass_count + 1,
+                            asset=asset,
+                            run_id=next_run.id,
+                            created_at=now,
+                        )
+                    )
+                    session.current_proposal = DrawingSessionProposal(
+                        asset=asset,
+                        created_at=now,
+                        advisor_driver=self._advisor.status.driver,
+                        advisor_model=self._advisor.status.model,
+                    )
+                    session.pass_count += 1
+                    session.current_run_id = next_run.id
+                    session.status = "running"
+                    session.error = None
+                    session.events.append(
+                        self._event(
+                            "plot_started",
+                            f"Started pass {session.pass_count}.",
+                            asset_id=asset.id,
+                            run_id=next_run.id,
+                        )
+                    )
+            session.updated_at = now
+            self._store.save(session)
+
+    def _pause_assessment_failure(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        consumed_guidance: list[str],
+        message: str,
+    ) -> None:
+        with self._lock:
+            session = self._store.get(session_id)
+            if session.assessing_run_id != run_id:
+                return
+            session.assessing_run_id = None
+            session.queued_guidance = consumed_guidance + session.queued_guidance
+            self._pause_session(session, message, run_id=run_id)
+            self._store.save(session)
+
+    def _recover_after_restart(self) -> None:
+        for session in self._store.list():
+            if session.session_version != 2 or session.status not in ACTIVE_SESSION_STATUSES:
+                continue
+            session.assessing_run_id = None
+            self._pause_session(
+                session,
+                "Backend restarted. Confirm readiness before resuming this session.",
+                run_id=session.current_run_id,
+            )
+            self._store.save(session)
+
+    def _assert_no_other_active_session(self, session_id: str) -> None:
+        for candidate in self._store.list():
+            if (
+                candidate.id != session_id
+                and candidate.session_version == 2
+                and candidate.status in ACTIVE_SESSION_STATUSES
+            ):
+                raise AppConflictError("Another creative drawing session is active.")
+
+    @staticmethod
+    def _has_recent_heartbeat(session: DrawingSession) -> bool:
+        heartbeat = session.authorization.last_heartbeat_at
+        if heartbeat is None:
+            return False
+        return (datetime.now(timezone.utc) - heartbeat).total_seconds() <= ATTENTION_GRACE_SECONDS
+
+    @staticmethod
+    def _event_exists(
+        session: DrawingSession,
+        event_type: str,
+        run_id: str,
+    ) -> bool:
+        return any(
+            event.type == event_type and event.run_id == run_id
+            for event in session.events
+        )
+
+    def _pause_session(
+        self,
+        session: DrawingSession,
+        message: str,
+        *,
+        run_id: Optional[str] = None,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        session.status = "paused"
+        session.paused_at = now
+        session.error = message
+        session.updated_at = now
+        if not (
+            session.events
+            and session.events[-1].type == "session_paused"
+            and session.events[-1].message == message
+            and session.events[-1].run_id == run_id
+        ):
+            session.events.append(
+                self._event("session_paused", message, run_id=run_id)
+            )
 
     def _dispatch_plan(self, session_id: str, generation: int) -> None:
         Thread(
@@ -501,7 +961,7 @@ class DrawingSessionService:
                     )
                 )
                 self._store.save(session)
-        except (InvalidArtifactError, ServiceUnavailableError, AppConflictError) as exc:
+        except Exception as exc:
             with self._lock:
                 session = self._store.get(session_id)
                 if session.planning_generation != generation:

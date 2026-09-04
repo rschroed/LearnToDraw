@@ -10,6 +10,7 @@ from learn_to_draw_api.models import (
     DrawingSessionCreateRequest,
     DrawingSessionListResponse,
     DrawingSessionMessageRequest,
+    DrawingSessionStopRequest,
     HealthResponse,
     HardwareStatus,
     LatestPlotRunResponse,
@@ -168,6 +169,10 @@ def build_api_router(
     ) -> PlotRunCaptureReviewResponse:
         return plot_workflow_service.confirm_capture_review(run_id, request)
 
+    @router.post("/api/plot-runs/{run_id}/capture/retry", response_model=PlotRun)
+    def post_plot_run_capture_retry(run_id: str) -> PlotRun:
+        return plot_workflow_service.retry_capture(run_id)
+
     @router.post("/api/drawing-sessions", response_model=DrawingSession)
     def post_drawing_session(request: DrawingSessionCreateRequest) -> DrawingSession:
         return drawing_session_service.create(request)
@@ -203,6 +208,30 @@ def build_api_router(
     )
     def post_drawing_session_approve(session_id: str) -> DrawingSession:
         return drawing_session_service.approve(session_id)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/heartbeat",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_heartbeat(session_id: str) -> DrawingSession:
+        return drawing_session_service.heartbeat(session_id)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/stop",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_stop(
+        session_id: str,
+        request: DrawingSessionStopRequest,
+    ) -> DrawingSession:
+        return drawing_session_service.stop_session(session_id, request)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/resume",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_resume(session_id: str) -> DrawingSession:
+        return drawing_session_service.resume(session_id)
 
     @router.post(
         "/api/drawing-sessions/{session_id}/advice",

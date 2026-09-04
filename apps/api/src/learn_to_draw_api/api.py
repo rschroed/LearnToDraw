@@ -130,7 +130,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         hardware_service.startup()
+        drawing_session_service.start()
         yield
+        drawing_session_service.stop()
         hardware_service.shutdown()
 
     app = FastAPI(title="LearnToDraw API", lifespan=lifespan)

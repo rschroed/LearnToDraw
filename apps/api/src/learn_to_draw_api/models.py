@@ -347,6 +347,7 @@ class PlotRun(BaseModel):
     asset: PlotAsset
     prepared_artifact: Optional[PreparedArtifactRecord] = None
     capture: Optional[CaptureMetadata] = None
+    capture_attempts: list[CaptureMetadata] = Field(default_factory=list)
     observed_result: Optional[ObservedResultRecord] = None
     error: Optional[str] = None
     stage_states: dict[str, PlotStageState] = Field(default_factory=dict)
@@ -454,12 +455,14 @@ class DrawingSession(BaseModel):
     plan: Optional[DrawingSessionPlan] = None
     current_proposal: Optional[DrawingSessionProposal] = None
     current_run_id: Optional[str] = None
+    assessing_run_id: Optional[str] = None
     pass_count: int = Field(default=0, ge=0)
     planning_generation: int = Field(default=0, ge=0)
     authorization: DrawingSessionAuthorization = Field(
         default_factory=DrawingSessionAuthorization
     )
     queued_guidance: list[str] = Field(default_factory=list)
+    requested_human_action: Optional[str] = None
     events: list[DrawingSessionEvent] = Field(default_factory=list)
     approved_at: Optional[datetime] = None
     paused_at: Optional[datetime] = None
@@ -475,6 +478,10 @@ class DrawingSessionCreateRequest(BaseModel):
 
 class DrawingSessionMessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
+
+
+class DrawingSessionStopRequest(BaseModel):
+    mode: Literal["after_pass", "emergency"]
 
 
 class DrawingSessionSummary(BaseModel):

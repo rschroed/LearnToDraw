@@ -159,4 +159,12 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Added typed append-only session events, proposal and authorization metadata, and open-ended V2 persistence while keeping V1 bounded session JSON readable without migration
 - Kept all provider output behind the existing SVG safety validator and reused normal PlotRuns only after explicit approval
 
+## Autonomous Session Orchestration And Capture Recovery Slice
+
+- Added a single backend coordinator that turns registered V2 observations into strict continue, complete, or pause decisions and creates at most one validated next PlotRun
+- Made one approval open-ended but attended through a 30-second creative-screen heartbeat, stop-after-pass, restart-to-pause recovery, and explicit resume
+- Queued guidance during physical work and consumed it exactly once at the next observation assessment, with restoration on provider or validation failure
+- Added capture-only retry after a completed plot and preserved ordered immutable capture attempts while keeping the existing current-capture contract
+- Kept manual registration, active-run exclusion, normal PlotRuns, mock adapters, and backend-only hardware ownership as the safety boundaries
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

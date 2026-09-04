@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
 
@@ -13,6 +14,7 @@ from learn_to_draw_api.adapters.mock_plotter import MockPlotter
 from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.api import create_app
 from learn_to_draw_api.config import AppConfig
+from learn_to_draw_api.services import drawing_sessions as drawing_sessions_module
 from learn_to_draw_api.models import (
     DeviceStatus,
     HardwareOperationError,
@@ -77,6 +79,30 @@ def wait_for_session_status(client: TestClient, session_id: str, statuses: set[s
         payload = response.json()
         if payload["status"] in statuses:
             return payload
+        time.sleep(0.01)
+    raise AssertionError(f"Drawing session did not reach expected state: {statuses}")
+
+
+def drive_v2_session_until(
+    client: TestClient,
+    session_id: str,
+    statuses: set[str],
+):
+    confirmed_run_ids = set()
+    for _ in range(500):
+        client.post(f"/api/drawing-sessions/{session_id}/heartbeat")
+        session = client.get(f"/api/drawing-sessions/{session_id}").json()
+        if session["status"] in statuses:
+            return session
+        run_id = session.get("current_run_id")
+        if session["status"] == "awaiting_capture_review" and run_id not in confirmed_run_ids:
+            run = client.get(f"/api/plot-runs/{run_id}").json()
+            response = client.post(
+                f"/api/plot-runs/{run_id}/capture-review/confirm",
+                json={"corners": run["capture"]["review"]["proposed_corners"]},
+            )
+            assert response.status_code == 200
+            confirmed_run_ids.add(run_id)
         time.sleep(0.01)
     raise AssertionError(f"Drawing session did not reach expected state: {statuses}")
 
@@ -300,6 +326,16 @@ class LowConfidenceCamera:
             width=640,
             height=480,
         )
+
+
+class CountingPlotter(MockPlotter):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.plot_count = 0
+
+    def plot(self, document):
+        self.plot_count += 1
+        return super().plot(document)
 
 
 def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
@@ -1091,6 +1127,182 @@ def test_v2_drawing_session_disabled_advisor_pauses_without_motion(tmp_path):
         assert "Drawing advisor is disabled" in paused["error"]
         assert paused["current_proposal"] is None
         assert client.get("/api/plot-runs").json()["runs"] == []
+
+
+def test_v2_session_auto_continues_consumes_guidance_and_completes(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0.03)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A loose field of flowers"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve"
+        ).json()
+        guidance_response = client.post(
+            f"/api/drawing-sessions/{planned['id']}/messages",
+            json={"text": "Make the flowers less regular."},
+        )
+        assert guidance_response.status_code == 200
+
+        completed = drive_v2_session_until(
+            client,
+            approved["id"],
+            {"completed"},
+        )
+
+    assert completed["pass_count"] == 2
+    assert plotter.plot_count == 2
+    decisions = [
+        event for event in completed["events"] if event["type"] == "agent_decision"
+    ]
+    assert decisions[0]["details"]["guidance"] == [
+        "Make the flowers less regular."
+    ]
+    assert decisions[-1]["details"]["decision"] == "complete"
+    assert completed["queued_guidance"] == []
+
+
+def test_v2_stop_after_pass_prevents_another_plot(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0.05)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A single thoughtful flower"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve"
+        ).json()
+        stopped = client.post(
+            f"/api/drawing-sessions/{approved['id']}/stop",
+            json={"mode": "after_pass"},
+        )
+        assert stopped.status_code == 200
+
+        paused = drive_v2_session_until(client, approved["id"], {"paused"})
+
+    assert paused["authorization"]["stop_requested"] is True
+    assert paused["pass_count"] == 1
+    assert plotter.plot_count == 1
+
+
+def test_v2_attention_timeout_pauses_before_a_second_plot(tmp_path, monkeypatch):
+    monkeypatch.setattr(drawing_sessions_module, "ATTENTION_GRACE_SECONDS", 0)
+    plotter = CountingPlotter(plot_delay_s=0)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "An attended drawing"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve"
+        ).json()
+        first_run = wait_for_run_status(
+            client,
+            approved["current_run_id"],
+            {"awaiting_capture_review"},
+        )
+        client.post(
+            f"/api/plot-runs/{first_run['id']}/capture-review/confirm",
+            json={"corners": first_run["capture"]["review"]["proposed_corners"]},
+        )
+        paused = wait_for_session_status(client, approved["id"], {"paused"})
+
+    assert "disconnected" in paused["error"]
+    assert paused["pass_count"] == 1
+    assert plotter.plot_count == 1
+
+
+def test_capture_retry_preserves_attempts_and_does_not_replot(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+    ) as client:
+        asset = client.post(
+            "/api/plot-assets/patterns",
+            json={"pattern_id": "tiny-square"},
+        ).json()
+        run = client.post("/api/plot-runs", json={"asset_id": asset["id"]}).json()
+        first = wait_for_run_status(
+            client,
+            run["id"],
+            {"awaiting_capture_review"},
+        )
+        first_capture_id = first["capture"]["id"]
+
+        retry_response = client.post(f"/api/plot-runs/{run['id']}/capture/retry")
+        assert retry_response.status_code == 200
+        second = wait_for_run_status(
+            client,
+            run["id"],
+            {"awaiting_capture_review"},
+        )
+
+    assert second["capture"]["id"] != first_capture_id
+    assert [item["id"] for item in second["capture_attempts"]] == [
+        first_capture_id,
+        second["capture"]["id"],
+    ]
+    assert plotter.plot_count == 1
+
+
+def test_v2_backend_restart_requires_explicit_resume(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=CountingPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A restart-safe drawing"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve"
+        ).json()
+        completed = drive_v2_session_until(client, approved["id"], {"completed"})
+
+    session_path = tmp_path / "drawing-sessions" / f"{completed['id']}.json"
+    persisted = json.loads(session_path.read_text(encoding="utf-8"))
+    persisted["status"] = "running"
+    persisted["completed_at"] = None
+    session_path.write_text(json.dumps(persisted), encoding="utf-8")
+    restarted_plotter = CountingPlotter(plot_delay_s=0)
+
+    with create_test_client(
+        tmp_path,
+        plotter=restarted_plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as restarted_client:
+        recovered = restarted_client.get(
+            f"/api/drawing-sessions/{completed['id']}"
+        ).json()
+
+    assert recovered["status"] == "paused"
+    assert "Backend restarted" in recovered["error"]
+    assert restarted_plotter.plot_count == 0
 
 
 def test_drawing_session_disabled_advisor_leaves_observation_retryable(tmp_path):
