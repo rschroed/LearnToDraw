@@ -144,7 +144,9 @@ The conversation records user guidance, agent plans, interpretations, decisions,
 
 The creative screen posts heartbeats only while visible and on an active authorized session. Closing or hiding it therefore allows the current physical pass to finish but prevents another pass after the backend grace period. Stop-after-pass preserves that same safe boundary. Emergency stop is confirmation-protected and is offered only while the current run is pending or plotting; its copy states that interruption occurs after the current path segment.
 
-Paused capture failures and questionable frames awaiting manual registration offer a camera-only retake, which cannot create a replacement plot run. Manual registration remains in-context on the canvas after the replacement capture. Resume is explicit and rechecks backend readiness. Advisor configuration stays server-side: the browser exposes provider availability and recovery guidance but never accepts, stores, or displays an API key.
+Paused capture failures and questionable frames awaiting manual registration offer a camera-only retake, which cannot create a replacement plot run. Manual registration remains in-context on the canvas after the replacement capture. Resume is explicit and rechecks backend readiness.
+
+Advisor credentials remain a backend-owned secret. Controls may submit an API key to the loopback-only configuration endpoint, but the frontend clears the password field after success and never writes the key to browser storage, artifacts, URLs, or responses. A thread-safe advisor delegate swaps the active provider atomically for planning and assessment work already owned by the drawing-session service. Runtime configuration exists only in backend process memory and clear/restart restores the startup environment configuration.
 
 ## Extension Points
 

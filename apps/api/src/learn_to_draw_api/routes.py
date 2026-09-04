@@ -6,6 +6,8 @@ from learn_to_draw_api.models import (
     CameraCaptureResponse,
     CameraCommandResponse,
     CameraDeviceSelectionRequest,
+    DrawingAdvisorConfigurationRequest,
+    DrawingAdvisorRuntimeStatus,
     DrawingSession,
     DrawingSessionCreateRequest,
     DrawingSessionListResponse,
@@ -38,6 +40,7 @@ from learn_to_draw_api.models import (
     PlotterWorkspaceResponse,
 )
 from learn_to_draw_api.services.hardware import HardwareService
+from learn_to_draw_api.services.drawing_advisor import RuntimeDrawingAdvisor
 from learn_to_draw_api.services.drawing_sessions import DrawingSessionService
 from learn_to_draw_api.services.plot_workflow import PlotWorkflowService
 
@@ -46,12 +49,39 @@ def build_api_router(
     hardware_service: HardwareService,
     plot_workflow_service: PlotWorkflowService,
     drawing_session_service: DrawingSessionService,
+    drawing_advisor: RuntimeDrawingAdvisor,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/health", response_model=HealthResponse)
     def get_health() -> HealthResponse:
         return HealthResponse()
+
+    @router.get(
+        "/api/drawing-advisor/configuration",
+        response_model=DrawingAdvisorRuntimeStatus,
+    )
+    def get_drawing_advisor_configuration() -> DrawingAdvisorRuntimeStatus:
+        return drawing_advisor.runtime_status
+
+    @router.post(
+        "/api/drawing-advisor/configuration",
+        response_model=DrawingAdvisorRuntimeStatus,
+    )
+    def post_drawing_advisor_configuration(
+        request: DrawingAdvisorConfigurationRequest,
+    ) -> DrawingAdvisorRuntimeStatus:
+        return drawing_advisor.configure_openai(
+            api_key=request.api_key.get_secret_value(),
+            model=request.model,
+        )
+
+    @router.delete(
+        "/api/drawing-advisor/configuration",
+        response_model=DrawingAdvisorRuntimeStatus,
+    )
+    def delete_drawing_advisor_configuration() -> DrawingAdvisorRuntimeStatus:
+        return drawing_advisor.clear_runtime_configuration()
 
     @router.get("/api/hardware/status", response_model=HardwareStatus)
     def get_hardware_status() -> HardwareStatus:

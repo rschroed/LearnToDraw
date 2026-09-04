@@ -511,6 +511,46 @@ it("lists session-level work in Gallery and keeps the full operator surface in C
   expect(screen.getByLabelText(/upload svg/i)).toHaveAttribute("type", "file");
 });
 
+it("configures the OpenAI advisor in backend memory and clears the key field", async () => {
+  window.history.replaceState({}, "", "/controls");
+  const controlsHarness = createHardwareDashboardHarness({
+    advisorConfiguration: {
+      advisor: {
+        driver: "disabled",
+        available: false,
+        model: null,
+        message: "Drawing advisor is disabled on the local backend.",
+      },
+      source: "startup",
+      persistence: "process_memory",
+      clears_on_restart: true,
+    },
+  });
+  installHardwareDashboardFetchMock(controlsHarness);
+  render(<App />);
+
+  const apiKey = "sk-test-browser-secret";
+  const keyInput = await screen.findByLabelText(/openai api key/i);
+  const modelInput = screen.getByLabelText(/^model$/i);
+  fireEvent.change(keyInput, { target: { value: apiKey } });
+  fireEvent.change(modelInput, { target: { value: "gpt-5.4-mini" } });
+  fireEvent.click(screen.getByRole("button", { name: /enable openai advisor/i }));
+
+  await waitFor(() => {
+    expect(controlsHarness.advisorConfigurationRequests).toEqual([
+      { api_key: apiKey, model: "gpt-5.4-mini" },
+    ]);
+  });
+  expect(keyInput).toHaveValue("");
+  expect(screen.getByText(/loaded in backend memory/i)).toBeInTheDocument();
+  expect(screen.queryByDisplayValue(apiKey)).not.toBeInTheDocument();
+  expect(window.localStorage.getItem("OPENAI_API_KEY")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: /clear runtime key/i }));
+  await waitFor(() => expect(controlsHarness.advisorConfigurationClears).toBe(1));
+  expect(screen.getByText(/runtime openai configuration cleared/i)).toBeInTheDocument();
+});
+
 it("surfaces provider-disabled recovery without exposing a browser key field", async () => {
   window.history.replaceState({}, "", "/sessions/session-1");
   const paused = buildSession("paused", {

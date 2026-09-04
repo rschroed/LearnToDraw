@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import cv2
 from fastapi.testclient import TestClient
+import httpx
 import numpy as np
 
 from learn_to_draw_api.adapters.axidraw_models import resolve_axidraw_model_info
@@ -133,6 +134,94 @@ def test_health_and_status_endpoints(tmp_path):
     payload = status.json()
     assert payload["plotter"]["driver"] == "mock-plotter"
     assert payload["camera"]["driver"] == "mock-camera"
+
+
+def test_runtime_openai_advisor_configuration_is_redacted_and_used(tmp_path, monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output_text": json.dumps(
+                    {
+                        "summary": "Build a loose cluster of varied flowers.",
+                        "paper_strategy": "Use the center and preserve breathing room.",
+                        "completion_intent": "Stop when the field feels lively.",
+                        "svg": (
+                            '<svg xmlns="http://www.w3.org/2000/svg" '
+                            'width="170mm" height="257mm" viewBox="0 0 170 257">'
+                            '<circle cx="85" cy="128" r="10"/></svg>'
+                        ),
+                    }
+                )
+            }
+
+    monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: Response())
+    api_key = "sk-test-runtime-secret"
+
+    with create_test_client(tmp_path) as client:
+        startup = client.get("/api/drawing-advisor/configuration")
+        configured = client.post(
+            "/api/drawing-advisor/configuration",
+            json={"api_key": api_key, "model": "vision-model"},
+        )
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A loose field of flowers"},
+        ).json()
+        planned = wait_for_session_status(
+            client,
+            created["id"],
+            {"awaiting_approval", "failed"},
+        )
+        cleared = client.delete("/api/drawing-advisor/configuration")
+
+    assert startup.json() == {
+        "advisor": {
+            "driver": "disabled",
+            "available": False,
+            "model": None,
+            "message": (
+                "Drawing advisor is disabled. Set LEARN_TO_DRAW_DRAWING_ADVISOR=openai, "
+                "OPENAI_API_KEY, and LEARN_TO_DRAW_OPENAI_MODEL to enable it."
+            ),
+        },
+        "source": "startup",
+        "persistence": "process_memory",
+        "clears_on_restart": True,
+    }
+    assert configured.status_code == 200
+    assert configured.json()["advisor"] == {
+        "driver": "openai",
+        "available": True,
+        "model": "vision-model",
+        "message": None,
+    }
+    assert configured.json()["source"] == "runtime"
+    assert api_key not in configured.text
+    assert planned["status"] == "awaiting_approval"
+    assert planned["advisor"]["driver"] == "openai"
+    assert planned["current_proposal"]["advisor_model"] == "vision-model"
+    assert cleared.json()["advisor"]["driver"] == "disabled"
+    assert cleared.json()["source"] == "startup"
+
+
+def test_invalid_runtime_advisor_configuration_preserves_active_advisor(tmp_path):
+    with create_test_client(
+        tmp_path,
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        invalid = client.post(
+            "/api/drawing-advisor/configuration",
+            json={"api_key": "   ", "model": "vision-model"},
+        )
+        current = client.get("/api/drawing-advisor/configuration")
+
+    assert invalid.status_code == 400
+    assert invalid.json() == {"detail": "Enter an OpenAI API key."}
+    assert current.json()["advisor"]["driver"] == "mock"
+    assert current.json()["source"] == "startup"
 
 
 class CompatOnlyPlotter:
