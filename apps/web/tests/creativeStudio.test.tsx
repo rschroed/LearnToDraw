@@ -533,12 +533,12 @@ it("configures the OpenAI advisor in backend memory and clears the key field", a
   const keyInput = await screen.findByLabelText(/openai api key/i);
   const modelInput = screen.getByLabelText(/^model$/i);
   fireEvent.change(keyInput, { target: { value: apiKey } });
-  fireEvent.change(modelInput, { target: { value: "gpt-5.4-mini" } });
+  fireEvent.change(modelInput, { target: { value: "gpt-5.6-terra" } });
   fireEvent.click(screen.getByRole("button", { name: /enable openai advisor/i }));
 
   await waitFor(() => {
     expect(controlsHarness.advisorConfigurationRequests).toEqual([
-      { api_key: apiKey, model: "gpt-5.4-mini" },
+      { api_key: apiKey, model: "gpt-5.6-terra" },
     ]);
   });
   expect(keyInput).toHaveValue("");

@@ -7,7 +7,7 @@ import {
 } from "../../lib/api";
 import type { DrawingAdvisorRuntimeStatus } from "../../types/drawing";
 
-const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
 
 export function AdvisorSetupPanel() {
   const [status, setStatus] = useState<DrawingAdvisorRuntimeStatus | null>(null);
