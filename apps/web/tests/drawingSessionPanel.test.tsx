@@ -38,6 +38,7 @@ function buildSession(status: DrawingSession["status"]): DrawingSession {
     : null;
   return {
     id: "session-1",
+    session_version: 1,
     intent: "A lively field of flowers",
     mode: "additive",
     iteration_limit: 3,
@@ -60,6 +61,23 @@ function buildSession(status: DrawingSession["status"]): DrawingSession {
       message: null,
     },
     error: null,
+    plan: null,
+    current_proposal: null,
+    current_run_id: "run-1",
+    assessing_run_id: null,
+    pass_count: 1,
+    planning_generation: 0,
+    authorization: {
+      approved_at: null,
+      stop_requested: false,
+      last_heartbeat_at: null,
+    },
+    queued_guidance: [],
+    requested_human_action: null,
+    events: [],
+    approved_at: null,
+    paused_at: null,
+    completed_at: null,
   };
 }
 

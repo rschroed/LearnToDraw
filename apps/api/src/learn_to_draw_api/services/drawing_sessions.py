@@ -196,9 +196,24 @@ class DrawingSessionService:
             for stored in self._store.list():
                 session = self._sync(stored)
                 preview_url = None
-                if session.current_proposal is not None:
+                if session.iterations:
+                    latest_run = self._plot_workflow.get_run(
+                        session.iterations[-1].run_id
+                    )
+                    capture = (
+                        latest_run.observed_result.capture
+                        if latest_run.observed_result is not None
+                        else latest_run.capture
+                    )
+                    if capture is not None:
+                        preview_url = (
+                            capture.normalized.rectified_grayscale_url
+                            if capture.normalized is not None
+                            else capture.public_url
+                        )
+                if preview_url is None and session.current_proposal is not None:
                     preview_url = session.current_proposal.asset.public_url
-                elif session.iterations:
+                elif preview_url is None and session.iterations:
                     preview_url = session.iterations[-1].asset.public_url
                 summaries.append(
                     DrawingSessionSummary(

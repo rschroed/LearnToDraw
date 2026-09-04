@@ -1,0 +1,504 @@
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+
+import { App } from "../src/app/App";
+import { StudioCanvas } from "../src/features/studio/StudioCanvas";
+import type {
+  DrawingSession,
+  DrawingSessionEvent,
+  DrawingSessionStatus,
+} from "../src/types/drawing";
+import type { CaptureMetadata } from "../src/types/hardware";
+import type { PlotAsset, PlotRun } from "../src/types/plotting";
+import {
+  createHardwareDashboardHarness,
+  defaultAxiDrawHardwareStatus,
+  installHardwareDashboardFetchMock,
+} from "./hardwareDashboardTestUtils";
+
+const now = "2026-09-04T20:00:00Z";
+
+const asset: PlotAsset = {
+  id: "asset-1",
+  kind: "generated_svg",
+  pattern_id: null,
+  name: "Whimsical flowers — first pass",
+  timestamp: now,
+  file_path: "/tmp/asset-1.svg",
+  public_url: "/plot-assets/asset-1.svg",
+  mime_type: "image/svg+xml",
+};
+
+function event(
+  type: DrawingSessionEvent["type"],
+  message: string,
+  details: Record<string, unknown> = {},
+): DrawingSessionEvent {
+  return {
+    id: `${type}-${message}`,
+    type,
+    created_at: now,
+    message,
+    asset_id: null,
+    run_id: type === "session_created" ? null : "run-1",
+    details,
+  };
+}
+
+function buildSession(
+  status: DrawingSessionStatus,
+  overrides: Partial<DrawingSession> = {},
+): DrawingSession {
+  const approved = !["planning", "awaiting_approval"].includes(status);
+  const hasRun = approved;
+  return {
+    id: "session-1",
+    session_version: 2,
+    intent: "A whimsical field of flowers",
+    mode: "additive",
+    iteration_limit: null,
+    status,
+    created_at: now,
+    updated_at: now,
+    iterations: hasRun
+      ? [{ number: 1, asset, run_id: "run-1", created_at: now, next_proposal: null }]
+      : [],
+    advisor: {
+      driver: "mock",
+      available: true,
+      model: "mock-advisor-v1",
+      message: null,
+    },
+    error: status === "paused" ? "The camera observation needs attention." : null,
+    plan:
+      status === "planning"
+        ? null
+        : {
+            summary: "Build an airy cluster from varied stems and a loose center.",
+            paper_strategy: "Keep the composition centered with generous breathing room.",
+            completion_intent: "Stop when the field feels lively without filling every gap.",
+          },
+    current_proposal:
+      status === "planning"
+        ? null
+        : {
+            asset,
+            created_at: now,
+            advisor_driver: "mock",
+            advisor_model: "mock-advisor-v1",
+          },
+    current_run_id: hasRun ? "run-1" : null,
+    assessing_run_id: null,
+    pass_count: hasRun ? 1 : 0,
+    planning_generation: 1,
+    authorization: {
+      approved_at: approved ? now : null,
+      stop_requested: status === "stopping",
+      last_heartbeat_at: approved ? now : null,
+    },
+    queued_guidance: [],
+    requested_human_action: null,
+    events: [
+      event("session_created", "Creative session created. Planning the first pass."),
+      ...(status === "planning"
+        ? []
+        : [event("plan_ready", "The drawing plan and first-pass preview are ready.")]),
+      ...(approved ? [event("session_approved", "Open-ended drawing approved.")] : []),
+    ],
+    approved_at: approved ? now : null,
+    paused_at: status === "paused" ? now : null,
+    completed_at: status === "completed" ? now : null,
+    ...overrides,
+  };
+}
+
+function buildCapture(reviewStatus: "pending" | "confirmed" = "confirmed"): CaptureMetadata {
+  const corners = {
+    top_left: [100, 100] as [number, number],
+    top_right: [1500, 100] as [number, number],
+    bottom_right: [1500, 1100] as [number, number],
+    bottom_left: [100, 1100] as [number, number],
+  };
+  return {
+    id: "capture-1",
+    timestamp: now,
+    file_path: "/tmp/capture-1.jpg",
+    public_url: "/captures/capture-1.jpg",
+    width: 1600,
+    height: 1200,
+    mime_type: "image/jpeg",
+    review: {
+      registration_version: 2,
+      review_mode: "manual_corners",
+      review_required: reviewStatus === "pending",
+      review_status: reviewStatus,
+      proposed_corners: corners,
+      confirmed_corners: reviewStatus === "confirmed" ? corners : null,
+      confirmation_source: reviewStatus === "confirmed" ? "manual" : null,
+    },
+    normalized:
+      reviewStatus === "confirmed"
+        ? {
+            rectified_color_url: "/captures/capture-1-color.png",
+            rectified_grayscale_url: "/captures/capture-1-gray.png",
+            debug_overlay_url: "/captures/capture-1-debug.png",
+            metadata: {
+              method: "manual_corners_v2",
+              confidence: null,
+              corners,
+              transform: {
+                matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                inverse_matrix: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                source_space: "raw_capture_px",
+                destination_space: "page_px",
+                pixels_per_mm_x: 8,
+                pixels_per_mm_y: 8,
+              },
+              output: { width: 2048, height: 1583, aspect_ratio: 1.294 },
+              target_frame_source: "prepared_svg",
+              frame: {
+                kind: "page_aligned",
+                version: 2,
+                page_width_mm: 279.4,
+                page_height_mm: 215.9,
+                origin: "top-left",
+              },
+            },
+          }
+        : null,
+  };
+}
+
+function buildRun(
+  status: PlotRun["status"] = "plotting",
+  capture: CaptureMetadata | null = null,
+): PlotRun {
+  const plotComplete = !["pending", "plotting", "stopping"].includes(status);
+  return {
+    id: "run-1",
+    status,
+    purpose: "normal",
+    capture_mode: "auto",
+    created_at: now,
+    updated_at: now,
+    asset,
+    prepared_artifact: {
+      file_path: "/tmp/run-1-prepared.svg",
+      public_url: "/plot-run-artifacts/run-1-prepared.svg",
+      mime_type: "image/svg+xml",
+    },
+    capture,
+    capture_attempts: [],
+    observed_result:
+      capture?.review?.review_status === "confirmed"
+        ? { capture, camera_driver: "mock-camera", captured_at: now, duration_ms: 200 }
+        : null,
+    progress_artifact: null,
+    interruption_reason: null,
+    error: status === "failed" ? "Capture failed." : null,
+    stage_states: {
+      prepare: { status: "completed", started_at: now, completed_at: now, message: "Prepared." },
+      plot: {
+        status: plotComplete ? "completed" : "in_progress",
+        started_at: now,
+        completed_at: plotComplete ? now : null,
+        message: plotComplete ? "Plotted." : "Plotting.",
+      },
+      capture: {
+        status: capture ? "completed" : status === "failed" ? "failed" : "pending",
+        started_at: capture || status === "failed" ? now : null,
+        completed_at: capture || status === "failed" ? now : null,
+        message: status === "failed" ? "Capture failed." : null,
+      },
+      capture_review: {
+        status:
+          status === "awaiting_capture_review"
+            ? "in_progress"
+            : capture?.review?.review_status === "confirmed"
+              ? "completed"
+              : "pending",
+        started_at: capture ? now : null,
+        completed_at: capture?.review?.review_status === "confirmed" ? now : null,
+        message: null,
+      },
+    },
+    plotter_run_details: {
+      preparation: { page_width_mm: 279.4, page_height_mm: 215.9 },
+    },
+    camera_run_details: {},
+  };
+}
+
+function installStudioMock(
+  initialSession: DrawingSession,
+  run: PlotRun | null = null,
+) {
+  let currentSession = initialSession;
+  let currentRun = run;
+  const requests: Array<{ method: string; url: string; body?: string }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    requests.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
+
+    if (url === "/api/hardware/status") return Response.json(defaultAxiDrawHardwareStatus);
+    if (url === `/api/drawing-sessions/${currentSession.id}` && method === "GET") {
+      return Response.json(currentSession);
+    }
+    if (url === `/api/plot-runs/${currentRun?.id}` && method === "GET" && currentRun) {
+      return Response.json(currentRun);
+    }
+    if (url.endsWith("/capture-review") && method === "GET" && currentRun?.capture?.review) {
+      return Response.json({
+        run_id: currentRun.id,
+        capture: currentRun.capture,
+        review: currentRun.capture.review,
+      });
+    }
+    if (url.endsWith("/heartbeat") && method === "POST") return Response.json(currentSession);
+    if (url.endsWith("/messages") && method === "POST") {
+      const text = JSON.parse(String(init?.body)).text as string;
+      currentSession = {
+        ...currentSession,
+        status: currentSession.authorization.approved_at ? currentSession.status : "planning",
+        plan: currentSession.authorization.approved_at ? currentSession.plan : null,
+        current_proposal: currentSession.authorization.approved_at
+          ? currentSession.current_proposal
+          : null,
+        queued_guidance: [...currentSession.queued_guidance, text],
+        events: [...currentSession.events, event("user_guidance", text)],
+      };
+      return Response.json(currentSession);
+    }
+    if (url.endsWith("/approve") && method === "POST") {
+      currentSession = buildSession("running");
+      currentRun = buildRun("plotting");
+      return Response.json(currentSession);
+    }
+    if (url.endsWith("/stop") && method === "POST") {
+      currentSession = {
+        ...currentSession,
+        status: "stopping",
+        authorization: { ...currentSession.authorization, stop_requested: true },
+      };
+      return Response.json(currentSession);
+    }
+    if (url.endsWith("/capture/retry") && method === "POST" && currentRun) {
+      currentRun = { ...currentRun, status: "capturing", error: null };
+      return Response.json(currentRun);
+    }
+    if (url.endsWith("/resume") && method === "POST") {
+      currentSession = { ...currentSession, status: "running", error: null, paused_at: null };
+      return Response.json(currentSession);
+    }
+    throw new Error(`Unexpected request: ${method} ${url}`);
+  });
+  return { requests, getSession: () => currentSession };
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  window.history.replaceState({}, "", "/");
+  Object.defineProperty(window, "scrollTo", { value: vi.fn(), writable: true });
+});
+
+it("starts with creative intent and creates a prompt-only planning session", async () => {
+  const currentSession = buildSession("planning");
+  const requests: Array<{ method: string; url: string; body?: string }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    requests.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
+    if (url === "/api/hardware/status") return Response.json(defaultAxiDrawHardwareStatus);
+    if (url === "/api/drawing-sessions/latest") return Response.json({ session: null });
+    if (url === "/api/drawing-sessions" && method === "POST") return Response.json(currentSession);
+    if (url === `/api/drawing-sessions/${currentSession.id}`) return Response.json(currentSession);
+    throw new Error(`Unexpected request: ${method} ${url}`);
+  });
+
+  render(<App />);
+  expect(await screen.findByRole("heading", { name: /what should we draw/i })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText(/drawing idea/i), {
+    target: { value: "A field of unruly flowers" },
+  });
+  const createButton = screen.getByRole("button", { name: /create a drawing/i });
+  await waitFor(() => expect(createButton).toBeEnabled());
+  fireEvent.click(createButton);
+
+  expect(await screen.findByRole("heading", { name: /finding the first useful marks/i })).toBeInTheDocument();
+  const createRequest = requests.find(
+    (request) => request.url === "/api/drawing-sessions" && request.method === "POST",
+  );
+  expect(JSON.parse(createRequest?.body ?? "{}")).toEqual({
+    intent: "A field of unruly flowers",
+    mode: "additive",
+  });
+  expect(requests.some((request) => request.url === "/api/plot-runs")).toBe(false);
+});
+
+it("shows the plan, explains open-ended approval, and lets a message replace the proposal", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const harness = installStudioMock(buildSession("awaiting_approval"));
+  render(<App />);
+
+  const planHeading = await screen.findByRole("heading", { name: /build an airy cluster/i });
+  await waitFor(() => expect(planHeading).toHaveFocus());
+  expect(screen.getByRole("img", { name: /proposed first drawing pass/i })).toBeInTheDocument();
+  expect(screen.getByText(/authorizes an attended sequence/i)).toBeInTheDocument();
+  expect(screen.getByText(/more than one permanent layer/i)).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText(/revise the plan/i), {
+    target: { value: "Leave more room on the right" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /revise plan/i }));
+
+  expect(await screen.findByRole("heading", { name: /finding the first useful marks/i })).toBeInTheDocument();
+  expect(screen.queryByRole("img", { name: /proposed first drawing pass/i })).not.toBeInTheDocument();
+  expect(
+    harness.requests.some(
+      (request) => request.url.endsWith("/messages") && request.body?.includes("room on the right"),
+    ),
+  ).toBe(true);
+});
+
+it("queues active guidance, sends heartbeats, and confirmation-protects emergency stop", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const harness = installStudioMock(buildSession("running"), buildRun("plotting"));
+  render(<App />);
+
+  expect(await screen.findByText(/the studio is authorized to continue/i)).toBeInTheDocument();
+  await waitFor(() => {
+    expect(harness.requests.some((request) => request.url.endsWith("/heartbeat"))).toBe(true);
+  });
+
+  fireEvent.change(screen.getByLabelText(/guidance for the next observation/i), {
+    target: { value: "Make the flowers less regular" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /queue guidance/i }));
+  expect(await screen.findByText("1 queued")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^emergency stop$/i }));
+  const dialog = screen.getByRole("alertdialog", { name: /pause the active plot/i });
+  expect(within(dialog).getByText(/after its current path segment/i)).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: /pause after current segment/i }));
+
+  await waitFor(() => {
+    const stopRequest = harness.requests.find((request) => request.url.endsWith("/stop"));
+    expect(JSON.parse(stopRequest?.body ?? "{}")).toEqual({ mode: "emergency" });
+  });
+});
+
+it("offers capture-only recovery and never creates a replacement plot run", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const failedRun = buildRun("failed");
+  const harness = installStudioMock(buildSession("paused"), failedRun);
+  render(<App />);
+
+  const recoveryHeading = await screen.findByRole("heading", { name: /safely paused/i });
+  await waitFor(() => expect(recoveryHeading).toHaveFocus());
+  fireEvent.click(screen.getByRole("button", { name: /retake photo only/i }));
+
+  await waitFor(() => {
+    expect(harness.requests.some((request) => request.url.endsWith("/capture/retry"))).toBe(true);
+  });
+  expect(
+    harness.requests.some(
+      (request) => request.url === "/api/plot-runs" && request.method === "POST",
+    ),
+  ).toBe(false);
+});
+
+it("renders a true V2 overlay and exposes manual registration when required", async () => {
+  const observedCapture = buildCapture("confirmed");
+  const completedRun = buildRun("completed", observedCapture);
+  const completedSession = buildSession("completed", {
+    events: [
+      event("agent_decision", "The composition has enough life.", {
+        assessment: "The varied stems now read as a field.",
+        decision: "complete",
+      }),
+      event("session_completed", "The drawing feels complete."),
+    ],
+  });
+  const { rerender } = render(
+    <StudioCanvas
+      session={completedSession}
+      runs={{ "run-1": completedRun }}
+      captureReview={null}
+      busy={false}
+      error={null}
+      onConfirmRegistration={async () => undefined}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /^overlay$/i }));
+  expect(screen.getByRole("heading", { name: /intended versus observed/i })).toBeInTheDocument();
+  const slider = screen.getByRole("slider", { name: /intended opacity/i });
+  fireEvent.change(slider, { target: { value: "72" } });
+  expect(slider).toHaveValue("72");
+
+  const pendingCapture = buildCapture("pending");
+  const pendingRun = buildRun("awaiting_capture_review", pendingCapture);
+  rerender(
+    <StudioCanvas
+      session={buildSession("awaiting_capture_review")}
+      runs={{ "run-1": pendingRun }}
+      captureReview={{ run_id: "run-1", capture: pendingCapture, review: pendingCapture.review! }}
+      busy={false}
+      error={null}
+      onConfirmRegistration={async () => undefined}
+    />,
+  );
+  expect(await screen.findByText(/manual page registration required/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /register page/i })).toBeInTheDocument();
+});
+
+it("lists session-level work in Gallery and keeps the full operator surface in Controls", async () => {
+  window.history.replaceState({}, "", "/gallery");
+  vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    Response.json({
+      sessions: [
+        {
+          id: "session-1",
+          session_version: 2,
+          intent: "A whimsical field of flowers",
+          status: "completed",
+          pass_count: 3,
+          created_at: now,
+          updated_at: now,
+          preview_url: "/captures/final-gray.png",
+        },
+      ],
+    }),
+  );
+  const { unmount } = render(<App />);
+  expect(await screen.findByRole("heading", { name: /drawings made through observation/i })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /whimsical field of flowers/i })).toBeInTheDocument();
+  expect(screen.getByText(/3 passes/i)).toBeInTheDocument();
+  unmount();
+
+  window.history.replaceState({}, "", "/controls");
+  const controlsHarness = createHardwareDashboardHarness();
+  installHardwareDashboardFetchMock(controlsHarness);
+  render(<App />);
+  expect(await screen.findByRole("heading", { name: /machine setup and manual work/i })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /upload, plot, capture, and inspect an svg/i })).toBeInTheDocument();
+  expect(screen.getByLabelText(/upload svg/i)).toHaveAttribute("type", "file");
+});
+
+it("surfaces provider-disabled recovery without exposing a browser key field", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const paused = buildSession("paused", {
+    advisor: {
+      driver: "disabled",
+      available: false,
+      model: null,
+      message: "Drawing advisor is disabled on the local backend.",
+    },
+  });
+  installStudioMock(paused, buildRun("failed"));
+  render(<App />);
+
+  expect(await screen.findByText(/creative advisor unavailable/i)).toBeInTheDocument();
+  expect(screen.getByText(/disabled on the local backend/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
+});

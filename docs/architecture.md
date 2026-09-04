@@ -31,13 +31,15 @@ The current backend structure centers on:
 
 ## Frontend Responsibilities
 
-The frontend is a lightweight local dashboard.
+The frontend is a lightweight local creative studio. Its primary surface describes and follows a drawing; operational tools remain secondary.
 
-- polls backend endpoints for hardware status, captures, plot runs, and plotter state
-- triggers safe backend-owned actions such as capture, return-to-origin, test actions, and plot workflow operations
-- organizes the local operator experience into workflow, machine-setup, and run-history surfaces
-- presents read-only hardware detail plus a small number of bounded controls
-- previews planned-vs-captured output and current workspace information without becoming a second hardware API
+- `/` starts from “What should we draw?” or redirects to the current active session
+- `/sessions/:id` presents the plan, cumulative intended artwork, latest registered observation, exact overlay, conversation, recovery actions, and persistent stop controls
+- `/gallery` lists session-level work using the latest or final observation as its preview
+- `/controls` retains paper setup, hardware readiness, test capture, fixed diagnostics, manual SVG plotting, and manual registration
+- polls backend endpoints for session, run, capture-review, and hardware state; the creative screen also posts its attendance heartbeat
+- sends conversational revisions before approval and queues guidance during physical work, but never invokes hardware outside backend-owned session and plot-run operations
+- presents major creative and machine events without turning routine polling and low-level stage transitions into conversation noise
 
 ## CameraBridge Real-Camera Path
 
@@ -86,6 +88,7 @@ The app currently supports a single backend-owned plotting workflow with a few n
 - `device settings`: stable machine information and operational safe bounds are backend-owned and surfaced read-only except for narrow safe overrides
 - `calibration`: persisted plotter calibration remains backend-owned and separate from transient runtime overrides
 - `drawing sessions`: V2 begins from creative intent, requires explicit authorization for an attended open-ended session, then serially observes and decides whether to continue, complete, or pause; V1 bounded sessions remain readable
+- `creative studio`: the prompt-first home and session canvas are the default product surface; machine setup, diagnostics, capture tools, and manual plotting live under Controls, while Gallery exposes session-level history
 
 ## Manual Capture Registration V2
 
@@ -130,6 +133,18 @@ The executor stores returned progress as a diagnostic `progress_artifact`, trans
 Mock plotting uses a deterministic stop event but preserves the same result contract. Compatibility-only and unavailable adapters do not grow undocumented interruption behavior. The physical AxiDraw Pause control remains the fallback if process signalling cannot be confirmed.
 
 Existing session JSON without `session_version` parses as V1. Its bounded two-to-ten-pass, request-advice, and approve-next-iteration behavior remains available through the legacy endpoints and is not migrated or proactively rewritten.
+
+## Creative Studio Interaction Contract
+
+Planning never implies motion. The home may create a planning session while plotter or camera readiness is incomplete; approval and every later pass still pass through backend hardware-readiness and safety checks. Pre-approval guidance replaces the proposal. Approval copy explicitly describes the attended, open-ended plot/capture/assessment authorization.
+
+The active canvas treats the physical page as the common coordinate frame. Intended mode stacks every prepared incremental SVG, observed mode shows the latest registered photograph, and overlay mode stacks those two views without cropping only when capture metadata proves a V2 page-aligned frame. Pending manual registration embeds the existing corner editor in the canvas and preserves validation errors and the draft.
+
+The conversation records user guidance, agent plans, interpretations, decisions, requests for human action, and consequential machine events. Guidance submitted while work is active is visibly queued and consumed by the backend at the next assessment. A live region announces state changes, focus moves to recovery or approval headings when those states appear, and all status labels include text rather than relying on color.
+
+The creative screen posts heartbeats only while visible and on an active authorized session. Closing or hiding it therefore allows the current physical pass to finish but prevents another pass after the backend grace period. Stop-after-pass preserves that same safe boundary. Emergency stop is confirmation-protected and is offered only while the current run is pending or plotting; its copy states that interruption occurs after the current path segment.
+
+Paused capture failures offer a camera-only retake, which cannot create a replacement plot run. Manual registration remains in-context on the canvas. Resume is explicit and rechecks backend readiness. Advisor configuration stays server-side: the browser exposes provider availability and recovery guidance but never accepts, stores, or displays an API key.
 
 ## Extension Points
 

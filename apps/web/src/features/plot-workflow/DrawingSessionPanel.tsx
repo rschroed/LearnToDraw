@@ -10,10 +10,14 @@ interface DrawingSessionPanelProps {
 }
 
 const STATUS_LABELS = {
+  planning: "Planning",
+  awaiting_approval: "Ready for approval",
   running: "Plotting or capturing",
   awaiting_capture_review: "Registration needs review",
   observed: "Observation ready",
   proposal_ready: "Next layer ready",
+  paused: "Paused",
+  stopping: "Stopping safely",
   completed: "Iteration limit reached",
   failed: "Session stopped",
 };
@@ -110,7 +114,8 @@ export function DrawingSessionPanel({
             <div>
               <span className="summary-label">Progress</span>
               <strong>
-                Pass {currentIteration.number} of {session.iteration_limit}
+                Pass {currentIteration.number}
+                {session.iteration_limit ? ` of ${session.iteration_limit}` : ""}
               </strong>
             </div>
             <div>

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { App } from "../src/app/App";
+import { HardwareDashboard as App } from "../src/features/hardware/HardwareDashboard";
 import { CameraPanel } from "../src/features/hardware/CameraPanel";
 import * as api from "../src/lib/api";
 import {

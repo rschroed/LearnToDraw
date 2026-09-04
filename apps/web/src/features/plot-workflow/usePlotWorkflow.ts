@@ -21,7 +21,13 @@ type PlotAction = "upload" | "pattern" | "start" | "review" | null;
 type NoticeTone = "info" | "success" | "error";
 type SelectionSource = "manual" | "run-derived" | null;
 
-const ACTIVE_RUN_STATUSES = new Set(["pending", "plotting", "capturing", "awaiting_capture_review"]);
+const ACTIVE_RUN_STATUSES = new Set([
+  "pending",
+  "plotting",
+  "stopping",
+  "capturing",
+  "awaiting_capture_review",
+]);
 export const PLOT_WORKFLOW_ACTIVE_POLL_INTERVAL_MS = 1200;
 export const PLOT_WORKFLOW_IDLE_POLL_INTERVAL_MS = 3500;
 

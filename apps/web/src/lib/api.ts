@@ -19,7 +19,11 @@ import type {
   PlotRunListResponse,
 } from "../types/plotting";
 import type { HelperStatus } from "../types/helper";
-import type { DrawingSession, LatestDrawingSessionResponse } from "../types/drawing";
+import type {
+  DrawingSession,
+  DrawingSessionListResponse,
+  LatestDrawingSessionResponse,
+} from "../types/drawing";
 
 const REQUEST_TIMEOUT_MS = 2000;
 const HELPER_OPEN_URL = "learntodraw-helper://open";
@@ -319,6 +323,12 @@ export function confirmPlotRunCaptureReview(
   );
 }
 
+export function retryPlotRunCapture(runId: string) {
+  return requestJson<PlotRun>(`/api/plot-runs/${runId}/capture/retry`, {
+    method: "POST",
+  });
+}
+
 export function fetchLatestDrawingSession() {
   return requestJson<LatestDrawingSessionResponse>("/api/drawing-sessions/latest");
 }
@@ -329,18 +339,61 @@ export function fetchDrawingSession(sessionId: string) {
 
 export function createDrawingSession(
   intent: string,
-  initialAssetId: string,
-  iterationLimit: number,
+  initialAssetId?: string,
+  iterationLimit?: number,
 ) {
+  const body: Record<string, unknown> = { intent, mode: "additive" };
+  if (initialAssetId) {
+    body.initial_asset_id = initialAssetId;
+  }
+  if (iterationLimit !== undefined) {
+    body.iteration_limit = iterationLimit;
+  }
   return requestJson<DrawingSession>("/api/drawing-sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      intent,
-      initial_asset_id: initialAssetId,
-      iteration_limit: iterationLimit,
-      mode: "additive",
-    }),
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchDrawingSessions() {
+  return requestJson<DrawingSessionListResponse>("/api/drawing-sessions");
+}
+
+export function sendDrawingSessionMessage(sessionId: string, text: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export function approveDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/approve`, {
+    method: "POST",
+  });
+}
+
+export function heartbeatDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/heartbeat`, {
+    method: "POST",
+  });
+}
+
+export function stopDrawingSession(
+  sessionId: string,
+  mode: "after_pass" | "emergency",
+) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/stop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function resumeDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/resume`, {
+    method: "POST",
   });
 }
 
