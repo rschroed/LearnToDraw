@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 
 import { App } from "../src/app/App";
 import { StudioCanvas } from "../src/features/studio/StudioCanvas";
+import { StudioProgressPanel } from "../src/features/studio/StudioProgressPanel";
 import type {
   DrawingSession,
   DrawingSessionEvent,
@@ -397,6 +398,77 @@ it("queues active guidance, sends heartbeats, and confirmation-protects emergenc
     const stopRequest = harness.requests.find((request) => request.url.endsWith("/stop"));
     expect(JSON.parse(stopRequest?.body ?? "{}")).toEqual({ mode: "emergency" });
   });
+});
+
+it("explains each creative run stage in human terms", () => {
+  const { rerender } = render(
+    <StudioProgressPanel session={buildSession("planning")} run={null} />,
+  );
+  expect(screen.getByRole("heading", { name: /planning the first pass/i })).toBeInTheDocument();
+  expect(screen.getByText(/nothing will move yet/i)).toBeInTheDocument();
+  expect(screen.getByText("Plan").closest("li")).toHaveAttribute("aria-current", "step");
+
+  rerender(<StudioProgressPanel session={buildSession("awaiting_approval")} run={null} />);
+  expect(screen.getByRole("heading", { name: /preview ready for approval/i })).toBeInTheDocument();
+
+  const preparingRun = buildRun("pending");
+  preparingRun.stage_states.prepare = {
+    status: "in_progress",
+    started_at: now,
+    completed_at: null,
+    message: "Preparing.",
+  };
+  rerender(<StudioProgressPanel session={buildSession("running")} run={preparingRun} />);
+  expect(screen.getByRole("heading", { name: /preparing pass 1/i })).toBeInTheDocument();
+
+  rerender(
+    <StudioProgressPanel session={buildSession("running")} run={buildRun("plotting")} />,
+  );
+  expect(screen.getByRole("heading", { name: /drawing pass 1/i })).toBeInTheDocument();
+  expect(screen.getByText("Draw").closest("li")).toHaveAttribute("aria-current", "step");
+
+  const capturingRun = buildRun("capturing");
+  capturingRun.stage_states.capture = {
+    status: "in_progress",
+    started_at: now,
+    completed_at: null,
+    message: "Capturing.",
+  };
+  rerender(<StudioProgressPanel session={buildSession("running")} run={capturingRun} />);
+  expect(screen.getByRole("heading", { name: /photographing pass 1/i })).toBeInTheDocument();
+
+  rerender(
+    <StudioProgressPanel
+      session={buildSession("awaiting_capture_review")}
+      run={buildRun("awaiting_capture_review", buildCapture("pending"))}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: /page registration needed for pass 1/i })).toBeInTheDocument();
+  expect(screen.getByText("Register").closest("li")).toHaveAttribute("aria-current", "step");
+
+  rerender(
+    <StudioProgressPanel
+      session={buildSession("running", { assessing_run_id: "run-1" })}
+      run={buildRun("completed", buildCapture())}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: /looking at pass 1/i })).toBeInTheDocument();
+  expect(screen.getByText("Reflect").closest("li")).toHaveAttribute("aria-current", "step");
+
+  rerender(
+    <StudioProgressPanel session={buildSession("stopping")} run={buildRun("stopping")} />,
+  );
+  expect(screen.getByRole("heading", { name: /stopping safely/i })).toBeInTheDocument();
+
+  rerender(<StudioProgressPanel session={buildSession("paused")} run={buildRun("failed")} />);
+  expect(screen.getByRole("heading", { name: /session paused/i })).toBeInTheDocument();
+
+  rerender(<StudioProgressPanel session={buildSession("failed")} run={buildRun("failed")} />);
+  expect(screen.getByRole("heading", { name: /session stopped/i })).toBeInTheDocument();
+
+  rerender(<StudioProgressPanel session={buildSession("completed")} run={buildRun("completed")} />);
+  expect(screen.getByRole("heading", { name: /drawing complete/i })).toBeInTheDocument();
+  expect(screen.getByText(/1 pass complete/i)).toBeInTheDocument();
 });
 
 it("offers capture-only recovery and never creates a replacement plot run", async () => {

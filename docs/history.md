@@ -197,4 +197,11 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Made the session studio use the backend-owned workspace page dimensions before a PlotRun exists, so landscape first-pass proposals render in a landscape paper frame
 - Kept run preparation and registered-capture dimensions authoritative after plotting, with the existing A4 fallback retained when workspace data is unavailable
 
+## Creative Session Progress Slice
+
+- Added a persistent, user-facing progress panel that translates session, plot-run, and stage states into planning, drawing, photographing, registration, reflection, stopping, paused, complete, and failed language
+- Added current-pass context and a compact five-step drawing-cycle indicator without inventing time estimates, percentages, or new backend states
+- Consolidated live status announcements into the progress panel and added responsive, reduced-motion, and non-color-only state treatment
+- Left polling, orchestration, advisor behavior, registration, capture, and hardware control unchanged
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).
