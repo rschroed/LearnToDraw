@@ -121,6 +121,9 @@ export function SessionStudio({
     : null;
   const hasPlottedWork = session.pass_count > 0;
   const isEnded = ["completed", "failed", "abandoned"].includes(session.status);
+  const advisorNeedsAttention =
+    session.advisor.available === false ||
+    session.error?.toLowerCase().includes("drawing advisor") === true;
 
   async function abandonAndStart() {
     const succeeded = await controller.abandon();
@@ -217,7 +220,10 @@ export function SessionStudio({
             <section className="studio-plan-card studio-plan-card-thinking" aria-live="polite">
               <p className="eyebrow">Planning</p>
               <h2>Finding the first useful marks</h2>
-              <p>No hardware will move until a safe SVG preview is ready and you approve it.</p>
+              <p>
+                Detailed vector plans can take a few minutes. This page updates automatically,
+                and no hardware will move until a safe SVG preview is ready and you approve it.
+              </p>
             </section>
           ) : null}
 
@@ -292,6 +298,9 @@ export function SessionStudio({
                 <p>{session.requested_human_action ?? session.error ?? "Inspect the latest observation before continuing."}</p>
               </div>
               <div className="studio-recovery-actions">
+                {advisorNeedsAttention ? (
+                  <a className="button-secondary" href="/controls">Change advisor</a>
+                ) : null}
                 {canRetryCapture && currentRun ? (
                   <button
                     type="button"

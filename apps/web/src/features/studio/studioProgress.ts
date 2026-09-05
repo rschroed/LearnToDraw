@@ -142,7 +142,7 @@ export function deriveStudioProgress(
   if (session.status === "planning") {
     return {
       title: "Planning the first pass",
-      detail: "The advisor is turning your idea into a safe drawing plan and preview. Nothing will move yet.",
+      detail: "The advisor is turning your idea into a safe drawing plan and preview. Detailed vector plans can take a few minutes; this page updates automatically and nothing will move yet.",
       passLabel,
       tone: "active",
       steps: stepsFor("plan"),

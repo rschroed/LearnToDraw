@@ -212,4 +212,12 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Required an explicit blank-sheet, displayed-orientation, and installed-pen confirmation before first motion, with the backend persisting the approved workspace dimensions and timestamp
 - Kept active abandonment invalid, all hardware transitions backend-owned, and existing V1/V2 artifacts readable through defaulted lifecycle fields
 
+## Runtime Advisor Model And Timeout Recovery Slice
+
+- Added a model-only runtime configuration operation that reuses the OpenAI credential already held privately by the backend
+- Made Controls save future model changes without asking the user to re-enter the intentionally cleared API key, while preserving explicit key replacement and clear-runtime actions
+- Kept in-flight planning or assessment on its original advisor snapshot and applied model changes only to future calls
+- Extended the bounded OpenAI request window from 60 to 180 seconds and made timeout recovery explicitly recommend retrying or selecting a faster model
+- Preserved process-memory-only secret handling and left provider discovery, key persistence, and background Responses orchestration out of scope
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

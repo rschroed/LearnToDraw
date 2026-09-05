@@ -149,6 +149,14 @@ export function configureDrawingAdvisor(apiKey: string, model: string) {
   });
 }
 
+export function updateDrawingAdvisorModel(model: string) {
+  return requestJson<DrawingAdvisorRuntimeStatus>("/api/drawing-advisor/configuration", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+}
+
 export function clearDrawingAdvisorConfiguration() {
   return requestJson<DrawingAdvisorRuntimeStatus>("/api/drawing-advisor/configuration", {
     method: "DELETE",
