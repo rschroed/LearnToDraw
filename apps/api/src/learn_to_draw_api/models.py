@@ -435,6 +435,7 @@ DrawingSessionEventType = Literal[
     "session_completed",
     "session_failed",
     "session_abandoned",
+    "session_replanned",
 ]
 
 
@@ -449,6 +450,11 @@ class DrawingSessionEvent(BaseModel):
 
 
 CreativeCriterionOutcome = Literal["meets", "partially_meets", "misses"]
+DrawingSessionRecoveryAction = Literal[
+    "resume",
+    "retake_capture",
+    "replan_new_sheet",
+]
 
 
 class DrawingCriterionAssessment(BaseModel):
@@ -519,6 +525,10 @@ class DrawingSession(BaseModel):
     paper_preflight: Optional[DrawingSessionPaperPreflight] = None
     queued_guidance: list[str] = Field(default_factory=list)
     requested_human_action: Optional[str] = None
+    recovery_action: Optional[DrawingSessionRecoveryAction] = None
+    replanned_from_session_id: Optional[str] = None
+    replanned_to_session_id: Optional[str] = None
+    replan_context: Optional[str] = None
     events: list[DrawingSessionEvent] = Field(default_factory=list)
     approved_at: Optional[datetime] = None
     paused_at: Optional[datetime] = None

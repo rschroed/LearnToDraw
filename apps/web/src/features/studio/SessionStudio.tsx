@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { StatusPill } from "../../components/StatusPill";
-import type { DrawingSessionStatus } from "../../types/drawing";
+import type {
+  DrawingSession,
+  DrawingSessionRecoveryAction,
+  DrawingSessionStatus,
+} from "../../types/drawing";
+import type { PlotRun } from "../../types/plotting";
 import { StudioCanvas } from "./StudioCanvas";
 import { StudioConversation } from "./StudioConversation";
 import { StudioProgressPanel } from "./StudioProgressPanel";
@@ -25,6 +30,25 @@ function activeSession(status: DrawingSessionStatus) {
   return ["running", "awaiting_capture_review", "stopping"].includes(status);
 }
 
+function effectiveRecoveryAction(
+  session: DrawingSession,
+  currentRun: PlotRun | null,
+): DrawingSessionRecoveryAction {
+  if (session.recovery_action) return session.recovery_action;
+  const latestDecision = [...session.events]
+    .reverse()
+    .find((event) => event.type === "agent_decision");
+  if (latestDecision?.details.decision === "pause") return "replan_new_sheet";
+  if (currentRun?.status === "cancelled") return "replan_new_sheet";
+  if (currentRun?.status === "failed") {
+    return currentRun.capture_mode === "auto" &&
+      currentRun.stage_states.plot?.status === "completed"
+      ? "retake_capture"
+      : "replan_new_sheet";
+  }
+  return "resume";
+}
+
 export function SessionStudio({
   sessionId,
   navigate,
@@ -41,6 +65,8 @@ export function SessionStudio({
   const newDrawingCancelRef = useRef<HTMLButtonElement | null>(null);
   const planHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const recoveryHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const trackedSessionIdRef = useRef<string | null>(null);
+  const priorSuccessorRef = useRef<string | null | undefined>(undefined);
   const session = controller.session;
   const currentRun = session?.current_run_id
     ? controller.runs[session.current_run_id] ?? null
@@ -71,6 +97,20 @@ export function SessionStudio({
       navigate("/new");
     }
   }, [navigate, session, startNewAfterFinish]);
+
+  useEffect(() => {
+    if (!session || session.id !== sessionId) return;
+    if (trackedSessionIdRef.current !== sessionId) {
+      trackedSessionIdRef.current = sessionId;
+      priorSuccessorRef.current = session.replanned_to_session_id;
+      return;
+    }
+    const priorSuccessor = priorSuccessorRef.current;
+    priorSuccessorRef.current = session.replanned_to_session_id;
+    if (priorSuccessor === null && session.replanned_to_session_id) {
+      navigate(`/sessions/${session.replanned_to_session_id}`);
+    }
+  }, [navigate, session, sessionId]);
 
   useEffect(() => {
     const activeElement = document.activeElement;
@@ -124,6 +164,7 @@ export function SessionStudio({
   const advisorNeedsAttention =
     session.advisor.available === false ||
     session.error?.toLowerCase().includes("drawing advisor") === true;
+  const recoveryAction = effectiveRecoveryAction(session, currentRun);
 
   async function abandonAndStart() {
     const succeeded = await controller.abandon();
@@ -180,6 +221,22 @@ export function SessionStudio({
       </header>
 
       <StudioProgressPanel session={session} run={currentRun} />
+
+      {session.replanned_from_session_id ? (
+        <section className="studio-attempt-context" aria-label="New-sheet attempt">
+          <div>
+            <p className="eyebrow">New-sheet attempt</p>
+            <strong>The prior result has been preserved, and this plan starts clean.</strong>
+          </div>
+          <a href={`/sessions/${session.replanned_from_session_id}`}>View prior attempt</a>
+          {session.replan_context ? (
+            <details>
+              <summary>What the agent learned</summary>
+              <p>{session.replan_context}</p>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
 
       {controller.hardwareError ? (
         <div className="studio-attention-banner" role="status">
@@ -335,7 +392,7 @@ export function SessionStudio({
                 {advisorNeedsAttention ? (
                   <a className="button-secondary" href="/controls">Change advisor</a>
                 ) : null}
-                {canRetryCapture && currentRun ? (
+                {recoveryAction === "retake_capture" && canRetryCapture && currentRun ? (
                   <button
                     type="button"
                     className="button-secondary"
@@ -355,14 +412,30 @@ export function SessionStudio({
                     {controller.busyAction === "finish" ? "Finishing…" : "Finish drawing"}
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  className="button-primary"
-                  disabled={controller.busyAction !== null || !plotterReady || !cameraReady}
-                  onClick={() => void controller.resume()}
-                >
-                  {controller.busyAction === "resume" ? "Rechecking…" : "Resume session"}
-                </button>
+                {recoveryAction === "replan_new_sheet" ? (
+                  <button
+                    type="button"
+                    className="button-primary"
+                    disabled={controller.busyAction !== null}
+                    onClick={() => {
+                      void controller.replan().then((successorId) => {
+                        if (successorId) navigate(`/sessions/${successorId}`);
+                      });
+                    }}
+                  >
+                    {controller.busyAction === "replan" ? "Planning…" : "Plan a new attempt"}
+                  </button>
+                ) : null}
+                {recoveryAction === "resume" ? (
+                  <button
+                    type="button"
+                    className="button-primary"
+                    disabled={controller.busyAction !== null || !plotterReady || !cameraReady}
+                    onClick={() => void controller.resume()}
+                  >
+                    {controller.busyAction === "resume" ? "Rechecking…" : "Resume session"}
+                  </button>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -393,11 +466,26 @@ export function SessionStudio({
           {session.status === "abandoned" ? (
             <section className="studio-recovery">
               <div>
-                <p className="eyebrow">Left unfinished</p>
-                <h2>This session will not make another move.</h2>
+                <p className="eyebrow">
+                  {session.replanned_to_session_id ? "Prior attempt" : "Left unfinished"}
+                </p>
+                <h2>
+                  {session.replanned_to_session_id
+                    ? "The studio continued with a clean sheet."
+                    : "This session will not make another move."}
+                </h2>
                 <p>Its plan, events, and any completed passes remain available here for reference.</p>
               </div>
-              <a className="button-primary" href="/new">Start a new drawing</a>
+              <a
+                className="button-primary"
+                href={
+                  session.replanned_to_session_id
+                    ? `/sessions/${session.replanned_to_session_id}`
+                    : "/new"
+                }
+              >
+                {session.replanned_to_session_id ? "Open new-sheet attempt" : "Start a new drawing"}
+              </a>
             </section>
           ) : null}
         </div>

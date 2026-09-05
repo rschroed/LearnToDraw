@@ -176,6 +176,7 @@ def test_openai_advisor_plans_first_pass_without_an_image(monkeypatch):
         guidance=["Keep it loose."],
         drawable_width_mm=170,
         drawable_height_mm=257,
+        prior_attempt_feedback="The first sheet became too diagrammatic.",
     )
 
     assert result.summary.startswith("Begin with")
@@ -183,6 +184,9 @@ def test_openai_advisor_plans_first_pass_without_an_image(monkeypatch):
     assert result.quality_review.decision == "accept"
     assert len(captured) == 2
     assert captured[0]["json"]["text"]["format"]["name"] == "initial_drawing_plan"
+    assert "The first sheet became too diagrammatic." in captured[0]["json"]["input"][0][
+        "content"
+    ][0]["text"]
     assert captured[0]["json"]["input"][0]["content"] == [
         {
             "type": "input_text",
@@ -409,6 +413,7 @@ def test_openai_advisor_assessment_requires_svg_for_continue(monkeypatch):
                         ),
                         "svg": _svg(),
                         "requested_human_action": None,
+                        "recovery_action": None,
                     }
                 )
             }
@@ -432,3 +437,82 @@ def test_openai_advisor_assessment_requires_svg_for_continue(monkeypatch):
     assert result.decision == "continue"
     assert result.svg_text == _svg()
     assert [item.criterion for item in result.criterion_assessments] == CREATIVE_CRITERIA
+
+
+def test_openai_advisor_parses_new_sheet_recovery(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output_text": json.dumps(
+                    {
+                        "assessment": "The irreversible foundation is too diagrammatic.",
+                        "decision": "pause",
+                        "reason": "Another additive pass would reinforce the wrong style.",
+                        "criterion_assessments": _criterion_assessments("misses"),
+                        "svg": None,
+                        "requested_human_action": "Replace the sheet before approving the new plan.",
+                        "recovery_action": "replan_new_sheet",
+                    }
+                )
+            }
+
+    monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: Response())
+    advisor = OpenAIDrawingAdvisor(api_key="secret", model="vision-model")
+
+    result = advisor.assess_iteration(
+        intent="A scientific dragonfly in a loose sketchbook style",
+        plan_summary="Build a naturalist study.",
+        creative_criteria=CREATIVE_CRITERIA,
+        observed_image=b"png-bytes",
+        observed_media_type="image/png",
+        iteration_number=1,
+        drawable_width_mm=170,
+        drawable_height_mm=257,
+        prior_interpretations=[],
+        guidance=[],
+    )
+
+    assert result.decision == "pause"
+    assert result.svg_text is None
+    assert result.recovery_action == "replan_new_sheet"
+
+
+def test_openai_advisor_rejects_untyped_pause(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output_text": json.dumps(
+                    {
+                        "assessment": "The photograph is unusable.",
+                        "decision": "pause",
+                        "reason": "The page cannot be assessed.",
+                        "criterion_assessments": _criterion_assessments("partially_meets"),
+                        "svg": None,
+                        "requested_human_action": "Try again.",
+                        "recovery_action": None,
+                    }
+                )
+            }
+
+    monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: Response())
+    advisor = OpenAIDrawingAdvisor(api_key="secret", model="vision-model")
+
+    with pytest.raises(ServiceUnavailableError, match="must choose"):
+        advisor.assess_iteration(
+            intent="A field of flowers",
+            plan_summary="Build a loose cluster.",
+            creative_criteria=CREATIVE_CRITERIA,
+            observed_image=b"png-bytes",
+            observed_media_type="image/png",
+            iteration_number=1,
+            drawable_width_mm=170,
+            drawable_height_mm=257,
+            prior_interpretations=[],
+            guidance=[],
+        )

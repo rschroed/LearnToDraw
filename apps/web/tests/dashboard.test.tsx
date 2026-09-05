@@ -351,22 +351,24 @@ describe("workflow-first dashboard", () => {
       .getByRole("img", { name: /normalized result image for run run-020/i })
       .closest(".artifact-frame");
     expect(resultFrame?.getAttribute("style")).toContain("aspect-ratio");
-    expect(screen.getByRole("button", { name: /^normalized$/i })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /^normalized$/i })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
     expect(screen.getByText("Normalized · Page aligned · 2048 × 1950")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^debug$/i }));
     expect(
-      await screen.findByRole("img", {
+      screen.getByRole("img", {
         name: /debug result image for run run-020/i,
       }),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /^raw$/i }));
     expect(
-      await screen.findByRole("img", {
+      screen.getByRole("img", {
         name: /raw result image for run run-020/i,
       }),
     ).toBeInTheDocument();

@@ -438,6 +438,12 @@ export function resumeDrawingSession(sessionId: string) {
   });
 }
 
+export function replanDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/replan`, {
+    method: "POST",
+  });
+}
+
 export function requestDrawingAdvice(sessionId: string) {
   return requestJson<DrawingSession>(
     `/api/drawing-sessions/${sessionId}/advice`,

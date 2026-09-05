@@ -229,4 +229,13 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Exposed the ranked criteria and initial review summary on the approval screen, plus later criterion findings in the session conversation, while keeping the mock advisor deterministic and older V2 artifacts readable through defaulted fields
 - Added `resvg_py` as the backend-only SVG review renderer without changing plotter, camera, registration, or hardware orchestration
 
+## Typed Session Recovery And New-Sheet Replanning Slice
+
+- Replaced ambiguous paused-session resume behavior with typed `resume`, `retake_capture`, and `replan_new_sheet` recovery actions
+- Allowed the advisor to invoke new-sheet replanning directly when an irreversible first pass cannot be repaired additively
+- Preserved the original sheet as a terminal linked attempt and asynchronously planned exactly one successor without authorization, pass history, or plotter motion
+- Passed the prior observation critique and ranked criterion findings into successor planning while retaining explicit blank-paper, orientation, and pen approval before motion
+- Kept capture failures on the existing camera-only retake path and rejected resume requests that would reassess an unchanged image
+- Added user-facing recovery-specific actions, automatic successor navigation, prior-attempt context, V1/V2 loading coverage, and regression tests for idempotence and no duplicate motion
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).
