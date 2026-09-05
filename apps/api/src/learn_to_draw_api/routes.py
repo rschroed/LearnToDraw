@@ -7,6 +7,7 @@ from learn_to_draw_api.models import (
     CameraCommandResponse,
     CameraDeviceSelectionRequest,
     DrawingAdvisorConfigurationRequest,
+    DrawingAdvisorModelRequest,
     DrawingAdvisorRuntimeStatus,
     DrawingSession,
     DrawingSessionApprovalRequest,
@@ -76,6 +77,15 @@ def build_api_router(
             api_key=request.api_key.get_secret_value(),
             model=request.model,
         )
+
+    @router.patch(
+        "/api/drawing-advisor/configuration",
+        response_model=DrawingAdvisorRuntimeStatus,
+    )
+    def patch_drawing_advisor_configuration(
+        request: DrawingAdvisorModelRequest,
+    ) -> DrawingAdvisorRuntimeStatus:
+        return drawing_advisor.update_openai_model(model=request.model)
 
     @router.delete(
         "/api/drawing-advisor/configuration",

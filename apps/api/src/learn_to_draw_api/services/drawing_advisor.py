@@ -11,11 +11,15 @@ import httpx
 
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.models import (
+    AppConflictError,
     DrawingAdvisorRuntimeStatus,
     DrawingAdvisorStatus,
     InvalidArtifactError,
     ServiceUnavailableError,
 )
+
+
+OPENAI_REQUEST_TIMEOUT_SECONDS = 180
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,23 @@ class RuntimeDrawingAdvisor(DrawingAdvisor):
         )
         with self._lock:
             self._active_advisor = candidate
+            self._source = "runtime"
+        return self.runtime_status
+
+    def update_openai_model(self, *, model: str) -> DrawingAdvisorRuntimeStatus:
+        normalized_model = model.strip()
+        if not normalized_model:
+            raise InvalidArtifactError("Enter an OpenAI model.")
+        with self._lock:
+            active_advisor = self._active_advisor
+            if (
+                not isinstance(active_advisor, OpenAIDrawingAdvisor)
+                or not active_advisor.has_api_key
+            ):
+                raise AppConflictError(
+                    "Configure an OpenAI API key before changing the model."
+                )
+            self._active_advisor = active_advisor.with_model(normalized_model)
             self._source = "runtime"
         return self.runtime_status
 
@@ -282,6 +303,13 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
             message=f"Missing {', '.join(missing)}." if missing else None,
         )
 
+    @property
+    def has_api_key(self) -> bool:
+        return bool(self._api_key)
+
+    def with_model(self, model: str) -> OpenAIDrawingAdvisor:
+        return OpenAIDrawingAdvisor(api_key=self._api_key, model=model)
+
     def propose_next_layer(
         self,
         *,
@@ -366,12 +394,14 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     "Content-Type": "application/json",
                 },
                 json=payload,
-                timeout=60,
+                timeout=OPENAI_REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
             response_payload = response.json()
             output_text = _extract_output_text(response_payload)
             parsed = json.loads(output_text)
+        except httpx.TimeoutException as exc:
+            raise ServiceUnavailableError(self._timeout_message()) from exc
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             raise ServiceUnavailableError(
                 f"Drawing advisor request failed: {exc}"
@@ -559,12 +589,22 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     "Content-Type": "application/json",
                 },
                 json=payload,
-                timeout=60,
+                timeout=OPENAI_REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
             return json.loads(_extract_output_text(response.json()))
+        except httpx.TimeoutException as exc:
+            raise ServiceUnavailableError(self._timeout_message()) from exc
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             raise ServiceUnavailableError(f"Drawing advisor request failed: {exc}") from exc
+
+    @staticmethod
+    def _timeout_message() -> str:
+        return (
+            "Drawing advisor request timed out after "
+            f"{OPENAI_REQUEST_TIMEOUT_SECONDS} seconds. Retry the session, or choose a "
+            "faster model in Controls."
+        )
 
 
 def _extract_output_text(payload: dict) -> str:

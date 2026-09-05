@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+from threading import Event, Thread
 
 import httpx
 import pytest
 
-from learn_to_draw_api.models import InvalidArtifactError
-from learn_to_draw_api.services.drawing_advisor import OpenAIDrawingAdvisor
+from learn_to_draw_api.models import InvalidArtifactError, ServiceUnavailableError
+from learn_to_draw_api.services.drawing_advisor import (
+    OPENAI_REQUEST_TIMEOUT_SECONDS,
+    OpenAIDrawingAdvisor,
+    RuntimeDrawingAdvisor,
+)
 from learn_to_draw_api.services.drawing_sessions import (
     validate_and_normalize_advisor_svg,
 )
@@ -101,6 +106,7 @@ def test_openai_advisor_sends_registered_image_and_parses_structured_output(monk
     assert captured["url"] == "https://api.openai.com/v1/responses"
     assert captured["json"]["store"] is False
     assert captured["json"]["text"]["format"]["type"] == "json_schema"
+    assert captured["timeout"] == OPENAI_REQUEST_TIMEOUT_SECONDS
     image_input = captured["json"]["input"][0]["content"][1]
     assert image_input["image_url"].startswith("data:image/png;base64,")
     assert "secret" not in json.dumps(captured["json"])
@@ -148,6 +154,95 @@ def test_openai_advisor_plans_first_pass_without_an_image(monkeypatch):
             "text": captured["json"]["input"][0]["content"][0]["text"],
         }
     ]
+    assert captured["timeout"] == OPENAI_REQUEST_TIMEOUT_SECONDS
+
+
+def test_openai_advisor_reports_actionable_timeout(monkeypatch):
+    def time_out(*_args, **_kwargs):
+        raise httpx.ReadTimeout(
+            "The read operation timed out",
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+
+    monkeypatch.setattr(httpx, "post", time_out)
+    advisor = OpenAIDrawingAdvisor(api_key="secret", model="vision-model")
+
+    with pytest.raises(
+        ServiceUnavailableError,
+        match=(
+            rf"timed out after {OPENAI_REQUEST_TIMEOUT_SECONDS} seconds.*"
+            "faster model in Controls"
+        ),
+    ):
+        advisor.plan_initial(
+            intent="A detailed dragonfly study",
+            guidance=[],
+            drawable_width_mm=170,
+            drawable_height_mm=257,
+        )
+
+
+def test_runtime_model_update_does_not_mutate_an_inflight_advisor(monkeypatch):
+    first_request_started = Event()
+    release_first_request = Event()
+    requested_models = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output_text": json.dumps(
+                    {
+                        "summary": "Begin with a clear silhouette.",
+                        "paper_strategy": "Keep the sheet registered.",
+                        "completion_intent": "Stop before the page feels crowded.",
+                        "svg": _svg(),
+                    }
+                )
+            }
+
+    def fake_post(_url, **kwargs):
+        requested_models.append(kwargs["json"]["model"])
+        if len(requested_models) == 1:
+            first_request_started.set()
+            release_first_request.wait(timeout=2)
+        return Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    advisor = RuntimeDrawingAdvisor(
+        OpenAIDrawingAdvisor(api_key="secret", model="original-model")
+    )
+    completed = []
+    worker = Thread(
+        target=lambda: completed.append(
+            advisor.plan_initial(
+                intent="A scientific dragonfly",
+                guidance=[],
+                drawable_width_mm=170,
+                drawable_height_mm=257,
+            )
+        )
+    )
+
+    worker.start()
+    assert first_request_started.wait(timeout=1)
+    updated = advisor.update_openai_model(model="new-model")
+    release_first_request.set()
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert len(completed) == 1
+    assert requested_models == ["original-model"]
+    assert updated.advisor.model == "new-model"
+    advisor.plan_initial(
+        intent="A scientific dragonfly",
+        guidance=[],
+        drawable_width_mm=170,
+        drawable_height_mm=257,
+    )
+    assert requested_models == ["original-model", "new-model"]
 
 
 def test_openai_advisor_assessment_requires_svg_for_continue(monkeypatch):

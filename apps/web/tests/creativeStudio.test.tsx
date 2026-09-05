@@ -753,9 +753,21 @@ it("configures the OpenAI advisor in backend memory and clears the key field", a
     ]);
   });
   expect(keyInput).toHaveValue("");
+  expect(screen.getByText(/leave this blank to keep the key/i)).toBeInTheDocument();
   expect(screen.getByText(/loaded in backend memory/i)).toBeInTheDocument();
   expect(screen.queryByDisplayValue(apiKey)).not.toBeInTheDocument();
   expect(window.localStorage.getItem("OPENAI_API_KEY")).toBeNull();
+
+  fireEvent.change(modelInput, { target: { value: "gpt-5.6-luna" } });
+  const saveModel = screen.getByRole("button", { name: /^save model$/i });
+  expect(saveModel).toBeEnabled();
+  fireEvent.click(saveModel);
+  await waitFor(() => {
+    expect(controlsHarness.advisorModelRequests).toEqual(["gpt-5.6-luna"]);
+  });
+  expect(keyInput).toHaveValue("");
+  expect(screen.getByText(/future advisor requests will use gpt-5.6-luna/i)).toBeInTheDocument();
+  expect(saveModel).toBeDisabled();
 
   fireEvent.click(screen.getByRole("button", { name: /clear runtime key/i }));
   await waitFor(() => expect(controlsHarness.advisorConfigurationClears).toBe(1));
@@ -777,5 +789,9 @@ it("surfaces provider-disabled recovery without exposing a browser key field", a
 
   expect(await screen.findByText(/creative advisor unavailable/i)).toBeInTheDocument();
   expect(screen.getByText(/disabled on the local backend/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /change advisor/i })).toHaveAttribute(
+    "href",
+    "/controls",
+  );
   expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
 });

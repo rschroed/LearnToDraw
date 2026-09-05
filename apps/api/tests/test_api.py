@@ -166,6 +166,10 @@ def test_runtime_openai_advisor_configuration_is_redacted_and_used(tmp_path, mon
             "/api/drawing-advisor/configuration",
             json={"api_key": api_key, "model": "vision-model"},
         )
+        model_updated = client.patch(
+            "/api/drawing-advisor/configuration",
+            json={"model": "vision-model-v2"},
+        )
         created = client.post(
             "/api/drawing-sessions",
             json={"intent": "A loose field of flowers"},
@@ -200,9 +204,13 @@ def test_runtime_openai_advisor_configuration_is_redacted_and_used(tmp_path, mon
     }
     assert configured.json()["source"] == "runtime"
     assert api_key not in configured.text
+    assert model_updated.status_code == 200
+    assert model_updated.json()["advisor"]["model"] == "vision-model-v2"
+    assert model_updated.json()["source"] == "runtime"
+    assert api_key not in model_updated.text
     assert planned["status"] == "awaiting_approval"
     assert planned["advisor"]["driver"] == "openai"
-    assert planned["current_proposal"]["advisor_model"] == "vision-model"
+    assert planned["current_proposal"]["advisor_model"] == "vision-model-v2"
     assert cleared.json()["advisor"]["driver"] == "disabled"
     assert cleared.json()["source"] == "startup"
 
@@ -216,12 +224,39 @@ def test_invalid_runtime_advisor_configuration_preserves_active_advisor(tmp_path
             "/api/drawing-advisor/configuration",
             json={"api_key": "   ", "model": "vision-model"},
         )
+        model_only = client.patch(
+            "/api/drawing-advisor/configuration",
+            json={"model": "vision-model-v2"},
+        )
         current = client.get("/api/drawing-advisor/configuration")
 
     assert invalid.status_code == 400
     assert invalid.json() == {"detail": "Enter an OpenAI API key."}
+    assert model_only.status_code == 409
+    assert model_only.json() == {
+        "detail": "Configure an OpenAI API key before changing the model."
+    }
     assert current.json()["advisor"]["driver"] == "mock"
     assert current.json()["source"] == "startup"
+
+
+def test_model_only_update_requires_an_active_openai_credential(tmp_path):
+    with create_test_client(
+        tmp_path,
+        config_overrides={
+            "drawing_advisor_driver": "openai",
+            "openai_model": "startup-model",
+        },
+    ) as client:
+        response = client.patch(
+            "/api/drawing-advisor/configuration",
+            json={"model": "replacement-model"},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Configure an OpenAI API key before changing the model."
+    }
 
 
 class CompatOnlyPlotter:

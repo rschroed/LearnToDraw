@@ -389,6 +389,10 @@ class DrawingAdvisorConfigurationRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
 
 
+class DrawingAdvisorModelRequest(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+
+
 class DrawingAdvisorRuntimeStatus(BaseModel):
     advisor: DrawingAdvisorStatus
     source: Literal["startup", "runtime"]

@@ -4,6 +4,7 @@ import {
   clearDrawingAdvisorConfiguration,
   configureDrawingAdvisor,
   fetchDrawingAdvisorConfiguration,
+  updateDrawingAdvisorModel,
 } from "../../lib/api";
 import type { DrawingAdvisorRuntimeStatus } from "../../types/drawing";
 
@@ -39,11 +40,16 @@ export function AdvisorSetupPanel() {
     setError(null);
     setFeedback(null);
     try {
-      const nextStatus = await configureDrawingAdvisor(apiKey, model);
+      const replacingKey = apiKey.trim().length > 0;
+      const nextStatus = replacingKey
+        ? await configureDrawingAdvisor(apiKey, model)
+        : await updateDrawingAdvisorModel(model);
       setStatus(nextStatus);
       setApiKey("");
       setFeedback(
-        "OpenAI advisor loaded in backend memory. The first drawing plan will verify the key and model with OpenAI.",
+        replacingKey
+          ? "OpenAI advisor loaded in backend memory. The first drawing plan will verify the key and model with OpenAI."
+          : `Future advisor requests will use ${nextStatus.advisor.model}.`,
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to configure the advisor.");
@@ -70,6 +76,9 @@ export function AdvisorSetupPanel() {
   }
 
   const isRuntimeOpenAI = status?.source === "runtime";
+  const canReuseOpenAIKey = status?.advisor.driver === "openai" && status.advisor.available;
+  const hasReplacementKey = apiKey.trim().length > 0;
+  const modelChanged = model.trim() !== (status?.advisor.model ?? "");
   const statusLabel = status === null
     ? "Checking advisor…"
     : status.advisor.available
@@ -103,10 +112,13 @@ export function AdvisorSetupPanel() {
             onChange={(event) => setApiKey(event.target.value)}
             autoComplete="new-password"
             spellCheck={false}
-            required
+            required={!canReuseOpenAIKey}
             disabled={busy}
-            placeholder={isRuntimeOpenAI ? "Enter a replacement key" : "sk-…"}
+            placeholder={canReuseOpenAIKey ? "Optional: replace the active key" : "sk-…"}
           />
+          {canReuseOpenAIKey ? (
+            <small>Leave this blank to keep the key already held by the backend.</small>
+          ) : null}
         </label>
         <label className="field-group">
           <span>Model</span>
@@ -121,8 +133,21 @@ export function AdvisorSetupPanel() {
           />
         </label>
         <div className="advisor-setup-actions">
-          <button type="submit" disabled={busy || apiKey.trim().length === 0 || model.trim().length === 0}>
-            {busy ? "Saving…" : isRuntimeOpenAI ? "Replace runtime key" : "Enable OpenAI advisor"}
+          <button
+            type="submit"
+            disabled={
+              busy ||
+              model.trim().length === 0 ||
+              (!hasReplacementKey && (!canReuseOpenAIKey || !modelChanged))
+            }
+          >
+            {busy
+              ? "Saving…"
+              : hasReplacementKey
+                ? canReuseOpenAIKey
+                  ? "Replace key and save model"
+                  : "Enable OpenAI advisor"
+                : "Save model"}
           </button>
           {isRuntimeOpenAI ? (
             <button type="button" className="button-secondary" disabled={busy} onClick={() => void clearConfiguration()}>

@@ -221,6 +221,7 @@ export interface HardwareDashboardHarness {
   }>;
   advisorConfiguration: DrawingAdvisorRuntimeStatus;
   advisorConfigurationRequests: Array<{ api_key: string; model: string }>;
+  advisorModelRequests: string[];
   advisorConfigurationClears: number;
 }
 
@@ -296,6 +297,7 @@ export function createHardwareDashboardHarness(
       clears_on_restart: true,
     },
     advisorConfigurationRequests: [],
+    advisorModelRequests: [],
     advisorConfigurationClears: 0,
     ...overrides,
   };
@@ -422,6 +424,20 @@ export function installHardwareDashboardFetchMock(
             model: string;
           };
           harness.advisorConfigurationRequests.push(body);
+          harness.advisorConfiguration = {
+            advisor: {
+              driver: "openai",
+              available: true,
+              model: body.model,
+              message: null,
+            },
+            source: "runtime",
+            persistence: "process_memory",
+            clears_on_restart: true,
+          };
+        } else if (method === "PATCH") {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { model: string };
+          harness.advisorModelRequests.push(body.model);
           harness.advisorConfiguration = {
             advisor: {
               driver: "openai",
