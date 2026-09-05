@@ -4,6 +4,7 @@ import { StatusPill } from "../../components/StatusPill";
 import type { DrawingSessionStatus } from "../../types/drawing";
 import { StudioCanvas } from "./StudioCanvas";
 import { StudioConversation } from "./StudioConversation";
+import { StudioProgressPanel } from "./StudioProgressPanel";
 import { useStudioSession } from "./useStudioSession";
 
 const STATUS_LABELS: Record<DrawingSessionStatus, string> = {
@@ -106,9 +107,7 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
         </div>
       </header>
 
-      <div className="sr-only" role="status" aria-live="polite">
-        {STATUS_LABELS[session.status]}. Pass {session.pass_count}.
-      </div>
+      <StudioProgressPanel session={session} run={currentRun} />
 
       {controller.hardwareError ? (
         <div className="studio-attention-banner" role="status">
