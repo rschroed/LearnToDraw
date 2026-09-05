@@ -192,4 +192,9 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Kept runtime credentials only in backend process memory, returned redacted status only, and made clear/restart restore startup configuration
 - Left environment-based advisor configuration available for operators who prefer startup-time setup
 
+## Pre-Approval Preview Orientation Fix
+
+- Made the session studio use the backend-owned workspace page dimensions before a PlotRun exists, so landscape first-pass proposals render in a landscape paper frame
+- Kept run preparation and registered-capture dimensions authoritative after plotting, with the existing A4 fallback retained when workspace data is unavailable
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

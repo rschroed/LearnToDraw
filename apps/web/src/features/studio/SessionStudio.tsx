@@ -133,6 +133,7 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
           <StudioCanvas
             session={session}
             runs={controller.runs}
+            pageSize={controller.plotterWorkspace?.page_size_mm}
             captureReview={controller.captureReview}
             busy={
               controller.busyAction === "register" ||

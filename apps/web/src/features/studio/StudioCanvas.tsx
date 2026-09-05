@@ -11,6 +11,7 @@ type CanvasMode = "intended" | "observed" | "overlay" | "registration";
 interface StudioCanvasProps {
   session: DrawingSession;
   runs: Record<string, PlotRun>;
+  pageSize?: { width_mm: number; height_mm: number } | null;
   captureReview: PlotRunCaptureReviewPayload | null;
   busy: boolean;
   retryingCapture: boolean;
@@ -23,7 +24,10 @@ function readFinite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function pageAspectFor(run: PlotRun | null) {
+function pageAspectFor(
+  run: PlotRun | null,
+  pageSize?: { width_mm: number; height_mm: number } | null,
+) {
   const capture = run?.observed_result?.capture ?? run?.capture ?? null;
   const frame = capture?.normalized?.metadata.frame;
   if (frame && frame.page_width_mm > 0 && frame.page_height_mm > 0) {
@@ -35,12 +39,16 @@ function pageAspectFor(run: PlotRun | null) {
     const height = readFinite((preparation as Record<string, unknown>).page_height_mm);
     if (width && height && width > 0 && height > 0) return width / height;
   }
+  if (pageSize && pageSize.width_mm > 0 && pageSize.height_mm > 0) {
+    return pageSize.width_mm / pageSize.height_mm;
+  }
   return 210 / 297;
 }
 
 export function StudioCanvas({
   session,
   runs,
+  pageSize = null,
   captureReview,
   busy,
   retryingCapture,
@@ -92,7 +100,7 @@ export function StudioCanvas({
     }
   }, [captureReview, mode, observation, overlayAvailable]);
 
-  const aspect = pageAspectFor(currentRun ?? latestObservedRun);
+  const aspect = pageAspectFor(currentRun ?? latestObservedRun, pageSize);
   const hasIntended = intendedUrls.length > 0 || Boolean(proposalUrl);
 
   return (
