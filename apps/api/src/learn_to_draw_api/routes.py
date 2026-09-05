@@ -292,6 +292,13 @@ def build_api_router(
         return drawing_session_service.resume(session_id)
 
     @router.post(
+        "/api/drawing-sessions/{session_id}/replan",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_replan(session_id: str) -> DrawingSession:
+        return drawing_session_service.replan(session_id)
+
+    @router.post(
         "/api/drawing-sessions/{session_id}/advice",
         response_model=DrawingSession,
     )

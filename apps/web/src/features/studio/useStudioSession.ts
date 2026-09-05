@@ -11,6 +11,7 @@ import {
   fetchPlotRunCaptureReview,
   finishDrawingSession,
   heartbeatDrawingSession,
+  replanDrawingSession,
   resumeDrawingSession,
   retryPlotRunCapture,
   sendDrawingSessionMessage,
@@ -48,6 +49,7 @@ export type StudioAction =
   | "stop-after-pass"
   | "emergency-stop"
   | "resume"
+  | "replan"
   | "retry-capture"
   | "register"
   | null;
@@ -252,6 +254,24 @@ export function useStudioSession(sessionId: string) {
     },
     resume: async () => {
       await runAction("resume", () => resumeDrawingSession(sessionId));
+    },
+    replan: async () => {
+      try {
+        setBusyAction("replan");
+        setError(null);
+        const successor = await replanDrawingSession(sessionId);
+        if (mountedRef.current) setSession(successor);
+        return successor.id;
+      } catch (actionError) {
+        if (mountedRef.current) {
+          setError(
+            actionError instanceof Error ? actionError.message : "Unable to plan a new attempt.",
+          );
+        }
+        return null;
+      } finally {
+        if (mountedRef.current) setBusyAction(null);
+      }
     },
     retryCapture: async (runId: string) => {
       await runAction("retry-capture", () => retryPlotRunCapture(runId));

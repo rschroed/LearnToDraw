@@ -21,6 +21,7 @@ from learn_to_draw_api.models import (
     DrawingSessionPaperPreflight,
     DrawingSessionPlan,
     DrawingSessionProposal,
+    DrawingSessionRecoveryAction,
     DrawingSessionStopRequest,
     DrawingSessionSummary,
     DrawingSession,
@@ -154,27 +155,10 @@ class DrawingSessionService:
 
     def _create_v2(self, intent: str) -> DrawingSession:
         with self._lock:
-            now = datetime.now(timezone.utc)
-            session = DrawingSession(
-                id=uuid4().hex,
-                session_version=2,
-                intent=intent,
-                status="planning",
-                created_at=now,
-                updated_at=now,
-                advisor=self._advisor.status,
-                planning_generation=1,
-                authorization=DrawingSessionAuthorization(),
-                events=[
-                    self._event(
-                        "session_created",
-                        "Creative session created. Planning the first pass.",
-                    )
-                ],
-            )
+            session = self._new_v2_session(intent=intent)
             self._store.save(session)
-            self._dispatch_plan(session.id, session.planning_generation)
-            return session
+        self._dispatch_plan(session.id, session.planning_generation)
+        return session
 
     def get(self, session_id: str) -> DrawingSession:
         with self._lock:
@@ -284,6 +268,9 @@ class DrawingSessionService:
             session.authorization.stop_requested = False
             session.authorization.finish_requested = False
             session.authorization.last_heartbeat_at = now
+            session.error = None
+            session.requested_human_action = None
+            session.recovery_action = None
             session.paper_preflight = DrawingSessionPaperPreflight(
                 confirmed_at=now,
                 page_width_mm=workspace.page_size_mm.width_mm,
@@ -417,7 +404,7 @@ class DrawingSessionService:
             session = self._sync(self._store.get(session_id))
             if session.session_version != 2:
                 raise AppConflictError("Stop control is available only for V2 drawing sessions.")
-            if session.status in {"completed", "failed"}:
+            if session.status in {"completed", "failed", "abandoned"}:
                 return session
             now = datetime.now(timezone.utc)
             session.authorization.stop_requested = True
@@ -443,6 +430,7 @@ class DrawingSessionService:
                         session,
                         "Emergency stop completed. Inspect the machine before resuming.",
                         run_id=run.id,
+                        recovery_action="replan_new_sheet",
                     )
                 else:
                     session.status = "stopping"
@@ -465,6 +453,15 @@ class DrawingSessionService:
                 raise AppConflictError("Resume is available only for V2 drawing sessions.")
             if session.status != "paused":
                 raise AppConflictError("This drawing session is not paused.")
+            recovery_action = self._effective_recovery_action(session)
+            if recovery_action == "retake_capture":
+                raise AppConflictError(
+                    "This session needs a new photograph, not another assessment of the old one."
+                )
+            if recovery_action == "replan_new_sheet":
+                raise AppConflictError(
+                    "This sheet cannot continue additively. Plan a new attempt instead."
+                )
             self._assert_no_other_active_session(session.id)
             now = datetime.now(timezone.utc)
             session.authorization.stop_requested = False
@@ -473,6 +470,7 @@ class DrawingSessionService:
             session.paused_at = None
             session.error = None
             session.requested_human_action = None
+            session.recovery_action = None
             session.assessing_run_id = None
             session.updated_at = now
             session.events.append(
@@ -488,6 +486,30 @@ class DrawingSessionService:
                 session.status = "running"
                 self._store.save(session)
             return session
+
+    def replan(self, session_id: str) -> DrawingSession:
+        with self._lock:
+            original = self._store.get(session_id)
+            if original.replanned_to_session_id is not None:
+                return self._store.get(original.replanned_to_session_id)
+            original = self._sync(original)
+            if original.session_version != 2:
+                raise AppConflictError("New-sheet replanning is available only for V2 sessions.")
+            if original.status != "paused":
+                raise AppConflictError("This drawing session is not safely paused.")
+            if original.current_run_id is not None:
+                run = self._plot_workflow.get_run(original.current_run_id)
+                if run.status in ACTIVE_PLOT_RUN_STATUSES:
+                    raise AppConflictError(
+                        "Wait for the current physical operation to finish before replanning."
+                    )
+            successor = self._create_replan_successor_locked(
+                original,
+                feedback=self._feedback_from_session(original),
+                guidance=list(original.queued_guidance),
+            )
+        self._dispatch_plan(successor.id, successor.planning_generation)
+        return successor
 
     def request_advice(self, session_id: str) -> DrawingSession:
         with self._lock:
@@ -621,6 +643,9 @@ class DrawingSessionService:
         return session
 
     def _sync_v2(self, session: DrawingSession) -> DrawingSession:
+        if session.status in {"completed", "failed", "abandoned"}:
+            session.advisor = self._advisor.status
+            return session
         if session.current_run_id is None:
             session.advisor = self._advisor.status
             return session
@@ -628,6 +653,11 @@ class DrawingSessionService:
         previous_status = session.status
         if run.status == "awaiting_capture_review":
             session.status = "awaiting_capture_review"
+            if previous_status == "paused":
+                session.paused_at = None
+                session.error = None
+                session.requested_human_action = None
+                session.recovery_action = None
         elif run.status in ACTIVE_PLOT_RUN_STATUSES:
             session.status = (
                 "stopping"
@@ -637,12 +667,18 @@ class DrawingSessionService:
                 )
                 else "running"
             )
+            if previous_status == "paused":
+                session.paused_at = None
+                session.error = None
+                session.requested_human_action = None
+                session.recovery_action = None
         elif run.status == "failed":
             if session.status != "paused":
                 self._pause_session(
                     session,
                     run.error or "The current plot run failed.",
                     run_id=run.id,
+                    recovery_action=self._terminal_run_recovery_action(run),
                 )
         elif run.status == "cancelled":
             if session.status != "paused":
@@ -650,6 +686,7 @@ class DrawingSessionService:
                     session,
                     "Emergency stop completed. Inspect the machine before resuming.",
                     run_id=run.id,
+                    recovery_action="replan_new_sheet",
                 )
         elif (
             run.status == "completed"
@@ -729,6 +766,7 @@ class DrawingSessionService:
                     session,
                     run.error or "The current plot run failed.",
                     run_id=run.id,
+                    recovery_action=self._terminal_run_recovery_action(run),
                 )
                 self._store.save(session)
                 return
@@ -737,6 +775,7 @@ class DrawingSessionService:
                     session,
                     "Emergency stop completed. Inspect the machine before resuming.",
                     run_id=run.id,
+                    recovery_action="replan_new_sheet",
                 )
                 self._store.save(session)
                 return
@@ -783,6 +822,7 @@ class DrawingSessionService:
                     session,
                     "The registered observed image is unavailable. Retake the capture.",
                     run_id=run.id,
+                    recovery_action="retake_capture",
                 )
                 self._store.save(session)
                 return
@@ -831,6 +871,29 @@ class DrawingSessionService:
                 prior_interpretations=prior_interpretations,
                 guidance=guidance,
             )
+            if assessment.decision == "pause":
+                if assessment.recovery_action not in {
+                    "retake_capture",
+                    "replan_new_sheet",
+                }:
+                    raise InvalidArtifactError(
+                        "A pause decision must choose retake_capture or replan_new_sheet."
+                    )
+                if not assessment.requested_human_action:
+                    raise InvalidArtifactError(
+                        "A pause decision must explain the requested human action."
+                    )
+                if assessment.svg_text is not None:
+                    raise InvalidArtifactError(
+                        "A pause decision cannot include a drawing layer."
+                    )
+            elif (
+                assessment.recovery_action is not None
+                or assessment.requested_human_action is not None
+            ):
+                raise InvalidArtifactError(
+                    "Continue and complete decisions cannot request a recovery action."
+                )
             safe_svg = None
             if assessment.decision == "continue":
                 if not assessment.svg_text:
@@ -866,6 +929,7 @@ class DrawingSessionService:
         safe_svg: Optional[str],
         consumed_guidance: list[str],
     ) -> None:
+        successor_to_dispatch: Optional[DrawingSession] = None
         with self._lock:
             session = self._store.get(session_id)
             if session.assessing_run_id != run_id or session.current_run_id != run_id:
@@ -908,6 +972,7 @@ class DrawingSessionService:
                         "reason": assessment.reason,
                         "guidance": consumed_guidance,
                         "requested_human_action": assessment.requested_human_action,
+                        "recovery_action": assessment.recovery_action,
                         "criterion_assessments": [
                             {
                                 "rank": item.rank,
@@ -933,7 +998,20 @@ class DrawingSessionService:
                 )
             elif assessment.decision == "pause":
                 session.requested_human_action = assessment.requested_human_action
-                self._pause_session(session, assessment.reason, run_id=run_id)
+                if assessment.recovery_action == "replan_new_sheet":
+                    session.recovery_action = "replan_new_sheet"
+                    successor_to_dispatch = self._create_replan_successor_locked(
+                        session,
+                        feedback=self._feedback_from_assessment(assessment),
+                        guidance=list(session.queued_guidance),
+                    )
+                else:
+                    self._pause_session(
+                        session,
+                        assessment.reason,
+                        run_id=run_id,
+                        recovery_action=assessment.recovery_action,
+                    )
             elif asset is not None:
                 if session.authorization.stop_requested:
                     self._pause_session(
@@ -986,8 +1064,13 @@ class DrawingSessionService:
                             run_id=next_run.id,
                         )
                     )
-            session.updated_at = now
+            session.updated_at = max(session.updated_at, now)
             self._store.save(session)
+        if successor_to_dispatch is not None:
+            self._dispatch_plan(
+                successor_to_dispatch.id,
+                successor_to_dispatch.planning_generation,
+            )
 
     def _pause_assessment_failure(
         self,
@@ -1022,6 +1105,156 @@ class DrawingSessionService:
             )
             self._store.save(session)
 
+    def _new_v2_session(
+        self,
+        *,
+        intent: str,
+        replanned_from_session_id: Optional[str] = None,
+        replan_context: Optional[str] = None,
+        guidance: Optional[list[str]] = None,
+    ) -> DrawingSession:
+        now = datetime.now(timezone.utc)
+        is_replan = replanned_from_session_id is not None
+        return DrawingSession(
+            id=uuid4().hex,
+            session_version=2,
+            intent=intent,
+            status="planning",
+            created_at=now,
+            updated_at=now,
+            advisor=self._advisor.status,
+            planning_generation=1,
+            authorization=DrawingSessionAuthorization(),
+            queued_guidance=list(guidance or []),
+            replanned_from_session_id=replanned_from_session_id,
+            replan_context=replan_context,
+            events=[
+                self._event(
+                    "session_created",
+                    (
+                        "The agent started a new-sheet attempt and is replanning the first pass."
+                        if is_replan
+                        else "Creative session created. Planning the first pass."
+                    ),
+                    details=(
+                        {"replanned_from_session_id": replanned_from_session_id}
+                        if is_replan
+                        else None
+                    ),
+                )
+            ],
+        )
+
+    def _create_replan_successor_locked(
+        self,
+        original: DrawingSession,
+        *,
+        feedback: str,
+        guidance: list[str],
+    ) -> DrawingSession:
+        if original.replanned_to_session_id is not None:
+            return self._store.get(original.replanned_to_session_id)
+        successor = self._new_v2_session(
+            intent=original.intent,
+            replanned_from_session_id=original.id,
+            replan_context=feedback,
+            guidance=guidance,
+        )
+        self._store.save(successor)
+        now = datetime.now(timezone.utc)
+        original.status = "abandoned"
+        original.abandoned_at = now
+        original.updated_at = now
+        original.assessing_run_id = None
+        original.queued_guidance = []
+        original.recovery_action = "replan_new_sheet"
+        original.replanned_to_session_id = successor.id
+        original.events.append(
+            self._event(
+                "session_replanned",
+                "The agent preserved this attempt and started a new plan for a fresh sheet.",
+                run_id=original.current_run_id,
+                details={"successor_session_id": successor.id},
+            )
+        )
+        self._store.save(original)
+        return successor
+
+    def _effective_recovery_action(
+        self,
+        session: DrawingSession,
+    ) -> DrawingSessionRecoveryAction:
+        if session.recovery_action is not None:
+            return session.recovery_action
+        last_agent_decision = next(
+            (event for event in reversed(session.events) if event.type == "agent_decision"),
+            None,
+        )
+        if (
+            last_agent_decision is not None
+            and last_agent_decision.details.get("decision") == "pause"
+        ):
+            return "replan_new_sheet"
+        if session.current_run_id is not None:
+            run = self._plot_workflow.get_run(session.current_run_id)
+            if run.status == "failed":
+                return self._terminal_run_recovery_action(run)
+            if run.status == "cancelled":
+                return "replan_new_sheet"
+        return "resume"
+
+    @staticmethod
+    def _terminal_run_recovery_action(run) -> DrawingSessionRecoveryAction:
+        if (
+            run.status == "failed"
+            and run.capture_mode == "auto"
+            and run.stage_states.plot.status == "completed"
+        ):
+            return "retake_capture"
+        return "replan_new_sheet"
+
+    @staticmethod
+    def _feedback_from_assessment(assessment) -> str:
+        lines = [
+            f"Observed result: {assessment.assessment}",
+            f"Why the attempt stopped: {assessment.reason}",
+        ]
+        if assessment.requested_human_action:
+            lines.append(f"Requested change: {assessment.requested_human_action}")
+        for item in assessment.criterion_assessments:
+            lines.append(
+                f"Criterion {item.rank} ({item.outcome}): {item.criterion} — "
+                f"{item.assessment}"
+            )
+        return "\n".join(lines)[:12000]
+
+    @staticmethod
+    def _feedback_from_session(session: DrawingSession) -> str:
+        for event in reversed(session.events):
+            if event.type != "agent_decision" or event.details.get("decision") != "pause":
+                continue
+            details = event.details
+            lines = [
+                f"Observed result: {details.get('assessment') or event.message}",
+                f"Why the attempt stopped: {details.get('reason') or event.message}",
+            ]
+            requested = details.get("requested_human_action") or session.requested_human_action
+            if requested:
+                lines.append(f"Requested change: {requested}")
+            criteria = details.get("criterion_assessments")
+            if isinstance(criteria, list):
+                for item in criteria:
+                    if not isinstance(item, dict):
+                        continue
+                    lines.append(
+                        f"Criterion {item.get('rank')} ({item.get('outcome')}): "
+                        f"{item.get('criterion')} — {item.get('assessment')}"
+                    )
+            return "\n".join(lines)[:12000]
+        return (session.requested_human_action or session.error or "Start a safer new attempt.")[
+            :12000
+        ]
+
     def _assert_no_other_active_session(self, session_id: str) -> None:
         for candidate in self._store.list():
             if (
@@ -1055,11 +1288,13 @@ class DrawingSessionService:
         message: str,
         *,
         run_id: Optional[str] = None,
+        recovery_action: Optional[DrawingSessionRecoveryAction] = "resume",
     ) -> None:
         now = datetime.now(timezone.utc)
         session.status = "paused"
         session.paused_at = now
         session.error = message
+        session.recovery_action = recovery_action
         session.updated_at = now
         if not (
             session.events
@@ -1083,6 +1318,7 @@ class DrawingSessionService:
         session.paused_at = None
         session.error = None
         session.requested_human_action = None
+        session.recovery_action = None
         session.assessing_run_id = None
         session.authorization.stop_requested = False
         session.authorization.finish_requested = False
@@ -1117,6 +1353,7 @@ class DrawingSessionService:
                     return
                 intent = session.intent
                 guidance = list(session.queued_guidance)
+                prior_attempt_feedback = session.replan_context
                 workspace = self._workspace_service.current_validated()
                 plot_area = workspace.to_plot_area()
             draft = self._advisor.plan_initial(
@@ -1124,6 +1361,7 @@ class DrawingSessionService:
                 guidance=guidance,
                 drawable_width_mm=plot_area.draw_width_mm,
                 drawable_height_mm=plot_area.draw_height_mm,
+                prior_attempt_feedback=prior_attempt_feedback,
             )
             safe_svg = validate_and_normalize_advisor_svg(
                 draft.svg_text,
@@ -1167,6 +1405,7 @@ class DrawingSessionService:
                 )
                 session.status = "awaiting_approval"
                 session.error = None
+                session.recovery_action = None
                 session.advisor = self._advisor.status
                 session.updated_at = now
                 session.events.append(
@@ -1195,6 +1434,7 @@ class DrawingSessionService:
                 session.status = "paused"
                 session.paused_at = now
                 session.error = str(exc)
+                session.recovery_action = "resume"
                 session.advisor = self._advisor.status
                 session.updated_at = now
                 session.events.append(self._event("plan_failed", str(exc)))

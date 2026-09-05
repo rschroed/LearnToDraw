@@ -103,12 +103,21 @@ export interface DrawingSession {
   } | null;
   queued_guidance: string[];
   requested_human_action: string | null;
+  recovery_action: DrawingSessionRecoveryAction | null;
+  replanned_from_session_id: string | null;
+  replanned_to_session_id: string | null;
+  replan_context: string | null;
   events: DrawingSessionEvent[];
   approved_at: string | null;
   paused_at: string | null;
   completed_at: string | null;
   abandoned_at: string | null;
 }
+
+export type DrawingSessionRecoveryAction =
+  | "resume"
+  | "retake_capture"
+  | "replan_new_sheet";
 
 export type DrawingSessionEventType =
   | "session_created"
@@ -126,7 +135,8 @@ export type DrawingSessionEventType =
   | "finish_requested"
   | "session_completed"
   | "session_failed"
-  | "session_abandoned";
+  | "session_abandoned"
+  | "session_replanned";
 
 export interface DrawingSessionEvent {
   id: string;

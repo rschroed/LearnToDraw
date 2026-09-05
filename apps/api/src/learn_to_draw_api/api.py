@@ -25,6 +25,7 @@ from learn_to_draw_api.services.camera_device_settings import (
 )
 from learn_to_draw_api.services.hardware import HardwareService
 from learn_to_draw_api.services.drawing_advisor import (
+    DrawingAdvisor,
     RuntimeDrawingAdvisor,
     build_drawing_advisor,
 )
@@ -56,6 +57,7 @@ def create_app(
     *,
     plotter: Optional[PlotterAdapter] = None,
     camera: Optional[CameraAdapter] = None,
+    advisor: Optional[DrawingAdvisor] = None,
 ) -> FastAPI:
     app_config = config or AppConfig.from_env()
     app_config.ensure_directories()
@@ -123,7 +125,9 @@ def create_app(
         device_settings_service=device_settings_service,
         workspace_service=workspace_service,
     )
-    drawing_advisor = RuntimeDrawingAdvisor(build_drawing_advisor(app_config))
+    drawing_advisor = RuntimeDrawingAdvisor(
+        advisor or build_drawing_advisor(app_config)
+    )
     drawing_session_service = DrawingSessionService(
         store=DrawingSessionStore(app_config.drawing_sessions_dir),
         plot_workflow_service=plot_workflow_service,

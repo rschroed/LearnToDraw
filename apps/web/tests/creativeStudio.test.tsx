@@ -138,6 +138,10 @@ function buildSession(
       : null,
     queued_guidance: [],
     requested_human_action: null,
+    recovery_action: null,
+    replanned_from_session_id: null,
+    replanned_to_session_id: null,
+    replan_context: null,
     events: [
       event("session_created", "Creative session created. Planning the first pass."),
       ...(status === "planning"
@@ -379,6 +383,14 @@ function installStudioMock(
     }
     if (url.endsWith("/resume") && method === "POST") {
       currentSession = { ...currentSession, status: "running", error: null, paused_at: null };
+      return Response.json(currentSession);
+    }
+    if (url.endsWith("/replan") && method === "POST") {
+      currentSession = buildSession("planning", {
+        id: "session-2",
+        replanned_from_session_id: currentSession.id,
+        replan_context: "The prior foundation was too diagrammatic.",
+      });
       return Response.json(currentSession);
     }
     throw new Error(`Unexpected request: ${method} ${url}`);
@@ -658,6 +670,7 @@ it("offers capture-only recovery and never creates a replacement plot run", asyn
 
   const recoveryHeading = await screen.findByRole("heading", { name: /safely paused/i });
   await waitFor(() => expect(recoveryHeading).toHaveFocus());
+  expect(screen.queryByRole("button", { name: /resume session/i })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /retake photo only/i }));
 
   await waitFor(() => {
@@ -668,6 +681,65 @@ it("offers capture-only recovery and never creates a replacement plot run", asyn
       (request) => request.url === "/api/plot-runs" && request.method === "POST",
     ),
   ).toBe(false);
+});
+
+it("turns an agent new-sheet pause into a linked planning attempt", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const paused = buildSession("paused", {
+    recovery_action: "replan_new_sheet",
+    requested_human_action: "Replace the sheet before approving the new attempt.",
+  });
+  const harness = installStudioMock(paused, buildRun("completed", buildCapture()));
+  render(<App />);
+
+  expect(await screen.findAllByText(/replace the sheet before approving/i)).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: /resume session/i })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /plan a new attempt/i }));
+
+  await waitFor(() => expect(window.location.pathname).toBe("/sessions/session-2"));
+  expect(
+    await screen.findByRole("heading", { name: /designing and reviewing the first pass/i }),
+  ).toBeInTheDocument();
+  expect(harness.requests.some((request) => request.url.endsWith("/replan"))).toBe(true);
+  expect(
+    harness.requests.some(
+      (request) => request.url === "/api/plot-runs" && request.method === "POST",
+    ),
+  ).toBe(false);
+});
+
+it("keeps ordinary recoverable pauses resumable", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const harness = installStudioMock(
+    buildSession("paused", { recovery_action: "resume" }),
+    buildRun("completed", buildCapture()),
+  );
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /resume session/i }));
+  await waitFor(() => {
+    expect(harness.requests.some((request) => request.url.endsWith("/resume"))).toBe(true);
+  });
+  expect(harness.requests.some((request) => request.url.endsWith("/replan"))).toBe(false);
+});
+
+it("explains what carried forward into a new-sheet plan", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  installStudioMock(
+    buildSession("awaiting_approval", {
+      replanned_from_session_id: "session-old",
+      replan_context: "The first sheet became too diagrammatic for the naturalist style.",
+    }),
+  );
+  render(<App />);
+
+  expect(await screen.findByLabelText(/new-sheet attempt/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /view prior attempt/i })).toHaveAttribute(
+    "href",
+    "/sessions/session-old",
+  );
+  fireEvent.click(screen.getByText(/what the agent learned/i));
+  expect(screen.getByText(/too diagrammatic for the naturalist style/i)).toBeInTheDocument();
 });
 
 it("retakes a questionable registration frame without replotting", async () => {

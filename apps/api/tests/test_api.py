@@ -16,6 +16,11 @@ from learn_to_draw_api.adapters.camera import CaptureArtifact
 from learn_to_draw_api.api import create_app
 from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.services import drawing_sessions as drawing_sessions_module
+from learn_to_draw_api.services.drawing_advisor import (
+    CreativeCriterionAssessmentDraft,
+    DrawingAssessmentDraft,
+    MockDrawingAdvisor,
+)
 from learn_to_draw_api.models import (
     DeviceStatus,
     DrawingSession,
@@ -25,7 +30,14 @@ from learn_to_draw_api.models import (
 )
 
 
-def create_test_client(tmp_path, *, plotter=None, camera=None, config_overrides=None):
+def create_test_client(
+    tmp_path,
+    *,
+    plotter=None,
+    camera=None,
+    advisor=None,
+    config_overrides=None,
+):
     config_overrides = config_overrides or {}
     app = create_app(
         AppConfig(
@@ -40,6 +52,7 @@ def create_test_client(tmp_path, *, plotter=None, camera=None, config_overrides=
         ),
         plotter=plotter,
         camera=camera,
+        advisor=advisor,
     )
     return TestClient(app)
 
@@ -489,6 +502,40 @@ class CountingPlotter(MockPlotter):
     def plot(self, document):
         self.plot_count += 1
         return super().plot(document)
+
+
+class PausingRecoveryAdvisor(MockDrawingAdvisor):
+    def __init__(self, recovery_action):
+        self.recovery_action = recovery_action
+        self.assessment_count = 0
+        self.prior_attempt_feedback = []
+
+    def plan_initial(self, **kwargs):
+        self.prior_attempt_feedback.append(kwargs.get("prior_attempt_feedback"))
+        return super().plan_initial(**kwargs)
+
+    def assess_iteration(self, *, creative_criteria, **_kwargs):
+        self.assessment_count += 1
+        return DrawingAssessmentDraft(
+            assessment="The foundation is too diagrammatic for the requested sketchbook study.",
+            decision="pause",
+            reason="Another additive pass would reinforce the wrong visual language.",
+            requested_human_action=(
+                "Replace the sheet before approving the new attempt."
+                if self.recovery_action == "replan_new_sheet"
+                else "Take another photograph of the unchanged sheet."
+            ),
+            recovery_action=self.recovery_action,
+            criterion_assessments=[
+                CreativeCriterionAssessmentDraft(
+                    rank=index,
+                    criterion=criterion,
+                    outcome="misses",
+                    assessment="The observed pass does not yet express this priority.",
+                )
+                for index, criterion in enumerate(creative_criteria, start=1)
+            ],
+        )
 
 
 def test_capture_endpoint_persists_real_camera_artifact(tmp_path):
@@ -1255,9 +1302,17 @@ def test_v2_drawing_session_plans_revises_and_approves_without_early_motion(tmp_
         earlier_v2_payload = json.loads(json.dumps(planned))
         earlier_v2_payload["plan"].pop("creative_criteria")
         earlier_v2_payload["current_proposal"].pop("quality_review")
+        earlier_v2_payload.pop("recovery_action")
+        earlier_v2_payload.pop("replanned_from_session_id")
+        earlier_v2_payload.pop("replanned_to_session_id")
+        earlier_v2_payload.pop("replan_context")
         earlier_v2_session = DrawingSession.model_validate(earlier_v2_payload)
         assert earlier_v2_session.plan.creative_criteria == []
         assert earlier_v2_session.current_proposal.quality_review is None
+        assert earlier_v2_session.recovery_action is None
+        assert earlier_v2_session.replanned_from_session_id is None
+        assert earlier_v2_session.replanned_to_session_id is None
+        assert earlier_v2_session.replan_context is None
 
         message_response = client.post(
             f"/api/drawing-sessions/{created['id']}/messages",
@@ -1390,6 +1445,164 @@ def test_v2_session_auto_continues_consumes_guidance_and_completes(tmp_path):
     assert len(decisions[0]["details"]["criterion_assessments"]) == 3
     assert decisions[-1]["details"]["decision"] == "complete"
     assert completed["queued_guidance"] == []
+
+
+def test_v2_agent_replans_new_sheet_once_without_more_motion(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0)
+    advisor = PausingRecoveryAdvisor("replan_new_sheet")
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        advisor=advisor,
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A scientific dragonfly in a loose sketchbook style"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
+        ).json()
+
+        original = drive_v2_session_until(client, approved["id"], {"abandoned"})
+        successor_id = original["replanned_to_session_id"]
+        successor = wait_for_session_status(client, successor_id, {"awaiting_approval"})
+        repeated = client.post(f"/api/drawing-sessions/{original['id']}/replan")
+        preserved = client.get(f"/api/drawing-sessions/{original['id']}").json()
+        stopped_original = client.post(
+            f"/api/drawing-sessions/{original['id']}/stop",
+            json={"mode": "after_pass"},
+        ).json()
+        plot_runs = client.get("/api/plot-runs").json()["runs"]
+
+    assert original["recovery_action"] == "replan_new_sheet"
+    assert original["iterations"][0]["run_id"] == approved["current_run_id"]
+    assert original["events"][-1]["type"] == "session_replanned"
+    assert successor["replanned_from_session_id"] == original["id"]
+    assert successor["authorization"]["approved_at"] is None
+    assert successor["current_run_id"] is None
+    assert successor["pass_count"] == 0
+    assert "too diagrammatic" in successor["replan_context"]
+    assert advisor.prior_attempt_feedback == [None, successor["replan_context"]]
+    assert advisor.assessment_count == 1
+    assert plotter.plot_count == 1
+    assert len(plot_runs) == 1
+    assert repeated.status_code == 200
+    assert repeated.json()["id"] == successor["id"]
+    assert preserved["status"] == "abandoned"
+    assert stopped_original["status"] == "abandoned"
+
+
+def test_v2_legacy_agent_pause_cannot_reassess_stale_observation(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A naturalist insect study"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
+        ).json()
+        client.post(
+            f"/api/drawing-sessions/{approved['id']}/stop",
+            json={"mode": "after_pass"},
+        )
+        paused = drive_v2_session_until(client, approved["id"], {"paused"})
+
+    session_path = tmp_path / "drawing-sessions" / f"{paused['id']}.json"
+    persisted = json.loads(session_path.read_text(encoding="utf-8"))
+    persisted.pop("recovery_action")
+    persisted["requested_human_action"] = "Replace the sheet before trying again."
+    persisted["events"].append(
+        {
+            "id": "legacy-agent-pause",
+            "type": "agent_decision",
+            "created_at": persisted["updated_at"],
+            "message": "The foundation cannot be repaired additively.",
+            "asset_id": None,
+            "run_id": persisted["current_run_id"],
+            "details": {
+                "assessment": "The first pass is too diagrammatic.",
+                "decision": "pause",
+                "reason": "A clean sheet is required.",
+                "requested_human_action": "Replace the sheet before trying again.",
+            },
+        }
+    )
+    session_path.write_text(json.dumps(persisted), encoding="utf-8")
+
+    with create_test_client(
+        tmp_path,
+        plotter=CountingPlotter(plot_delay_s=0),
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        resume = client.post(f"/api/drawing-sessions/{paused['id']}/resume")
+        unchanged = client.get(f"/api/drawing-sessions/{paused['id']}").json()
+        successor_response = client.post(
+            f"/api/drawing-sessions/{paused['id']}/replan"
+        )
+        successor = wait_for_session_status(
+            client,
+            successor_response.json()["id"],
+            {"awaiting_approval"},
+        )
+
+    assert unchanged["recovery_action"] is None
+    assert resume.status_code == 409
+    assert "Plan a new attempt" in resume.json()["detail"]
+    assert unchanged["status"] == "paused"
+    assert successor["replanned_from_session_id"] == paused["id"]
+    assert plotter.plot_count == 1
+
+
+def test_v2_retake_recovery_rejects_resume_and_never_replots(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0)
+    advisor = PausingRecoveryAdvisor("retake_capture")
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        advisor=advisor,
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "A loose field of flowers"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
+        ).json()
+        paused = drive_v2_session_until(client, approved["id"], {"paused"})
+        first_capture_id = client.get(
+            f"/api/plot-runs/{paused['current_run_id']}"
+        ).json()["capture"]["id"]
+
+        resume = client.post(f"/api/drawing-sessions/{paused['id']}/resume")
+        retry = client.post(
+            f"/api/plot-runs/{paused['current_run_id']}/capture/retry"
+        )
+        recaptured = wait_for_run_status(
+            client,
+            paused["current_run_id"],
+            {"awaiting_capture_review"},
+        )
+
+    assert paused["recovery_action"] == "retake_capture"
+    assert resume.status_code == 409
+    assert retry.status_code == 200
+    assert recaptured["capture"]["id"] != first_capture_id
+    assert plotter.plot_count == 1
 
 
 def test_v2_stop_after_pass_prevents_another_plot(tmp_path):

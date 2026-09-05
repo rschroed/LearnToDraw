@@ -3112,12 +3112,43 @@ button {
 .studio-plan-card,
 .studio-recovery,
 .studio-complete,
+.studio-attempt-context,
 .gallery-empty,
 .controls-section {
   border: 1px solid var(--border);
   border-radius: 26px;
   background: rgba(34, 32, 29, 0.88);
   box-shadow: var(--shadow);
+}
+
+.studio-attempt-context {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 20px;
+}
+
+.studio-attempt-context p {
+  margin: 0;
+}
+
+.studio-attempt-context a,
+.studio-attempt-context summary {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-underline-offset: 3px;
+}
+
+.studio-attempt-context details {
+  grid-column: 1 / -1;
+}
+
+.studio-attempt-context details p {
+  margin-top: 10px;
+  color: var(--text-muted);
+  white-space: pre-line;
 }
 
 .studio-canvas-panel {
@@ -3983,6 +4014,14 @@ button {
   .studio-registration-recovery {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .studio-attempt-context {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-attempt-context details {
+    grid-column: auto;
   }
 
   .creative-prompt-footer {

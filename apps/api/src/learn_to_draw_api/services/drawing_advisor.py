@@ -14,6 +14,7 @@ from learn_to_draw_api.models import (
     AppConflictError,
     DrawingAdvisorRuntimeStatus,
     DrawingAdvisorStatus,
+    DrawingSessionRecoveryAction,
     InvalidArtifactError,
     ServiceUnavailableError,
 )
@@ -73,6 +74,7 @@ class DrawingAssessmentDraft:
     reason: str
     svg_text: Optional[str] = None
     requested_human_action: Optional[str] = None
+    recovery_action: Optional[DrawingSessionRecoveryAction] = None
     criterion_assessments: list[CreativeCriterionAssessmentDraft] = field(
         default_factory=list
     )
@@ -92,6 +94,7 @@ class DrawingAdvisor(ABC):
         guidance: list[str],
         drawable_width_mm: float,
         drawable_height_mm: float,
+        prior_attempt_feedback: Optional[str] = None,
     ) -> InitialDrawingPlanDraft:
         raise NotImplementedError
 
@@ -266,6 +269,7 @@ class MockDrawingAdvisor(DrawingAdvisor):
         guidance: list[str],
         drawable_width_mm: float,
         drawable_height_mm: float,
+        prior_attempt_feedback: Optional[str] = None,
     ) -> InitialDrawingPlanDraft:
         creative_criteria = [
             f'Express the distinctive character of “{intent}”.',
@@ -495,13 +499,16 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
         guidance: list[str],
         drawable_width_mm: float,
         drawable_height_mm: float,
+        prior_attempt_feedback: Optional[str] = None,
     ) -> InitialDrawingPlanDraft:
         revisions = "\n".join(f"- {item}" for item in guidance[-10:]) or "- None"
+        prior_attempt = prior_attempt_feedback or "None"
         prompt = (
             f"Drawing intent: {intent}\n"
             f"Drawable SVG canvas: {drawable_width_mm} mm wide by "
             f"{drawable_height_mm} mm high.\n"
             f"Requested revisions:\n{revisions}\n\n"
+            f"Prior physical-attempt feedback:\n{prior_attempt}\n\n"
             "Plan a physical pen drawing and provide only its first plotted layer. First return "
             "three to five ordered creative criteria. Rank the qualities that make this request "
             "distinctive first: medium, technique, mood, scientific or expressive character, "
@@ -713,10 +720,13 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
             "continue, complete, or pause. Continue only when a specific additive black-line layer "
             "can materially close a named criterion gap. Complete when the highest-ranked criteria "
             "are satisfied and another pass risks overworking the page. If the foundation is wrong "
-            "and cannot be repaired additively, pause and request a new-sheet or replanning action; "
-            "do not add detail that merely reinforces the wrong direction. Also pause when a person "
-            "must correct a physical condition. For continue, return a safe incremental SVG on the "
-            "exact canvas. Otherwise return null for svg."
+            "and cannot be repaired additively, pause with recovery_action=replan_new_sheet; the "
+            "backend may prepare a successor plan, but a person must confirm the new physical sheet "
+            "before plotting. If the observation is unusable but the same drawing can continue after "
+            "a new photograph, pause with recovery_action=retake_capture. Do not request another "
+            "assessment of the unchanged image. For continue, return a safe incremental SVG on the "
+            "exact canvas. Otherwise return null for svg. For continue or complete, return null for "
+            "recovery_action and requested_human_action."
         )
         parsed = self._request_structured(
             prompt=prompt,
@@ -735,6 +745,10 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     },
                     "svg": {"type": ["string", "null"]},
                     "requested_human_action": {"type": ["string", "null"]},
+                    "recovery_action": {
+                        "type": ["string", "null"],
+                        "enum": ["retake_capture", "replan_new_sheet", None],
+                    },
                 },
                 "required": [
                     "assessment",
@@ -743,6 +757,7 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     "criterion_assessments",
                     "svg",
                     "requested_human_action",
+                    "recovery_action",
                 ],
                 "additionalProperties": False,
             },
@@ -753,6 +768,7 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
         reason = parsed.get("reason")
         svg_text = parsed.get("svg")
         action = parsed.get("requested_human_action")
+        recovery_action = parsed.get("recovery_action")
         if (
             not isinstance(assessment, str)
             or decision not in {"continue", "complete", "pause"}
@@ -761,12 +777,26 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
             raise ServiceUnavailableError("Drawing advisor returned an incomplete assessment.")
         if decision == "continue" and not isinstance(svg_text, str):
             raise ServiceUnavailableError("A continue decision must include an SVG layer.")
+        if decision == "pause":
+            if recovery_action not in {"retake_capture", "replan_new_sheet"}:
+                raise ServiceUnavailableError(
+                    "A pause decision must choose retake_capture or replan_new_sheet."
+                )
+            if not isinstance(action, str) or not action.strip():
+                raise ServiceUnavailableError(
+                    "A pause decision must explain the requested human action."
+                )
+        elif recovery_action is not None or action is not None:
+            raise ServiceUnavailableError(
+                "Continue and complete decisions cannot request a recovery action."
+            )
         return DrawingAssessmentDraft(
             assessment=assessment.strip(),
             decision=decision,
             reason=reason.strip(),
             svg_text=svg_text.strip() if isinstance(svg_text, str) else None,
             requested_human_action=action.strip() if isinstance(action, str) else None,
+            recovery_action=recovery_action,
             criterion_assessments=_parse_criterion_assessments(
                 parsed.get("criterion_assessments"),
                 criteria,
