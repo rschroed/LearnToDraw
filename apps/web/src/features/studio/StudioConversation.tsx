@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
-import type { DrawingSession, DrawingSessionEvent } from "../../types/drawing";
+import type {
+  CreativeCriterionAssessment,
+  DrawingSession,
+  DrawingSessionEvent,
+} from "../../types/drawing";
 import type { StudioAction } from "./useStudioSession";
 
 interface StudioConversationProps {
@@ -25,6 +29,21 @@ function formatEventTime(timestamp: string) {
   return new Date(timestamp).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
+  });
+}
+
+function criterionAssessments(event: DrawingSessionEvent): CreativeCriterionAssessment[] {
+  const assessments = event.details.criterion_assessments;
+  if (!Array.isArray(assessments)) return [];
+  return assessments.filter((item): item is CreativeCriterionAssessment => {
+    if (!item || typeof item !== "object") return false;
+    const candidate = item as Record<string, unknown>;
+    return (
+      typeof candidate.rank === "number" &&
+      typeof candidate.criterion === "string" &&
+      ["meets", "partially_meets", "misses"].includes(String(candidate.outcome)) &&
+      typeof candidate.assessment === "string"
+    );
   });
 }
 
@@ -67,22 +86,40 @@ export function StudioConversation({
       </header>
 
       <ol className="studio-event-log" aria-live="polite" aria-relevant="additions text">
-        {session.events.map((event) => (
-          <li
-            key={event.id}
-            className={
-              event.type === "user_guidance"
-                ? "studio-event studio-event-user"
-                : "studio-event studio-event-agent"
-            }
-          >
-            <div className="studio-event-meta">
-              <strong>{eventSpeaker(event)}</strong>
-              <time dateTime={event.created_at}>{formatEventTime(event.created_at)}</time>
-            </div>
-            <p>{eventBody(event)}</p>
-          </li>
-        ))}
+        {session.events.map((event) => {
+          const assessments = criterionAssessments(event);
+          return (
+            <li
+              key={event.id}
+              className={
+                event.type === "user_guidance"
+                  ? "studio-event studio-event-user"
+                  : "studio-event studio-event-agent"
+              }
+            >
+              <div className="studio-event-meta">
+                <strong>{eventSpeaker(event)}</strong>
+                <time dateTime={event.created_at}>{formatEventTime(event.created_at)}</time>
+              </div>
+              <p>{eventBody(event)}</p>
+              {assessments.length > 0 ? (
+                <details className="studio-event-criteria">
+                  <summary>Review against creative criteria</summary>
+                  <ol>
+                    {assessments.map((item) => (
+                      <li key={item.rank}>
+                        <span>{item.criterion}</span>
+                        <small>
+                          {item.outcome.replace("_", " ")}: {item.assessment}
+                        </small>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              ) : null}
+            </li>
+          );
+        })}
         <li ref={endRef} className="studio-event-end" aria-hidden="true" />
       </ol>
 

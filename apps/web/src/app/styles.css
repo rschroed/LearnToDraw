@@ -3470,6 +3470,95 @@ button {
   color: #e7dfd3;
 }
 
+.studio-creative-criteria,
+.studio-quality-review {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.studio-creative-criteria h3 {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.studio-creative-criteria ol,
+.studio-quality-review ol {
+  margin: 10px 0 0;
+  padding-left: 22px;
+}
+
+.studio-creative-criteria li + li,
+.studio-quality-review li + li {
+  margin-top: 7px;
+}
+
+.studio-quality-review {
+  border-color: rgba(208, 161, 95, 0.28);
+  background: rgba(208, 161, 95, 0.06);
+}
+
+.studio-quality-review > p {
+  color: #e7dfd3;
+}
+
+.studio-quality-review details {
+  margin-top: 12px;
+  color: var(--text-muted);
+}
+
+.studio-quality-review summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.studio-quality-review li span,
+.studio-quality-review li small {
+  display: block;
+}
+
+.studio-quality-review li small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.studio-event-criteria {
+  margin-top: 10px;
+  color: var(--text-muted);
+}
+
+.studio-event-criteria summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.studio-event-criteria ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.studio-event-criteria li + li {
+  margin-top: 7px;
+}
+
+.studio-event-criteria span,
+.studio-event-criteria small {
+  display: block;
+}
+
+.studio-event-criteria small {
+  margin-top: 2px;
+  text-transform: capitalize;
+}
+
 .studio-approval {
   padding: 16px;
   display: grid;

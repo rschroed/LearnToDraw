@@ -220,4 +220,13 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Extended the bounded OpenAI request window from 60 to 180 seconds and made timeout recovery explicitly recommend retrying or selecting a faster model
 - Preserved process-memory-only secret handling and left provider discovery, key persistence, and background Responses orchestration out of scope
 
+## Pre-Plot Creative Quality Gate Slice
+
+- Added ordered creative criteria to V2 plans so prompt-defining technique, medium, mood, scientific character, and composition can outrank generic subject recognition
+- Validated and rasterized each OpenAI first-pass candidate, then sent the exact black-on-white page image through a separate criterion-by-criterion review before approval
+- Allowed the review to accept the candidate or replace it once, with the same SVG safety and page-boundary validation applied to the replacement
+- Passed the persistent criteria into later registered-observation assessments and recorded criterion findings with each agent decision
+- Exposed the ranked criteria and initial review summary on the approval screen, plus later criterion findings in the session conversation, while keeping the mock advisor deterministic and older V2 artifacts readable through defaulted fields
+- Added `resvg_py` as the backend-only SVG review renderer without changing plotter, camera, registration, or hardware orchestration
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

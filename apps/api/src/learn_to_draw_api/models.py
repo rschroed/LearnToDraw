@@ -448,10 +448,28 @@ class DrawingSessionEvent(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+CreativeCriterionOutcome = Literal["meets", "partially_meets", "misses"]
+
+
+class DrawingCriterionAssessment(BaseModel):
+    rank: int = Field(ge=1)
+    criterion: str
+    outcome: CreativeCriterionOutcome
+    assessment: str
+
+
+class DrawingCandidateQualityReview(BaseModel):
+    summary: str
+    decision: Literal["accept", "revise"]
+    revision_applied: bool
+    criterion_assessments: list[DrawingCriterionAssessment] = Field(default_factory=list)
+
+
 class DrawingSessionPlan(BaseModel):
     summary: str
     paper_strategy: str
     completion_intent: str
+    creative_criteria: list[str] = Field(default_factory=list)
 
 
 class DrawingSessionProposal(BaseModel):
@@ -459,6 +477,7 @@ class DrawingSessionProposal(BaseModel):
     created_at: datetime
     advisor_driver: str
     advisor_model: Optional[str] = None
+    quality_review: Optional[DrawingCandidateQualityReview] = None
 
 
 class DrawingSessionAuthorization(BaseModel):

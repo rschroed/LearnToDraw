@@ -18,6 +18,7 @@ from learn_to_draw_api.config import AppConfig
 from learn_to_draw_api.services import drawing_sessions as drawing_sessions_module
 from learn_to_draw_api.models import (
     DeviceStatus,
+    DrawingSession,
     HardwareOperationError,
     PlotDocument,
     PlotResult,
@@ -138,26 +139,54 @@ def test_health_and_status_endpoints(tmp_path):
 
 def test_runtime_openai_advisor_configuration_is_redacted_and_used(tmp_path, monkeypatch):
     class Response:
+        def __init__(self, payload):
+            self._payload = payload
+
         def raise_for_status(self):
             return None
 
         def json(self):
-            return {
-                "output_text": json.dumps(
-                    {
+            return {"output_text": json.dumps(self._payload)}
+
+    criteria = [
+        "Create a loose botanical character.",
+        "Vary the flowers rather than repeating a symbol.",
+        "Preserve breathing room around the cluster.",
+    ]
+
+    def fake_post(_url, **kwargs):
+        schema_name = kwargs["json"]["text"]["format"]["name"]
+        if schema_name == "initial_drawing_plan":
+            return Response(
+                {
                         "summary": "Build a loose cluster of varied flowers.",
                         "paper_strategy": "Use the center and preserve breathing room.",
                         "completion_intent": "Stop when the field feels lively.",
+                        "creative_criteria": criteria,
                         "svg": (
                             '<svg xmlns="http://www.w3.org/2000/svg" '
                             'width="170mm" height="257mm" viewBox="0 0 170 257">'
                             '<circle cx="85" cy="128" r="10"/></svg>'
                         ),
+                }
+            )
+        return Response(
+            {
+                "summary": "The varied focal gesture is a sound first layer.",
+                "decision": "accept",
+                "criterion_assessments": [
+                    {
+                        "rank": rank,
+                        "outcome": "meets",
+                        "assessment": "The candidate visibly supports this criterion.",
                     }
-                )
+                    for rank in range(1, 4)
+                ],
+                "svg": None,
             }
+        )
 
-    monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(httpx, "post", fake_post)
     api_key = "sk-test-runtime-secret"
 
     with create_test_client(tmp_path) as client:
@@ -1210,8 +1239,25 @@ def test_v2_drawing_session_plans_revises_and_approves_without_early_motion(tmp_
         )
         first_asset_id = planned["current_proposal"]["asset"]["id"]
         assert planned["plan"]["paper_strategy"]
+        assert len(planned["plan"]["creative_criteria"]) == 3
+        assert planned["current_proposal"]["quality_review"]["decision"] == "accept"
+        assert (
+            len(
+                planned["current_proposal"]["quality_review"][
+                    "criterion_assessments"
+                ]
+            )
+            == 3
+        )
         assert planned["iteration_limit"] is None
         assert client.get("/api/plot-runs").json()["runs"] == []
+
+        earlier_v2_payload = json.loads(json.dumps(planned))
+        earlier_v2_payload["plan"].pop("creative_criteria")
+        earlier_v2_payload["current_proposal"].pop("quality_review")
+        earlier_v2_session = DrawingSession.model_validate(earlier_v2_payload)
+        assert earlier_v2_session.plan.creative_criteria == []
+        assert earlier_v2_session.current_proposal.quality_review is None
 
         message_response = client.post(
             f"/api/drawing-sessions/{created['id']}/messages",
@@ -1341,6 +1387,7 @@ def test_v2_session_auto_continues_consumes_guidance_and_completes(tmp_path):
     assert decisions[0]["details"]["guidance"] == [
         "Make the flowers less regular."
     ]
+    assert len(decisions[0]["details"]["criterion_assessments"]) == 3
     assert decisions[-1]["details"]["decision"] == "complete"
     assert completed["queued_guidance"] == []
 

@@ -45,6 +45,20 @@ export interface DrawingIteration {
   next_proposal: DrawingIterationProposal | null;
 }
 
+export interface CreativeCriterionAssessment {
+  rank: number;
+  criterion: string;
+  outcome: "meets" | "partially_meets" | "misses";
+  assessment: string;
+}
+
+export interface CandidateQualityReview {
+  summary: string;
+  decision: "accept" | "revise";
+  revision_applied: boolean;
+  criterion_assessments: CreativeCriterionAssessment[];
+}
+
 export interface DrawingSession {
   id: string;
   session_version: 1 | 2;
@@ -61,12 +75,14 @@ export interface DrawingSession {
     summary: string;
     paper_strategy: string;
     completion_intent: string;
+    creative_criteria: string[];
   } | null;
   current_proposal: {
     asset: PlotAsset;
     created_at: string;
     advisor_driver: string;
     advisor_model: string | null;
+    quality_review: CandidateQualityReview | null;
   } | null;
   current_run_id: string | null;
   assessing_run_id: string | null;
