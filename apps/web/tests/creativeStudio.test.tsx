@@ -241,6 +241,18 @@ function installStudioMock(
     requests.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
 
     if (url === "/api/hardware/status") return Response.json(defaultAxiDrawHardwareStatus);
+    if (url === "/api/plotter/workspace") {
+      return Response.json({
+        plotter_bounds_mm: { width_mm: 289.974, height_mm: 207.932 },
+        page_size_mm: { width_mm: 279.4, height_mm: 215.9 },
+        margins_mm: { left_mm: 10, top_mm: 10, right_mm: 10, bottom_mm: 10 },
+        drawable_area_mm: { width_mm: 259.4, height_mm: 195.9 },
+        updated_at: now,
+        source: "persisted",
+        is_valid: true,
+        validation_error: null,
+      });
+    }
     if (url === `/api/drawing-sessions/${currentSession.id}` && method === "GET") {
       return Response.json(currentSession);
     }
@@ -424,6 +436,21 @@ it("retakes a questionable registration frame without replotting", async () => {
       (request) => request.url === "/api/plot-runs" && request.method === "POST",
     ),
   ).toBe(false);
+});
+
+it("uses the configured landscape page orientation before a plot run exists", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  installStudioMock(buildSession("awaiting_approval"));
+  const { container } = render(<App />);
+
+  expect(
+    await screen.findByRole("heading", { name: /what we intend to draw/i }),
+  ).toBeInTheDocument();
+  await waitFor(() => {
+    const paper = container.querySelector<HTMLElement>(".studio-paper");
+    expect(paper).not.toBeNull();
+    expect(Number(paper?.style.aspectRatio)).toBeCloseTo(279.4 / 215.9);
+  });
 });
 
 it("renders a true V2 overlay and exposes manual registration when required", async () => {

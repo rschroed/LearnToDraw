@@ -5,6 +5,7 @@ import {
   confirmPlotRunCaptureReview,
   fetchDrawingSession,
   fetchHardwareStatus,
+  fetchPlotterWorkspace,
   fetchPlotRun,
   fetchPlotRunCaptureReview,
   heartbeatDrawingSession,
@@ -14,7 +15,11 @@ import {
   stopDrawingSession,
 } from "../../lib/api";
 import type { DrawingSession } from "../../types/drawing";
-import type { HardwareStatus, NormalizationCorners } from "../../types/hardware";
+import type {
+  HardwareStatus,
+  NormalizationCorners,
+  PlotterWorkspace,
+} from "../../types/hardware";
 import type { PlotRun, PlotRunCaptureReviewPayload } from "../../types/plotting";
 
 const ACTIVE_SESSION_STATUSES = new Set([
@@ -48,6 +53,7 @@ export function useStudioSession(sessionId: string) {
   const [runs, setRuns] = useState<Record<string, PlotRun>>({});
   const [captureReview, setCaptureReview] = useState<PlotRunCaptureReviewPayload | null>(null);
   const [hardwareStatus, setHardwareStatus] = useState<HardwareStatus | null>(null);
+  const [plotterWorkspace, setPlotterWorkspace] = useState<PlotterWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<StudioAction>(null);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +118,13 @@ export function useStudioSession(sessionId: string) {
           statusError instanceof Error ? statusError.message : "Hardware status is unavailable.",
         );
       }
+    }
+
+    try {
+      const workspace = await fetchPlotterWorkspace();
+      if (mountedRef.current) setPlotterWorkspace(workspace);
+    } catch {
+      if (mountedRef.current) setPlotterWorkspace(null);
     }
   }
 
@@ -211,6 +224,7 @@ export function useStudioSession(sessionId: string) {
     runs,
     captureReview,
     hardwareStatus,
+    plotterWorkspace,
     hardwareError,
     loading,
     busyAction,
