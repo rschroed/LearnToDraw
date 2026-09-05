@@ -373,6 +373,7 @@ DrawingSessionStatus = Literal[
     "stopping",
     "completed",
     "failed",
+    "abandoned",
 ]
 
 
@@ -418,6 +419,7 @@ DrawingSessionEventType = Literal[
     "user_guidance",
     "plan_ready",
     "plan_failed",
+    "paper_confirmed",
     "session_approved",
     "plot_started",
     "observation_ready",
@@ -425,8 +427,10 @@ DrawingSessionEventType = Literal[
     "session_paused",
     "session_resumed",
     "stop_requested",
+    "finish_requested",
     "session_completed",
     "session_failed",
+    "session_abandoned",
 ]
 
 
@@ -456,7 +460,16 @@ class DrawingSessionProposal(BaseModel):
 class DrawingSessionAuthorization(BaseModel):
     approved_at: Optional[datetime] = None
     stop_requested: bool = False
+    finish_requested: bool = False
     last_heartbeat_at: Optional[datetime] = None
+
+
+class DrawingSessionPaperPreflight(BaseModel):
+    confirmed_at: datetime
+    page_width_mm: float = Field(gt=0)
+    page_height_mm: float = Field(gt=0)
+    drawable_width_mm: float = Field(gt=0)
+    drawable_height_mm: float = Field(gt=0)
 
 
 class DrawingSession(BaseModel):
@@ -480,12 +493,14 @@ class DrawingSession(BaseModel):
     authorization: DrawingSessionAuthorization = Field(
         default_factory=DrawingSessionAuthorization
     )
+    paper_preflight: Optional[DrawingSessionPaperPreflight] = None
     queued_guidance: list[str] = Field(default_factory=list)
     requested_human_action: Optional[str] = None
     events: list[DrawingSessionEvent] = Field(default_factory=list)
     approved_at: Optional[datetime] = None
     paused_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    abandoned_at: Optional[datetime] = None
 
 
 class DrawingSessionCreateRequest(BaseModel):
@@ -497,6 +512,10 @@ class DrawingSessionCreateRequest(BaseModel):
 
 class DrawingSessionMessageRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
+
+
+class DrawingSessionApprovalRequest(BaseModel):
+    paper_ready: bool = False
 
 
 class DrawingSessionStopRequest(BaseModel):

@@ -9,6 +9,7 @@ from learn_to_draw_api.models import (
     DrawingAdvisorConfigurationRequest,
     DrawingAdvisorRuntimeStatus,
     DrawingSession,
+    DrawingSessionApprovalRequest,
     DrawingSessionCreateRequest,
     DrawingSessionListResponse,
     DrawingSessionMessageRequest,
@@ -236,8 +237,25 @@ def build_api_router(
         "/api/drawing-sessions/{session_id}/approve",
         response_model=DrawingSession,
     )
-    def post_drawing_session_approve(session_id: str) -> DrawingSession:
-        return drawing_session_service.approve(session_id)
+    def post_drawing_session_approve(
+        session_id: str,
+        request: DrawingSessionApprovalRequest,
+    ) -> DrawingSession:
+        return drawing_session_service.approve(session_id, request)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/finish",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_finish(session_id: str) -> DrawingSession:
+        return drawing_session_service.finish(session_id)
+
+    @router.post(
+        "/api/drawing-sessions/{session_id}/abandon",
+        response_model=DrawingSession,
+    )
+    def post_drawing_session_abandon(session_id: str) -> DrawingSession:
+        return drawing_session_service.abandon(session_id)
 
     @router.post(
         "/api/drawing-sessions/{session_id}/heartbeat",

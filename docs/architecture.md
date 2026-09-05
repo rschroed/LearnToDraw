@@ -34,6 +34,7 @@ The current backend structure centers on:
 The frontend is a lightweight local creative studio. Its primary surface describes and follows a drawing; operational tools remain secondary.
 
 - `/` starts from “What should we draw?” or redirects to the current active session
+- `/new` always opens a blank creative prompt, even while a completed or unfinished session remains in Gallery
 - `/sessions/:id` presents the plan, cumulative intended artwork, latest registered observation, exact overlay, conversation, recovery actions, and persistent stop controls
 - `/gallery` lists session-level work using the latest or final observation as its preview
 - `/controls` retains paper setup, hardware readiness, test capture, fixed diagnostics, manual SVG plotting, and manual registration
@@ -114,13 +115,15 @@ V1 capture and run JSON remains readable without migration. Its detector fields 
 
 V2 `DrawingSession` records begin from intent alone. Creation persists `planning` state and dispatches provider work without moving hardware. The drawing advisor returns a concise plan, paper strategy, completion intent, and first-pass SVG. That SVG is untrusted: the backend validates its exact drawable-area canvas, supported passive elements, direct coordinates, safe stroke styling, and in-bounds geometry before storing it as a generated asset and exposing `awaiting_approval`.
 
-Guidance submitted before approval is appended to the session event timeline, invalidates the current proposal, and starts a newer planning generation. A stale provider response cannot replace the latest generation. Approval is the first operation that creates a normal PlotRun; all existing preparation, active-run exclusion, hardware adapters, capture registration, and persistence remain authoritative.
+Guidance submitted before approval is appended to the session event timeline, invalidates the current proposal, and starts a newer planning generation. A stale provider response cannot replace the latest generation. Approval requires an explicit `paper_ready` assertion that a blank sheet is loaded in the displayed orientation and a pen is installed. The backend records the approved workspace page and drawable dimensions with the confirmation timestamp before creating the first normal PlotRun. All existing preparation, active-run exclusion, hardware adapters, capture registration, and persistence remain authoritative.
 
 V2 persistence adds an append-only typed event timeline, plan and proposal references, authorization timestamps, current-run identity, pass count, and queued guidance. SVGs and images remain separate stored artifacts. Session-list responses expose compact gallery summaries without embedding artifact data. Provider calls remain read-only and receive no hardware tools.
 
 After a registered observation completes, a single backend coordinator sends the rectified grayscale page, current plan, bounded interpretation history, and atomically consumed guidance through `assess_iteration`. `continue` requires a validated incremental SVG and creates exactly one next normal PlotRun. `complete` ends the session. `pause` records its reason and any requested human action. Provider, hardware, registration, and artifact failures pause rather than permitting another physical pass.
 
-Authorization remains attended. The creative client posts a heartbeat; if it is absent for 30 seconds, the current physical pass and its capture may finish, but another pass cannot begin. Stop-after-pass uses the same boundary. Backend startup converts persisted active V2 sessions to a paused recovery state, so process restart never restarts hardware automatically. Resume refreshes attendance, clears the soft-stop request, and re-enters coordination only after normal readiness checks.
+Authorization remains attended. The creative client posts a heartbeat; if it is absent for 30 seconds, the current physical pass and its capture may finish, but another pass cannot begin. Stop-after-pass uses the same boundary and leaves the session paused. Finish drawing instead makes the latest safely completed observation terminal; when requested during plotting or capture it waits for that physical pass and its persistence to finish, then takes precedence over another advisor decision. Backend startup converts persisted active V2 sessions to a paused recovery state, so process restart never restarts hardware automatically. Resume refreshes attendance, clears the soft-stop and finish requests, and re-enters coordination only after normal readiness checks.
+
+An unused or safely paused V2 session can be abandoned. Abandon is terminal, retains the plan, event history, and completed run references for Gallery, and is rejected while plotting, capturing, or waiting for capture registration. Completed and abandoned sessions remain immutable through these lifecycle operations. Existing session JSON loads with default lifecycle fields and is never rewritten merely to adopt the V2 additions.
 
 A plot run may retake its capture after plotting completed. The run retains an ordered `capture_attempts` history, keeps `capture` as the selected current attempt for compatibility, and sends only that current attempt through registration and normalization. Retake never invokes the plotter. Earlier capture files and metadata remain immutable evidence.
 
@@ -136,7 +139,7 @@ Existing session JSON without `session_version` parses as V1. Its bounded two-to
 
 ## Creative Studio Interaction Contract
 
-Planning never implies motion. The home may create a planning session while plotter or camera readiness is incomplete; approval and every later pass still pass through backend hardware-readiness and safety checks. Pre-approval guidance replaces the proposal. Approval copy explicitly describes the attended, open-ended plot/capture/assessment authorization.
+Planning never implies motion. The home may create a planning session while plotter or camera readiness is incomplete; approval and every later pass still pass through backend hardware-readiness and safety checks. Pre-approval guidance replaces the proposal. Before approval, the interface displays the backend-owned page dimensions and orientation and requires the operator to confirm a matching blank sheet and installed pen. Approval copy explicitly describes the attended, open-ended plot/capture/assessment authorization.
 
 The active canvas treats the physical page as the common coordinate frame. Intended mode stacks every prepared incremental SVG, observed mode shows the latest registered photograph, and overlay mode stacks those two views without cropping only when capture metadata proves a V2 page-aligned frame. Pending manual registration embeds the existing corner editor in the canvas and preserves validation errors and the draft.
 
@@ -145,6 +148,8 @@ The conversation records user guidance, agent plans, interpretations, decisions,
 The creative screen posts heartbeats only while visible and on an active authorized session. Closing or hiding it therefore allows the current physical pass to finish but prevents another pass after the backend grace period. Stop-after-pass preserves that same safe boundary. Emergency stop is confirmation-protected and is offered only while the current run is pending or plotting; its copy states that interruption occurs after the current path segment.
 
 Paused capture failures and questionable frames awaiting manual registration offer a camera-only retake, which cannot create a replacement plot run. Manual registration remains in-context on the canvas after the replacement capture. Resume is explicit and rechecks backend readiness.
+
+Every session offers New drawing. Terminal sessions open `/new` directly. An unused plan can be left unfinished without motion; a safely paused drawing can either be preserved as complete or left unfinished; an active drawing can finish its current plot and observation before the blank prompt opens. These choices are explicit so “stop,” “finish,” and “start over” never share hidden state semantics.
 
 Advisor credentials remain a backend-owned secret. Controls may submit an API key to the loopback-only configuration endpoint, but the frontend clears the password field after success and never writes the key to browser storage, artifacts, URLs, or responses. A thread-safe advisor delegate swaps the active provider atomically for planning and assessment work already owned by the drawing-session service. Runtime configuration exists only in backend process memory and clear/restart restores the startup environment configuration.
 

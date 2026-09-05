@@ -159,8 +159,12 @@ export function deriveStudioProgress(
   }
   if (session.status === "awaiting_capture_review") {
     return {
-      title: `Page registration needed for pass ${number}`,
-      detail: "Place the four corner markers on the physical sheet, or retake the photo, before the advisor continues.",
+      title: session.authorization.finish_requested
+        ? `Register the final photo for pass ${number}`
+        : `Page registration needed for pass ${number}`,
+      detail: session.authorization.finish_requested
+        ? "Place the four corner markers, or retake the photo. The drawing will finish after this observation is saved."
+        : "Place the four corner markers on the physical sheet, or retake the photo, before the advisor continues.",
       passLabel,
       tone: "attention",
       steps: stepsFor("register", "attention"),
@@ -169,10 +173,14 @@ export function deriveStudioProgress(
   if (session.status === "stopping") {
     const emergencyStopInProgress = run?.status === "stopping";
     return {
-      title: emergencyStopInProgress
+      title: session.authorization.finish_requested
+        ? `Finishing pass ${number}`
+        : emergencyStopInProgress
         ? "Stopping safely"
         : `Finishing pass ${number}, then stopping`,
-      detail: emergencyStopInProgress
+      detail: session.authorization.finish_requested
+        ? "The current plot and its photograph will finish safely. No additional drawing layer will begin."
+        : emergencyStopInProgress
         ? "The plotter will pause after its current path segment. No photograph or later pass will begin."
         : "The current pass and its observation will finish, but the studio will not begin another layer.",
       passLabel,
@@ -207,6 +215,15 @@ export function deriveStudioProgress(
       detail: session.error ?? "The drawing could not continue safely.",
       passLabel,
       tone: "failed",
+      steps: stepsFor(inferRunStep(run), "attention"),
+    };
+  }
+  if (session.status === "abandoned") {
+    return {
+      title: "Session left unfinished",
+      detail: "The studio will not return to this drawing or make another physical move for it.",
+      passLabel: session.pass_count === 0 ? "No passes plotted" : passLabel,
+      tone: "attention",
       steps: stepsFor(inferRunStep(run), "attention"),
     };
   }

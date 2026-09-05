@@ -387,8 +387,22 @@ export function sendDrawingSessionMessage(sessionId: string, text: string) {
   });
 }
 
-export function approveDrawingSession(sessionId: string) {
+export function approveDrawingSession(sessionId: string, paperReady: boolean) {
   return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paper_ready: paperReady }),
+  });
+}
+
+export function finishDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/finish`, {
+    method: "POST",
+  });
+}
+
+export function abandonDrawingSession(sessionId: string) {
+  return requestJson<DrawingSession>(`/api/drawing-sessions/${sessionId}/abandon`, {
     method: "POST",
   });
 }

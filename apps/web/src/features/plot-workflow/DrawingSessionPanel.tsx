@@ -20,6 +20,7 @@ const STATUS_LABELS = {
   stopping: "Stopping safely",
   completed: "Iteration limit reached",
   failed: "Session stopped",
+  abandoned: "Left unfinished",
 };
 
 export function DrawingSessionPanel({

@@ -70,14 +70,17 @@ function buildSession(status: DrawingSession["status"]): DrawingSession {
     authorization: {
       approved_at: null,
       stop_requested: false,
+      finish_requested: false,
       last_heartbeat_at: null,
     },
+    paper_preflight: null,
     queued_guidance: [],
     requested_human_action: null,
     events: [],
     approved_at: null,
     paused_at: null,
     completed_at: null,
+    abandoned_at: null,
   };
 }
 

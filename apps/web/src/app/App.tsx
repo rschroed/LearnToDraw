@@ -76,10 +76,13 @@ export function App() {
       </header>
 
       {pathname === "/" ? <CreativeHome navigate={navigate} /> : null}
+      {pathname === "/new" ? <CreativeHome navigate={navigate} resumeActive={false} /> : null}
       {pathname === "/gallery" ? <GalleryPage /> : null}
       {pathname === "/controls" ? <ControlsPage /> : null}
-      {sessionMatch ? <SessionStudio sessionId={decodeURIComponent(sessionMatch[1])} /> : null}
-      {!sessionMatch && !["/", "/gallery", "/controls"].includes(pathname) ? (
+      {sessionMatch ? (
+        <SessionStudio sessionId={decodeURIComponent(sessionMatch[1])} navigate={navigate} />
+      ) : null}
+      {!sessionMatch && !["/", "/new", "/gallery", "/controls"].includes(pathname) ? (
         <main className="studio-loading">
           <h1>That page does not exist.</h1>
           <AppLink href="/" navigate={navigate} className="button-primary">Return home</AppLink>

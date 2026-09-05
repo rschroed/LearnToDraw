@@ -10,7 +10,8 @@ export type DrawingSessionStatus =
   | "paused"
   | "stopping"
   | "completed"
-  | "failed";
+  | "failed"
+  | "abandoned";
 
 export interface DrawingAdvisorStatus {
   driver: "disabled" | "mock" | "openai";
@@ -74,14 +75,23 @@ export interface DrawingSession {
   authorization: {
     approved_at: string | null;
     stop_requested: boolean;
+    finish_requested: boolean;
     last_heartbeat_at: string | null;
   };
+  paper_preflight: {
+    confirmed_at: string;
+    page_width_mm: number;
+    page_height_mm: number;
+    drawable_width_mm: number;
+    drawable_height_mm: number;
+  } | null;
   queued_guidance: string[];
   requested_human_action: string | null;
   events: DrawingSessionEvent[];
   approved_at: string | null;
   paused_at: string | null;
   completed_at: string | null;
+  abandoned_at: string | null;
 }
 
 export type DrawingSessionEventType =
@@ -89,6 +99,7 @@ export type DrawingSessionEventType =
   | "user_guidance"
   | "plan_ready"
   | "plan_failed"
+  | "paper_confirmed"
   | "session_approved"
   | "plot_started"
   | "observation_ready"
@@ -96,8 +107,10 @@ export type DrawingSessionEventType =
   | "session_paused"
   | "session_resumed"
   | "stop_requested"
+  | "finish_requested"
   | "session_completed"
-  | "session_failed";
+  | "session_failed"
+  | "session_abandoned";
 
 export interface DrawingSessionEvent {
   id: string;

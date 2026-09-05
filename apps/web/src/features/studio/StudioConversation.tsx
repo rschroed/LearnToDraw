@@ -37,7 +37,7 @@ export function StudioConversation({
   const endRef = useRef<HTMLLIElement | null>(null);
   const canSend =
     draft.trim().length > 0 &&
-    !["completed", "failed", "stopping"].includes(session.status) &&
+    !["completed", "failed", "abandoned", "stopping"].includes(session.status) &&
     busyAction !== "message";
 
   useEffect(() => {
@@ -97,7 +97,7 @@ export function StudioConversation({
           value={draft}
           rows={3}
           maxLength={2000}
-          disabled={["completed", "failed", "stopping"].includes(session.status)}
+          disabled={["completed", "failed", "abandoned", "stopping"].includes(session.status)}
           placeholder={
             session.authorization.approved_at
               ? "For example: make the rhythm less regular"

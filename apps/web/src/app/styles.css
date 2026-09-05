@@ -2949,6 +2949,12 @@ button {
   gap: 8px;
 }
 
+.studio-session-heading-actions {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+}
+
 .studio-progress {
   --progress-tone: var(--accent);
   margin-bottom: 18px;
@@ -3479,6 +3485,52 @@ button {
   font-size: 0.9rem;
 }
 
+.studio-paper-preflight {
+  display: grid;
+  gap: 13px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid rgba(208, 161, 95, 0.2);
+}
+
+.studio-paper-preflight > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px 14px;
+}
+
+.studio-paper-preflight > div span {
+  color: #e7c493;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.studio-paper-preflight label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  color: #eee6da;
+  font-size: 0.87rem;
+  line-height: 1.4;
+}
+
+.studio-paper-preflight input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+}
+
+.studio-paper-preflight a {
+  width: fit-content;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-underline-offset: 3px;
+}
+
 .studio-recovery,
 .studio-complete {
   display: flex;
@@ -3850,6 +3902,10 @@ button {
   .studio-complete-actions,
   .controls-heading .readiness-bar {
     justify-content: flex-start;
+  }
+
+  .studio-session-heading-actions {
+    justify-items: start;
   }
 
   .studio-progress {
