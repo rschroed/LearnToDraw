@@ -1196,8 +1196,19 @@ def test_v2_drawing_session_plans_revises_and_approves_without_early_motion(tmp_
         assert summaries[0]["id"] == created["id"]
         assert summaries[0]["preview_url"] == revised["current_proposal"]["asset"]["public_url"]
 
+        missing_preflight = client.post(
+            f"/api/drawing-sessions/{created['id']}/approve",
+            json={"paper_ready": False},
+        )
+        assert missing_preflight.status_code == 400
+        assert missing_preflight.json() == {
+            "detail": "Confirm that a blank sheet and pen are ready before drawing."
+        }
+        assert client.get("/api/plot-runs").json()["runs"] == []
+
         approved_response = client.post(
-            f"/api/drawing-sessions/{created['id']}/approve"
+            f"/api/drawing-sessions/{created['id']}/approve",
+            json={"paper_ready": True},
         )
         assert approved_response.status_code == 200
         approved = approved_response.json()
@@ -1205,6 +1216,44 @@ def test_v2_drawing_session_plans_revises_and_approves_without_early_motion(tmp_
         assert approved["authorization"]["approved_at"] is not None
         assert approved["pass_count"] == 1
         assert len(approved["iterations"]) == 1
+        assert approved["paper_preflight"] == {
+            "confirmed_at": approved["approved_at"],
+            "page_width_mm": 210.0,
+            "page_height_mm": 297.0,
+            "drawable_width_mm": 170.0,
+            "drawable_height_mm": 257.0,
+        }
+        assert any(
+            event["type"] == "paper_confirmed" for event in approved["events"]
+        )
+
+
+def test_v2_unplotted_session_can_be_abandoned_without_motion(tmp_path):
+    with create_test_client(
+        tmp_path,
+        plotter=MockPlotter(plot_delay_s=0),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "An idea I changed my mind about"},
+        ).json()
+        wait_for_session_status(client, created["id"], {"awaiting_approval"})
+
+        response = client.post(
+            f"/api/drawing-sessions/{created['id']}/abandon"
+        )
+        unchanged = client.post(
+            f"/api/drawing-sessions/{created['id']}/abandon"
+        )
+
+    assert response.status_code == 200
+    abandoned = response.json()
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["abandoned_at"] is not None
+    assert abandoned["pass_count"] == 0
+    assert abandoned["events"][-1]["type"] == "session_abandoned"
+    assert unchanged.json()["status"] == "abandoned"
 
 
 def test_v2_drawing_session_disabled_advisor_pauses_without_motion(tmp_path):
@@ -1234,7 +1283,8 @@ def test_v2_session_auto_continues_consumes_guidance_and_completes(tmp_path):
         ).json()
         planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
         approved = client.post(
-            f"/api/drawing-sessions/{planned['id']}/approve"
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
         ).json()
         guidance_response = client.post(
             f"/api/drawing-sessions/{planned['id']}/messages",
@@ -1274,7 +1324,8 @@ def test_v2_stop_after_pass_prevents_another_plot(tmp_path):
         ).json()
         planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
         approved = client.post(
-            f"/api/drawing-sessions/{planned['id']}/approve"
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
         ).json()
         stopped = client.post(
             f"/api/drawing-sessions/{approved['id']}/stop",
@@ -1283,9 +1334,49 @@ def test_v2_stop_after_pass_prevents_another_plot(tmp_path):
         assert stopped.status_code == 200
 
         paused = drive_v2_session_until(client, approved["id"], {"paused"})
+        finished = client.post(
+            f"/api/drawing-sessions/{approved['id']}/finish"
+        ).json()
 
     assert paused["authorization"]["stop_requested"] is True
     assert paused["pass_count"] == 1
+    assert finished["status"] == "completed"
+    assert finished["events"][-1]["details"]["source"] == "user"
+    assert plotter.plot_count == 1
+
+
+def test_v2_finish_request_completes_current_pass_without_another_plot(tmp_path):
+    plotter = CountingPlotter(plot_delay_s=0.05)
+    with create_test_client(
+        tmp_path,
+        plotter=plotter,
+        camera=LowConfidenceCamera(),
+        config_overrides={"drawing_advisor_driver": "mock"},
+    ) as client:
+        created = client.post(
+            "/api/drawing-sessions",
+            json={"intent": "One final thoughtful flower"},
+        ).json()
+        planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
+        approved = client.post(
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
+        ).json()
+
+        active_abandon = client.post(
+            f"/api/drawing-sessions/{approved['id']}/abandon"
+        )
+        finish_response = client.post(
+            f"/api/drawing-sessions/{approved['id']}/finish"
+        )
+        completed = drive_v2_session_until(client, approved["id"], {"completed"})
+
+    assert active_abandon.status_code == 409
+    assert finish_response.status_code == 200
+    assert completed["pass_count"] == 1
+    assert completed["authorization"]["finish_requested"] is False
+    assert completed["events"][-1]["type"] == "session_completed"
+    assert completed["events"][-1]["details"]["source"] == "user"
     assert plotter.plot_count == 1
 
 
@@ -1303,7 +1394,8 @@ def test_v2_emergency_stop_cancels_plot_without_capture_or_continuation(tmp_path
         ).json()
         planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
         approved = client.post(
-            f"/api/drawing-sessions/{planned['id']}/approve"
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
         ).json()
         active_run = wait_for_run_status(
             client,
@@ -1349,7 +1441,8 @@ def test_v2_attention_timeout_pauses_before_a_second_plot(tmp_path, monkeypatch)
         ).json()
         planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
         approved = client.post(
-            f"/api/drawing-sessions/{planned['id']}/approve"
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
         ).json()
         first_run = wait_for_run_status(
             client,
@@ -1415,7 +1508,8 @@ def test_v2_backend_restart_requires_explicit_resume(tmp_path):
         ).json()
         planned = wait_for_session_status(client, created["id"], {"awaiting_approval"})
         approved = client.post(
-            f"/api/drawing-sessions/{planned['id']}/approve"
+            f"/api/drawing-sessions/{planned['id']}/approve",
+            json={"paper_ready": True},
         ).json()
         completed = drive_v2_session_until(client, approved["id"], {"completed"})
 

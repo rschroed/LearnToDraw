@@ -18,16 +18,27 @@ const STATUS_LABELS: Record<DrawingSessionStatus, string> = {
   stopping: "Stopping safely",
   completed: "Drawing complete",
   failed: "Session failed",
+  abandoned: "Left unfinished",
 };
 
 function activeSession(status: DrawingSessionStatus) {
   return ["running", "awaiting_capture_review", "stopping"].includes(status);
 }
 
-export function SessionStudio({ sessionId }: { sessionId: string }) {
+export function SessionStudio({
+  sessionId,
+  navigate,
+}: {
+  sessionId: string;
+  navigate: (path: string) => void;
+}) {
   const controller = useStudioSession(sessionId);
   const [showEmergencyConfirm, setShowEmergencyConfirm] = useState(false);
+  const [showNewDrawingConfirm, setShowNewDrawingConfirm] = useState(false);
+  const [startNewAfterFinish, setStartNewAfterFinish] = useState(false);
+  const [paperReady, setPaperReady] = useState(false);
   const emergencyCancelRef = useRef<HTMLButtonElement | null>(null);
+  const newDrawingCancelRef = useRef<HTMLButtonElement | null>(null);
   const planHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const recoveryHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const session = controller.session;
@@ -42,6 +53,24 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     if (showEmergencyConfirm) emergencyCancelRef.current?.focus();
   }, [showEmergencyConfirm]);
+
+  useEffect(() => {
+    if (showNewDrawingConfirm) newDrawingCancelRef.current?.focus();
+  }, [showNewDrawingConfirm]);
+
+  useEffect(() => {
+    setPaperReady(false);
+  }, [session?.current_proposal?.asset.id]);
+
+  useEffect(() => {
+    if (
+      startNewAfterFinish &&
+      session &&
+      ["completed", "abandoned"].includes(session.status)
+    ) {
+      navigate("/new");
+    }
+  }, [navigate, session, startNewAfterFinish]);
 
   useEffect(() => {
     const activeElement = document.activeElement;
@@ -82,6 +111,36 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
   const canEmergencyStop = Boolean(
     currentRun && ["pending", "plotting"].includes(currentRun.status),
   );
+  const pageSize = controller.plotterWorkspace?.page_size_mm ?? null;
+  const pageOrientation = pageSize
+    ? pageSize.width_mm > pageSize.height_mm
+      ? "landscape"
+      : pageSize.height_mm > pageSize.width_mm
+        ? "portrait"
+        : "square"
+    : null;
+  const hasPlottedWork = session.pass_count > 0;
+  const isEnded = ["completed", "failed", "abandoned"].includes(session.status);
+
+  async function abandonAndStart() {
+    const succeeded = await controller.abandon();
+    if (succeeded) navigate("/new");
+  }
+
+  async function finishAndStart() {
+    setStartNewAfterFinish(true);
+    setShowNewDrawingConfirm(false);
+    const succeeded = await controller.finish();
+    if (!succeeded) setStartNewAfterFinish(false);
+  }
+
+  function requestNewDrawing() {
+    if (isEnded) {
+      navigate("/new");
+      return;
+    }
+    setShowNewDrawingConfirm(true);
+  }
 
   return (
     <main className="studio-session-shell">
@@ -96,14 +155,24 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
             {session.session_version === 1 ? <span>Legacy session</span> : null}
           </div>
         </div>
-        <div className="studio-session-readiness" aria-label="Machine readiness">
-          <StatusPill
-            label="Studio"
-            value={controller.hardwareStatus ? "online" : "offline"}
-            tone={controller.hardwareStatus ? "ok" : "warn"}
-          />
-          <StatusPill label="Plotter" value={plotterReady ? "ready" : "attention"} tone={plotterReady ? "ok" : "warn"} />
-          <StatusPill label="Camera" value={cameraReady ? "ready" : "attention"} tone={cameraReady ? "ok" : "warn"} />
+        <div className="studio-session-heading-actions">
+          <div className="studio-session-readiness" aria-label="Machine readiness">
+            <StatusPill
+              label="Studio"
+              value={controller.hardwareStatus ? "online" : "offline"}
+              tone={controller.hardwareStatus ? "ok" : "warn"}
+            />
+            <StatusPill label="Plotter" value={plotterReady ? "ready" : "attention"} tone={plotterReady ? "ok" : "warn"} />
+            <StatusPill label="Camera" value={cameraReady ? "ready" : "attention"} tone={cameraReady ? "ok" : "warn"} />
+          </div>
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={controller.busyAction !== null}
+            onClick={requestNewDrawing}
+          >
+            New drawing
+          </button>
         </div>
       </header>
 
@@ -171,6 +240,26 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
                 </dl>
               </div>
               <div className="studio-approval">
+                <div className="studio-paper-preflight">
+                  <div>
+                    <strong>Before the plotter moves</strong>
+                    <span>
+                      {pageSize && pageOrientation
+                        ? `${pageSize.width_mm} × ${pageSize.height_mm} mm · ${pageOrientation}`
+                        : "Paper setup is unavailable."}
+                    </span>
+                  </div>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={paperReady}
+                      disabled={controller.busyAction !== null || !pageSize}
+                      onChange={(event) => setPaperReady(event.target.checked)}
+                    />
+                    <span>I have a blank sheet loaded in this orientation and a pen installed.</span>
+                  </label>
+                  <a href="/controls">Change paper or machine setup</a>
+                </div>
                 <p>
                   Approving authorizes an attended sequence of plot, photograph, and agent-decision
                   cycles. It may add more than one permanent layer without asking again.
@@ -178,8 +267,14 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
                 <button
                   type="button"
                   className="button-primary"
-                  disabled={controller.busyAction !== null || !plotterReady || !cameraReady}
-                  onClick={() => void controller.approve()}
+                  disabled={
+                    controller.busyAction !== null ||
+                    !plotterReady ||
+                    !cameraReady ||
+                    !pageSize ||
+                    !paperReady
+                  }
+                  onClick={() => void controller.approve(paperReady)}
                 >
                   {controller.busyAction === "approve" ? "Authorizing…" : "Approve and begin"}
                 </button>
@@ -207,6 +302,16 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
                     {controller.busyAction === "retry-capture" ? "Retaking…" : "Retake photo only"}
                   </button>
                 ) : null}
+                {hasPlottedWork ? (
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    disabled={controller.busyAction !== null}
+                    onClick={() => void controller.finish()}
+                  >
+                    {controller.busyAction === "finish" ? "Finishing…" : "Finish drawing"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="button-primary"
@@ -226,7 +331,7 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
               <p>{completionMessage}</p>
               <div className="studio-complete-actions">
                 <a className="button-secondary" href="/gallery">View gallery</a>
-                <a className="button-primary" href="/">Create another drawing</a>
+                <a className="button-primary" href="/new">Create another drawing</a>
               </div>
             </section>
           ) : null}
@@ -238,7 +343,18 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
                 <h2 id="failed-title">This drawing needs a fresh start.</h2>
                 <p>{session.error ?? "The session could not continue safely."}</p>
               </div>
-              <a className="button-primary" href="/">Create another drawing</a>
+              <a className="button-primary" href="/new">Create another drawing</a>
+            </section>
+          ) : null}
+
+          {session.status === "abandoned" ? (
+            <section className="studio-recovery">
+              <div>
+                <p className="eyebrow">Left unfinished</p>
+                <h2>This session will not make another move.</h2>
+                <p>Its plan, events, and any completed passes remain available here for reference.</p>
+              </div>
+              <a className="button-primary" href="/new">Start a new drawing</a>
             </section>
           ) : null}
         </div>
@@ -263,6 +379,14 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
             onClick={() => void controller.stopAfterPass()}
           >
             {controller.busyAction === "stop-after-pass" ? "Stopping…" : "Stop after this pass"}
+          </button>
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={controller.busyAction !== null || session.status === "stopping"}
+            onClick={() => void controller.finish()}
+          >
+            {controller.busyAction === "finish" ? "Finishing…" : "Finish drawing"}
           </button>
           <button
             type="button"
@@ -302,6 +426,68 @@ export function SessionStudio({ sessionId }: { sessionId: string }) {
                 }}
               >
                 Pause after current segment
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showNewDrawingConfirm ? (
+        <div
+          className="studio-confirm-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-drawing-title"
+          aria-describedby="new-drawing-description"
+        >
+          <div className="studio-confirm-card">
+            <p className="eyebrow">New drawing</p>
+            <h2 id="new-drawing-title">
+              {hasPlottedWork ? "What should happen to this drawing?" : "Leave this draft?"}
+            </h2>
+            <p id="new-drawing-description">
+              {hasPlottedWork
+                ? session.status === "paused"
+                  ? "You can preserve it as a completed drawing or leave it unfinished. Neither choice moves the machine."
+                  : "The current plot and photograph must finish safely. The studio will then complete this drawing and open a blank prompt."
+                : "Nothing has been plotted. The unused plan will remain in Gallery as an unfinished session."}
+            </p>
+            <div>
+              <button
+                ref={newDrawingCancelRef}
+                type="button"
+                className="button-secondary"
+                onClick={() => setShowNewDrawingConfirm(false)}
+              >
+                Keep this session
+              </button>
+              {hasPlottedWork && session.status === "paused" ? (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  disabled={controller.busyAction !== null}
+                  onClick={() => void abandonAndStart()}
+                >
+                  Leave unfinished
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="button-primary"
+                disabled={controller.busyAction !== null}
+                onClick={() => {
+                  if (hasPlottedWork) {
+                    void finishAndStart();
+                  } else {
+                    void abandonAndStart();
+                  }
+                }}
+              >
+                {hasPlottedWork
+                  ? session.status === "paused"
+                    ? "Finish and start new"
+                    : "Finish this pass, then start new"
+                  : "Abandon and start new"}
               </button>
             </div>
           </div>

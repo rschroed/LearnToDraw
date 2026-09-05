@@ -204,4 +204,12 @@ This document keeps the internal slice-by-slice evolution notes that used to liv
 - Consolidated live status announcements into the progress panel and added responsive, reduced-motion, and non-color-only state treatment
 - Left polling, orchestration, advisor behavior, registration, capture, and hardware control unchanged
 
+## Creative Session Lifecycle And Paper Preflight Slice
+
+- Added a deliberate New drawing path that can abandon an unused plan, preserve a safely paused session as unfinished, or finish the active physical pass before opening a blank prompt
+- Distinguished stop-after-pass from user-requested completion and made completion win before another autonomous assessment or plot can begin
+- Added terminal abandoned sessions while retaining their plans, event timelines, and completed run references in Gallery
+- Required an explicit blank-sheet, displayed-orientation, and installed-pen confirmation before first motion, with the backend persisting the approved workspace dimensions and timestamp
+- Kept active abandonment invalid, all hardware transitions backend-owned, and existing V1/V2 artifacts readable through defaulted lifecycle fields
+
 For the current architecture and system boundaries, see [architecture.md](architecture.md).

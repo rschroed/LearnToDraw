@@ -13,10 +13,12 @@ from learn_to_draw_api.models import (
     AppNotFoundError,
     DrawingIteration,
     DrawingIterationProposal,
+    DrawingSessionApprovalRequest,
     DrawingSessionAuthorization,
     DrawingSessionEvent,
     DrawingSessionListResponse,
     DrawingSessionMessageRequest,
+    DrawingSessionPaperPreflight,
     DrawingSessionPlan,
     DrawingSessionProposal,
     DrawingSessionStopRequest,
@@ -245,7 +247,7 @@ class DrawingSessionService:
             session = self._sync(self._store.get(session_id))
             if session.session_version != 2:
                 raise AppConflictError("Messages are available only for V2 drawing sessions.")
-            if session.status in {"completed", "failed", "stopping"}:
+            if session.status in {"completed", "failed", "abandoned", "stopping"}:
                 raise AppConflictError("This drawing session is not accepting guidance.")
             session.queued_guidance.append(message)
             session.events.append(self._event("user_guidance", message))
@@ -263,7 +265,11 @@ class DrawingSessionService:
                 self._store.save(session)
             return session
 
-    def approve(self, session_id: str) -> DrawingSession:
+    def approve(
+        self,
+        session_id: str,
+        request: DrawingSessionApprovalRequest,
+    ) -> DrawingSession:
         with self._lock:
             session = self._sync(self._store.get(session_id))
             if session.session_version != 2:
@@ -272,13 +278,26 @@ class DrawingSessionService:
                 raise AppConflictError("This drawing session has no first pass ready to approve.")
             if session.authorization.approved_at is not None:
                 raise AppConflictError("This drawing session has already been approved.")
+            if not request.paper_ready:
+                raise InvalidArtifactError(
+                    "Confirm that a blank sheet and pen are ready before drawing."
+                )
             self._assert_no_other_active_session(session.id)
+            workspace = self._workspace_service.current_validated()
             asset = self._plot_workflow.get_asset(session.current_proposal.asset.id)
             run = self._plot_workflow.create_run(asset.id)
             now = datetime.now(timezone.utc)
             session.authorization.approved_at = now
             session.authorization.stop_requested = False
+            session.authorization.finish_requested = False
             session.authorization.last_heartbeat_at = now
+            session.paper_preflight = DrawingSessionPaperPreflight(
+                confirmed_at=now,
+                page_width_mm=workspace.page_size_mm.width_mm,
+                page_height_mm=workspace.page_size_mm.height_mm,
+                drawable_width_mm=workspace.drawable_area_mm.width_mm,
+                drawable_height_mm=workspace.drawable_area_mm.height_mm,
+            )
             session.approved_at = now
             session.current_run_id = run.id
             session.pass_count = 1
@@ -292,6 +311,14 @@ class DrawingSessionService:
             )
             session.events.extend(
                 [
+                    self._event(
+                        "paper_confirmed",
+                        "Blank paper orientation and pen readiness confirmed.",
+                        details={
+                            "page_width_mm": workspace.page_size_mm.width_mm,
+                            "page_height_mm": workspace.page_size_mm.height_mm,
+                        },
+                    ),
                     self._event(
                         "session_approved",
                         "Open-ended attended drawing session approved.",
@@ -309,12 +336,79 @@ class DrawingSessionService:
             session.error = None
             return self._store.save(session)
 
+    def finish(self, session_id: str) -> DrawingSession:
+        with self._lock:
+            session = self._sync(self._store.get(session_id))
+            if session.session_version != 2:
+                raise AppConflictError("Finish control is available only for V2 drawing sessions.")
+            if session.status == "completed":
+                return session
+            if session.status in {"failed", "abandoned"}:
+                raise AppConflictError("This drawing session has already ended.")
+            if session.pass_count == 0 or session.current_run_id is None:
+                raise AppConflictError("Abandon an unused drawing instead of finishing it.")
+            if session.status not in ACTIVE_SESSION_STATUSES | {"paused"}:
+                raise AppConflictError("This drawing session cannot be finished from its current state.")
+
+            if not session.authorization.finish_requested:
+                session.authorization.finish_requested = True
+                session.authorization.stop_requested = False
+                session.events.append(
+                    self._event(
+                        "finish_requested",
+                        "Finish requested. No additional pass will begin.",
+                        run_id=session.current_run_id,
+                    )
+                )
+            run = self._plot_workflow.get_run(session.current_run_id)
+            if session.status == "paused" or (
+                run.status in {"completed", "failed", "cancelled"}
+                and session.assessing_run_id is None
+            ):
+                self._complete_by_user(session, run_id=run.id)
+            elif run.status == "awaiting_capture_review":
+                session.status = "awaiting_capture_review"
+            else:
+                session.status = "stopping"
+            session.updated_at = datetime.now(timezone.utc)
+            return self._store.save(session)
+
+    def abandon(self, session_id: str) -> DrawingSession:
+        with self._lock:
+            session = self._sync(self._store.get(session_id))
+            if session.session_version != 2:
+                raise AppConflictError("Abandon control is available only for V2 drawing sessions.")
+            if session.status == "abandoned":
+                return session
+            if session.status in ACTIVE_SESSION_STATUSES:
+                raise AppConflictError(
+                    "Finish or pause the current physical pass before abandoning this session."
+                )
+            if session.status in {"completed", "failed"}:
+                raise AppConflictError("An ended drawing cannot be abandoned.")
+
+            now = datetime.now(timezone.utc)
+            session.status = "abandoned"
+            session.abandoned_at = now
+            session.updated_at = now
+            session.error = None
+            session.requested_human_action = None
+            session.queued_guidance = []
+            session.events.append(
+                self._event(
+                    "session_abandoned",
+                    "This session was left unfinished.",
+                    run_id=session.current_run_id,
+                )
+            )
+            return self._store.save(session)
+
     def heartbeat(self, session_id: str) -> DrawingSession:
         with self._lock:
             session = self._store.get(session_id)
             if session.session_version != 2:
                 raise AppConflictError("Heartbeat is available only for V2 drawing sessions.")
-            if session.status in {"completed", "failed"}:
+            if session.status in {"completed", "failed", "abandoned"}:
                 return session
             now = datetime.now(timezone.utc)
             session.authorization.last_heartbeat_at = now
@@ -334,6 +428,7 @@ class DrawingSessionService:
                 return session
             now = datetime.now(timezone.utc)
             session.authorization.stop_requested = True
+            session.authorization.finish_requested = False
             session.updated_at = now
             session.events.append(
                 self._event(
@@ -380,6 +475,7 @@ class DrawingSessionService:
             self._assert_no_other_active_session(session.id)
             now = datetime.now(timezone.utc)
             session.authorization.stop_requested = False
+            session.authorization.finish_requested = False
             session.authorization.last_heartbeat_at = now
             session.paused_at = None
             session.error = None
@@ -541,7 +637,12 @@ class DrawingSessionService:
             session.status = "awaiting_capture_review"
         elif run.status in ACTIVE_PLOT_RUN_STATUSES:
             session.status = (
-                "stopping" if session.authorization.stop_requested else "running"
+                "stopping"
+                if (
+                    session.authorization.stop_requested
+                    or session.authorization.finish_requested
+                )
+                else "running"
             )
         elif run.status == "failed":
             if session.status != "paused":
@@ -562,7 +663,12 @@ class DrawingSessionService:
             and session.status == "awaiting_capture_review"
         ):
             session.status = (
-                "stopping" if session.authorization.stop_requested else "running"
+                "stopping"
+                if (
+                    session.authorization.stop_requested
+                    or session.authorization.finish_requested
+                )
+                else "running"
             )
         session.advisor = self._advisor.status
         if session.status != previous_status:
@@ -613,7 +719,12 @@ class DrawingSessionService:
                 return
             if run.status in ACTIVE_PLOT_RUN_STATUSES:
                 next_status = (
-                    "stopping" if session.authorization.stop_requested else "running"
+                    "stopping"
+                    if (
+                        session.authorization.stop_requested
+                        or session.authorization.finish_requested
+                    )
+                    else "running"
                 )
                 if session.status != next_status:
                     session.status = next_status
@@ -637,6 +748,10 @@ class DrawingSessionService:
                 self._store.save(session)
                 return
             if run.status != "completed":
+                return
+            if session.authorization.finish_requested:
+                self._complete_by_user(session, run_id=run.id)
+                self._store.save(session)
                 return
             if session.authorization.stop_requested:
                 self._pause_session(
@@ -754,6 +869,15 @@ class DrawingSessionService:
         safe_svg: Optional[str],
         consumed_guidance: list[str],
     ) -> None:
+        with self._lock:
+            session = self._store.get(session_id)
+            if session.assessing_run_id != run_id or session.current_run_id != run_id:
+                return
+            if session.authorization.finish_requested:
+                session.assessing_run_id = None
+                self._complete_by_user(session, run_id=run_id)
+                self._store.save(session)
+                return
         asset = None
         if assessment.decision == "continue" and safe_svg is not None:
             with self._lock:
@@ -767,6 +891,11 @@ class DrawingSessionService:
         with self._lock:
             session = self._store.get(session_id)
             if session.assessing_run_id != run_id or session.current_run_id != run_id:
+                return
+            if session.authorization.finish_requested:
+                session.assessing_run_id = None
+                self._complete_by_user(session, run_id=run_id)
+                self._store.save(session)
                 return
             now = datetime.now(timezone.utc)
             session.assessing_run_id = None
@@ -867,6 +996,10 @@ class DrawingSessionService:
             if session.assessing_run_id != run_id:
                 return
             session.assessing_run_id = None
+            if session.authorization.finish_requested:
+                self._complete_by_user(session, run_id=run_id)
+                self._store.save(session)
+                return
             session.queued_guidance = consumed_guidance + session.queued_guidance
             self._pause_session(session, message, run_id=run_id)
             self._store.save(session)
@@ -932,6 +1065,36 @@ class DrawingSessionService:
                 self._event("session_paused", message, run_id=run_id)
             )
 
+    def _complete_by_user(
+        self,
+        session: DrawingSession,
+        *,
+        run_id: Optional[str],
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        session.status = "completed"
+        session.completed_at = now
+        session.paused_at = None
+        session.error = None
+        session.requested_human_action = None
+        session.assessing_run_id = None
+        session.authorization.stop_requested = False
+        session.authorization.finish_requested = False
+        if not (
+            session.events
+            and session.events[-1].type == "session_completed"
+            and session.events[-1].details.get("source") == "user"
+        ):
+            session.events.append(
+                self._event(
+                    "session_completed",
+                    f"Finished by you after pass {session.pass_count}.",
+                    run_id=run_id,
+                    details={"source": "user"},
+                )
+            )
+        session.updated_at = now
+
     def _dispatch_plan(self, session_id: str, generation: int) -> None:
         Thread(
             target=self._plan_session,
@@ -961,14 +1124,14 @@ class DrawingSessionService:
                 drawable_width_mm=plot_area.draw_width_mm,
                 drawable_height_mm=plot_area.draw_height_mm,
             )
-            asset = self._plot_workflow.create_generated_asset(
-                name=f"{intent[:48]} — first pass",
-                svg_text=safe_svg,
-            )
             with self._lock:
                 session = self._store.get(session_id)
                 if session.planning_generation != generation or session.status != "planning":
                     return
+                asset = self._plot_workflow.create_generated_asset(
+                    name=f"{intent[:48]} — first pass",
+                    svg_text=safe_svg,
+                )
                 now = datetime.now(timezone.utc)
                 session.plan = DrawingSessionPlan(
                     summary=draft.summary.strip(),

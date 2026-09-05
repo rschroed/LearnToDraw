@@ -94,8 +94,18 @@ function buildSession(
     authorization: {
       approved_at: approved ? now : null,
       stop_requested: status === "stopping",
+      finish_requested: false,
       last_heartbeat_at: approved ? now : null,
     },
+    paper_preflight: approved
+      ? {
+          confirmed_at: now,
+          page_width_mm: 279.4,
+          page_height_mm: 215.9,
+          drawable_width_mm: 259.4,
+          drawable_height_mm: 195.9,
+        }
+      : null,
     queued_guidance: [],
     requested_human_action: null,
     events: [
@@ -108,6 +118,7 @@ function buildSession(
     approved_at: approved ? now : null,
     paused_at: status === "paused" ? now : null,
     completed_at: status === "completed" ? now : null,
+    abandoned_at: status === "abandoned" ? now : null,
     ...overrides,
   };
 }
@@ -242,6 +253,9 @@ function installStudioMock(
     requests.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
 
     if (url === "/api/hardware/status") return Response.json(defaultAxiDrawHardwareStatus);
+    if (url === "/api/drawing-sessions/latest" && method === "GET") {
+      return Response.json({ session: currentSession });
+    }
     if (url === "/api/plotter/workspace") {
       return Response.json({
         plotter_bounds_mm: { width_mm: 289.974, height_mm: 207.932 },
@@ -285,6 +299,40 @@ function installStudioMock(
     if (url.endsWith("/approve") && method === "POST") {
       currentSession = buildSession("running");
       currentRun = buildRun("plotting");
+      return Response.json(currentSession);
+    }
+    if (url.endsWith("/finish") && method === "POST") {
+      currentSession = {
+        ...currentSession,
+        status: "completed",
+        completed_at: now,
+        paused_at: null,
+        authorization: {
+          ...currentSession.authorization,
+          stop_requested: false,
+          finish_requested: false,
+        },
+        events: [
+          ...currentSession.events,
+          event("session_completed", "Finished by you after the current pass.", {
+            source: "user",
+          }),
+        ],
+      };
+      return Response.json(currentSession);
+    }
+    if (url.endsWith("/abandon") && method === "POST") {
+      currentSession = {
+        ...currentSession,
+        status: "abandoned",
+        abandoned_at: now,
+        error: null,
+        queued_guidance: [],
+        events: [
+          ...currentSession.events,
+          event("session_abandoned", "This session was left unfinished."),
+        ],
+      };
       return Response.json(currentSession);
     }
     if (url.endsWith("/stop") && method === "POST") {
@@ -348,6 +396,18 @@ it("starts with creative intent and creates a prompt-only planning session", asy
   expect(requests.some((request) => request.url === "/api/plot-runs")).toBe(false);
 });
 
+it("keeps the deliberate new-drawing route on a blank prompt", async () => {
+  window.history.replaceState({}, "", "/new");
+  installStudioMock(buildSession("paused"), buildRun("completed", buildCapture()));
+
+  render(<App />);
+
+  expect(
+    await screen.findByRole("heading", { name: /what should we draw/i }),
+  ).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/new");
+});
+
 it("shows the plan, explains open-ended approval, and lets a message replace the proposal", async () => {
   window.history.replaceState({}, "", "/sessions/session-1");
   const harness = installStudioMock(buildSession("awaiting_approval"));
@@ -371,6 +431,58 @@ it("shows the plan, explains open-ended approval, and lets a message replace the
       (request) => request.url.endsWith("/messages") && request.body?.includes("room on the right"),
     ),
   ).toBe(true);
+});
+
+it("requires a paper and pen preflight before first motion", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const harness = installStudioMock(buildSession("awaiting_approval"));
+  render(<App />);
+
+  const approve = await screen.findByRole("button", { name: /approve and begin/i });
+  expect(approve).toBeDisabled();
+  expect(screen.getByText(/279.4 × 215.9 mm · landscape/i)).toBeInTheDocument();
+
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: /blank sheet loaded in this orientation/i }),
+  );
+  expect(approve).toBeEnabled();
+  fireEvent.click(approve);
+
+  await waitFor(() => {
+    const request = harness.requests.find((item) => item.url.endsWith("/approve"));
+    expect(JSON.parse(request?.body ?? "{}")).toEqual({ paper_ready: true });
+  });
+});
+
+it("abandons an unused plan before opening a blank new drawing", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const harness = installStudioMock(buildSession("awaiting_approval"));
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /new drawing/i }));
+  const dialog = screen.getByRole("dialog", { name: /leave this draft/i });
+  expect(within(dialog).getByText(/nothing has been plotted/i)).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: /abandon and start new/i }));
+
+  expect(
+    await screen.findByRole("heading", { name: /what should we draw/i }),
+  ).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/new");
+  expect(harness.requests.some((request) => request.url.endsWith("/abandon"))).toBe(true);
+});
+
+it("lets the user finish a safely paused drawing", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const harness = installStudioMock(buildSession("paused"), buildRun("completed", buildCapture()));
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /^finish drawing$/i }));
+  await waitFor(() => {
+    expect(harness.requests.some((request) => request.url.endsWith("/finish"))).toBe(true);
+  });
+  expect(
+    await screen.findAllByText(/finished by you after the current pass/i),
+  ).not.toHaveLength(0);
 });
 
 it("queues active guidance, sends heartbeats, and confirmation-protects emergency stop", async () => {

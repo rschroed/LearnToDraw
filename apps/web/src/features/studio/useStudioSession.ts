@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  abandonDrawingSession,
   approveDrawingSession,
   confirmPlotRunCaptureReview,
   fetchDrawingSession,
@@ -8,6 +9,7 @@ import {
   fetchPlotterWorkspace,
   fetchPlotRun,
   fetchPlotRunCaptureReview,
+  finishDrawingSession,
   heartbeatDrawingSession,
   resumeDrawingSession,
   retryPlotRunCapture,
@@ -41,6 +43,8 @@ export const STUDIO_HEARTBEAT_MS = 10000;
 export type StudioAction =
   | "message"
   | "approve"
+  | "finish"
+  | "abandon"
   | "stop-after-pass"
   | "emergency-stop"
   | "resume"
@@ -131,12 +135,12 @@ export function useStudioSession(sessionId: string) {
   async function runAction(
     action: Exclude<StudioAction, null>,
     callback: () => Promise<DrawingSession | PlotRun | { run: PlotRun }>,
-  ) {
+  ): Promise<boolean> {
     try {
       setBusyAction(action);
       setError(null);
       const result = await callback();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       if ("session_version" in result) {
         setSession(result);
       } else if ("run" in result) {
@@ -145,12 +149,14 @@ export function useStudioSession(sessionId: string) {
         setRuns((current) => ({ ...current, [result.id]: result }));
       }
       await refresh({ silent: true });
+      return true;
     } catch (actionError) {
       if (mountedRef.current) {
         setError(
           actionError instanceof Error ? actionError.message : "The studio action failed.",
         );
       }
+      return false;
     } finally {
       if (mountedRef.current) {
         setBusyAction(null);
@@ -230,17 +236,28 @@ export function useStudioSession(sessionId: string) {
     busyAction,
     error,
     refresh,
-    sendMessage: (text: string) =>
-      runAction("message", () => sendDrawingSessionMessage(sessionId, text)),
-    approve: () => runAction("approve", () => approveDrawingSession(sessionId)),
-    stopAfterPass: () =>
-      runAction("stop-after-pass", () => stopDrawingSession(sessionId, "after_pass")),
-    emergencyStop: () =>
-      runAction("emergency-stop", () => stopDrawingSession(sessionId, "emergency")),
-    resume: () => runAction("resume", () => resumeDrawingSession(sessionId)),
-    retryCapture: (runId: string) =>
-      runAction("retry-capture", () => retryPlotRunCapture(runId)),
-    confirmRegistration: (runId: string, corners: NormalizationCorners) =>
-      runAction("register", () => confirmPlotRunCaptureReview(runId, corners)),
+    sendMessage: async (text: string) => {
+      await runAction("message", () => sendDrawingSessionMessage(sessionId, text));
+    },
+    approve: async (paperReady: boolean) => {
+      await runAction("approve", () => approveDrawingSession(sessionId, paperReady));
+    },
+    finish: () => runAction("finish", () => finishDrawingSession(sessionId)),
+    abandon: () => runAction("abandon", () => abandonDrawingSession(sessionId)),
+    stopAfterPass: async () => {
+      await runAction("stop-after-pass", () => stopDrawingSession(sessionId, "after_pass"));
+    },
+    emergencyStop: async () => {
+      await runAction("emergency-stop", () => stopDrawingSession(sessionId, "emergency"));
+    },
+    resume: async () => {
+      await runAction("resume", () => resumeDrawingSession(sessionId));
+    },
+    retryCapture: async (runId: string) => {
+      await runAction("retry-capture", () => retryPlotRunCapture(runId));
+    },
+    confirmRegistration: async (runId: string, corners: NormalizationCorners) => {
+      await runAction("register", () => confirmPlotRunCaptureReview(runId, corners));
+    },
   };
 }

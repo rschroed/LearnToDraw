@@ -18,7 +18,13 @@ const RESUMABLE_STATUSES = new Set([
   "stopping",
 ]);
 
-export function CreativeHome({ navigate }: { navigate: (path: string) => void }) {
+export function CreativeHome({
+  navigate,
+  resumeActive = true,
+}: {
+  navigate: (path: string) => void;
+  resumeActive?: boolean;
+}) {
   const [intent, setIntent] = useState("");
   const [hardware, setHardware] = useState<HardwareStatus | null>(null);
   const [recentSession, setRecentSession] = useState<DrawingSession | null>(null);
@@ -35,7 +41,11 @@ export function CreativeHome({ navigate }: { navigate: (path: string) => void })
         setHardware(status);
         setRecentSession(latest.session);
         setError(null);
-        if (latest.session && RESUMABLE_STATUSES.has(latest.session.status)) {
+        if (
+          resumeActive &&
+          latest.session &&
+          RESUMABLE_STATUSES.has(latest.session.status)
+        ) {
           navigate(`/sessions/${latest.session.id}`);
         }
       })
@@ -51,7 +61,7 @@ export function CreativeHome({ navigate }: { navigate: (path: string) => void })
     return () => {
       mountedRef.current = false;
     };
-  }, []);
+  }, [resumeActive]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
