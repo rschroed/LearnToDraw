@@ -219,10 +219,11 @@ export function SessionStudio({
           {session.status === "planning" ? (
             <section className="studio-plan-card studio-plan-card-thinking" aria-live="polite">
               <p className="eyebrow">Planning</p>
-              <h2>Finding the first useful marks</h2>
+              <h2>Designing and reviewing the first pass</h2>
               <p>
-                Detailed vector plans can take a few minutes. This page updates automatically,
-                and no hardware will move until a safe SVG preview is ready and you approve it.
+                The advisor is ranking what matters, drawing a candidate, and checking the rendered
+                page before showing it. Detailed vector plans can take a few minutes. No hardware
+                will move until a safe preview is ready and you approve it.
               </p>
             </section>
           ) : null}
@@ -244,6 +245,39 @@ export function SessionStudio({
                     <dd>{session.plan.completion_intent}</dd>
                   </div>
                 </dl>
+                {session.plan.creative_criteria.length > 0 ? (
+                  <div className="studio-creative-criteria">
+                    <h3>What matters most</h3>
+                    <ol>
+                      {session.plan.creative_criteria.map((criterion) => (
+                        <li key={criterion}>{criterion}</li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
+                {session.current_proposal?.quality_review ? (
+                  <div className="studio-quality-review">
+                    <strong>
+                      {session.current_proposal.quality_review.revision_applied
+                        ? "Revised once before preview"
+                        : "Candidate passed creative review"}
+                    </strong>
+                    <p>{session.current_proposal.quality_review.summary}</p>
+                    <details>
+                      <summary>Criterion review</summary>
+                      <ol>
+                        {session.current_proposal.quality_review.criterion_assessments.map(
+                          (item) => (
+                            <li key={item.rank}>
+                              <span>{item.criterion}</span>
+                              <small>{item.outcome.replace("_", " ")}: {item.assessment}</small>
+                            </li>
+                          ),
+                        )}
+                      </ol>
+                    </details>
+                  </div>
+                ) : null}
               </div>
               <div className="studio-approval">
                 <div className="studio-paper-preflight">

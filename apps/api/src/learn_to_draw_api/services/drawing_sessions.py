@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import math
 from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Optional
-import xml.etree.ElementTree as ET
 from uuid import uuid4
 
 from learn_to_draw_api.models import (
@@ -13,6 +11,8 @@ from learn_to_draw_api.models import (
     AppNotFoundError,
     DrawingIteration,
     DrawingIterationProposal,
+    DrawingCandidateQualityReview,
+    DrawingCriterionAssessment,
     DrawingSessionApprovalRequest,
     DrawingSessionAuthorization,
     DrawingSessionEvent,
@@ -28,13 +28,8 @@ from learn_to_draw_api.models import (
     InvalidArtifactError,
 )
 from learn_to_draw_api.services.drawing_advisor import DrawingAdvisor
+from learn_to_draw_api.services.advisor_svg import validate_and_normalize_advisor_svg
 from learn_to_draw_api.services.plot_workflow import PlotWorkflowService
-from learn_to_draw_api.services.plot_workflow_preparation import (
-    SVG_SHAPE_TAGS,
-    extract_source_box,
-    extract_source_content_ratios,
-    parse_svg_root,
-)
 from learn_to_draw_api.services.plotter_workspace import PlotterWorkspaceService
 
 
@@ -45,8 +40,6 @@ ACTIVE_PLOT_RUN_STATUSES = {
     "capturing",
     "awaiting_capture_review",
 }
-ALLOWED_ADVISOR_SVG_TAGS = SVG_SHAPE_TAGS | {"svg", "g", "title", "desc"}
-DIMENSION_EPSILON_MM = 0.01
 ATTENTION_GRACE_SECONDS = 30
 COORDINATOR_POLL_SECONDS = 0.05
 ACTIVE_SESSION_STATUSES = {"running", "awaiting_capture_review", "stopping"}
@@ -813,6 +806,9 @@ class DrawingSessionService:
             self._store.save(session)
             intent = session.intent
             plan_summary = session.plan.summary if session.plan else session.intent
+            creative_criteria = (
+                list(session.plan.creative_criteria) if session.plan else []
+            )
             iteration_number = session.pass_count
             workspace = self._workspace_service.current_validated()
             plot_area = workspace.to_plot_area()
@@ -826,6 +822,7 @@ class DrawingSessionService:
             assessment = self._advisor.assess_iteration(
                 intent=intent,
                 plan_summary=plan_summary,
+                creative_criteria=creative_criteria,
                 observed_image=image_path.read_bytes(),
                 observed_media_type="image/png",
                 iteration_number=iteration_number,
@@ -911,6 +908,15 @@ class DrawingSessionService:
                         "reason": assessment.reason,
                         "guidance": consumed_guidance,
                         "requested_human_action": assessment.requested_human_action,
+                        "criterion_assessments": [
+                            {
+                                "rank": item.rank,
+                                "criterion": item.criterion,
+                                "outcome": item.outcome,
+                                "assessment": item.assessment,
+                            }
+                            for item in assessment.criterion_assessments
+                        ],
                     },
                 )
             )
@@ -1137,12 +1143,27 @@ class DrawingSessionService:
                     summary=draft.summary.strip(),
                     paper_strategy=draft.paper_strategy.strip(),
                     completion_intent=draft.completion_intent.strip(),
+                    creative_criteria=list(draft.creative_criteria),
                 )
                 session.current_proposal = DrawingSessionProposal(
                     asset=asset,
                     created_at=now,
                     advisor_driver=self._advisor.status.driver,
                     advisor_model=self._advisor.status.model,
+                    quality_review=DrawingCandidateQualityReview(
+                        summary=draft.quality_review.summary,
+                        decision=draft.quality_review.decision,
+                        revision_applied=draft.quality_review.revision_applied,
+                        criterion_assessments=[
+                            DrawingCriterionAssessment(
+                                rank=item.rank,
+                                criterion=item.criterion,
+                                outcome=item.outcome,
+                                assessment=item.assessment,
+                            )
+                            for item in draft.quality_review.criterion_assessments
+                        ],
+                    ),
                 )
                 session.status = "awaiting_approval"
                 session.error = None
@@ -1157,6 +1178,10 @@ class DrawingSessionService:
                             "summary": session.plan.summary,
                             "paper_strategy": session.plan.paper_strategy,
                             "completion_intent": session.plan.completion_intent,
+                            "creative_criteria": session.plan.creative_criteria,
+                            "quality_review": session.current_proposal.quality_review.model_dump(
+                                mode="json"
+                            ),
                         },
                     )
                 )
@@ -1193,73 +1218,3 @@ class DrawingSessionService:
             run_id=run_id,
             details=details or {},
         )
-
-
-def validate_and_normalize_advisor_svg(
-    svg_text: str,
-    *,
-    drawable_width_mm: float,
-    drawable_height_mm: float,
-) -> str:
-    root = parse_svg_root(svg_text)
-    source_box = extract_source_box(root)
-    dimensions = (
-        source_box.physical_width_mm,
-        source_box.physical_height_mm,
-        source_box.view_box_min_x,
-        source_box.view_box_min_y,
-        source_box.view_box_width,
-        source_box.view_box_height,
-    )
-    if not all(value is not None and math.isfinite(value) for value in dimensions):
-        raise InvalidArtifactError(
-            "Advisor SVG must declare finite physical dimensions and a viewBox."
-        )
-    if (
-        abs((source_box.physical_width_mm or 0) - drawable_width_mm)
-        > DIMENSION_EPSILON_MM
-        or abs((source_box.physical_height_mm or 0) - drawable_height_mm)
-        > DIMENSION_EPSILON_MM
-        or abs(source_box.view_box_min_x) > DIMENSION_EPSILON_MM
-        or abs(source_box.view_box_min_y) > DIMENSION_EPSILON_MM
-        or abs(source_box.view_box_width - drawable_width_mm) > DIMENSION_EPSILON_MM
-        or abs(source_box.view_box_height - drawable_height_mm) > DIMENSION_EPSILON_MM
-    ):
-        raise InvalidArtifactError(
-            "Advisor SVG canvas must exactly match the current drawable area in millimeters."
-        )
-    shape_count = 0
-    for element in root.iter():
-        tag = element.tag.rsplit("}", 1)[-1]
-        if tag not in ALLOWED_ADVISOR_SVG_TAGS:
-            raise InvalidArtifactError(f"Advisor SVG element '{tag}' is not allowed.")
-        for attribute in element.attrib:
-            local_attribute = attribute.rsplit("}", 1)[-1].lower()
-            if local_attribute.startswith("on") or local_attribute in {
-                "href",
-                "style",
-                "class",
-                "transform",
-            }:
-                raise InvalidArtifactError(
-                    f"Advisor SVG attribute '{local_attribute}' is not allowed."
-                )
-        if tag in SVG_SHAPE_TAGS:
-            shape_count += 1
-            element.attrib["fill"] = "none"
-            element.attrib["stroke"] = "black"
-            element.attrib["stroke-width"] = "0.6"
-    if shape_count == 0:
-        raise InvalidArtifactError("Advisor SVG must contain at least one drawable mark.")
-    content_ratios = extract_source_content_ratios(root, source_box=source_box)
-    if content_ratios is None:
-        raise InvalidArtifactError("Advisor SVG marks could not be bounded safely.")
-    left, top, width, height = content_ratios
-    if (
-        left < -DIMENSION_EPSILON_MM
-        or top < -DIMENSION_EPSILON_MM
-        or left + width > 1 + DIMENSION_EPSILON_MM
-        or top + height > 1 + DIMENSION_EPSILON_MM
-    ):
-        raise InvalidArtifactError("Advisor SVG contains marks outside the drawable area.")
-    return ET.tostring(root, encoding="unicode")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from threading import RLock
 from typing import Literal, Optional
@@ -17,6 +17,10 @@ from learn_to_draw_api.models import (
     InvalidArtifactError,
     ServiceUnavailableError,
 )
+from learn_to_draw_api.services.advisor_svg import (
+    render_advisor_svg_png,
+    validate_and_normalize_advisor_svg,
+)
 
 
 OPENAI_REQUEST_TIMEOUT_SECONDS = 180
@@ -29,10 +33,36 @@ class DrawingAdviceDraft:
 
 
 @dataclass(frozen=True)
+class CreativeCriterionAssessmentDraft:
+    rank: int
+    criterion: str
+    outcome: Literal["meets", "partially_meets", "misses"]
+    assessment: str
+
+
+@dataclass(frozen=True)
+class CandidateQualityReviewDraft:
+    summary: str
+    decision: Literal["accept", "revise"]
+    revision_applied: bool
+    criterion_assessments: list[CreativeCriterionAssessmentDraft]
+
+
+@dataclass(frozen=True)
+class _CandidateReviewResponse:
+    summary: str
+    decision: Literal["accept", "revise"]
+    criterion_assessments: list[CreativeCriterionAssessmentDraft]
+    svg_text: Optional[str]
+
+
+@dataclass(frozen=True)
 class InitialDrawingPlanDraft:
     summary: str
     paper_strategy: str
     completion_intent: str
+    creative_criteria: list[str]
+    quality_review: CandidateQualityReviewDraft
     svg_text: str
 
 
@@ -43,6 +73,9 @@ class DrawingAssessmentDraft:
     reason: str
     svg_text: Optional[str] = None
     requested_human_action: Optional[str] = None
+    criterion_assessments: list[CreativeCriterionAssessmentDraft] = field(
+        default_factory=list
+    )
 
 
 class DrawingAdvisor(ABC):
@@ -68,6 +101,7 @@ class DrawingAdvisor(ABC):
         *,
         intent: str,
         plan_summary: str,
+        creative_criteria: list[str],
         observed_image: bytes,
         observed_media_type: str,
         iteration_number: int,
@@ -233,6 +267,11 @@ class MockDrawingAdvisor(DrawingAdvisor):
         drawable_width_mm: float,
         drawable_height_mm: float,
     ) -> InitialDrawingPlanDraft:
+        creative_criteria = [
+            f'Express the distinctive character of “{intent}”.',
+            "Use intentional, lively pen marks rather than generic diagram geometry.",
+            "Keep a clear composition with enough open paper for later passes.",
+        ]
         margin = round(min(drawable_width_mm, drawable_height_mm) * 0.18, 3)
         center_x = round(drawable_width_mm / 2, 3)
         center_y = round(drawable_height_mm / 2, 3)
@@ -250,6 +289,21 @@ class MockDrawingAdvisor(DrawingAdvisor):
             summary=f'Build “{intent}” from a simple focal gesture, then respond to the drawing.',
             paper_strategy="Keep the sheet in place and add restrained layers.",
             completion_intent="Stop when the subject reads clearly and the page still has breathing room.",
+            creative_criteria=creative_criteria,
+            quality_review=CandidateQualityReviewDraft(
+                summary="The deterministic mock candidate meets its creative test criteria.",
+                decision="accept",
+                revision_applied=False,
+                criterion_assessments=[
+                    CreativeCriterionAssessmentDraft(
+                        rank=index,
+                        criterion=criterion,
+                        outcome="meets",
+                        assessment="The mock candidate intentionally satisfies this criterion.",
+                    )
+                    for index, criterion in enumerate(creative_criteria, start=1)
+                ],
+            ),
             svg_text=svg_text,
         )
 
@@ -261,13 +315,29 @@ class MockDrawingAdvisor(DrawingAdvisor):
         drawable_width_mm: float,
         drawable_height_mm: float,
         guidance: list[str],
+        creative_criteria: list[str],
         **_kwargs,
     ) -> DrawingAssessmentDraft:
+        criteria = creative_criteria or [f'Fulfill the drawing intent: “{intent}”.']
+        criterion_assessments = [
+            CreativeCriterionAssessmentDraft(
+                rank=index,
+                criterion=criterion,
+                outcome="meets" if iteration_number >= 2 else "partially_meets",
+                assessment=(
+                    "The mock observation satisfies this criterion."
+                    if iteration_number >= 2
+                    else "The mock observation can develop this criterion with one more pass."
+                ),
+            )
+            for index, criterion in enumerate(criteria, start=1)
+        ]
         if iteration_number >= 2:
             return DrawingAssessmentDraft(
                 assessment=f'The mock drawing for “{intent}” has a clear focal structure.',
                 decision="complete",
                 reason="The deterministic mock completes after two observed passes.",
+                criterion_assessments=criterion_assessments,
             )
         advice = self.propose_next_layer(
             intent=intent,
@@ -281,6 +351,7 @@ class MockDrawingAdvisor(DrawingAdvisor):
             decision="continue",
             reason="One restrained additive pass will develop the composition.",
             svg_text=advice.svg_text,
+            criterion_assessments=criterion_assessments,
         )
 
 
@@ -431,13 +502,20 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
             f"Drawable SVG canvas: {drawable_width_mm} mm wide by "
             f"{drawable_height_mm} mm high.\n"
             f"Requested revisions:\n{revisions}\n\n"
-            "Plan a physical pen drawing and provide only its first plotted layer. Describe a "
-            "practical paper strategy and a subjective completion intent. The first layer must "
-            "be useful on its own and leave room for later observed adjustments. The SVG root "
-            "width and height must exactly match the drawable canvas in mm, its viewBox must "
-            "start at 0 0 with those dimensions, and every mark must stay inside it. Use only "
-            "svg, g, path, line, polyline, polygon, circle, ellipse, and rect elements, direct "
-            "coordinates, fill=none, and black strokes. Do not include transforms or text."
+            "Plan a physical pen drawing and provide only its first plotted layer. First return "
+            "three to five ordered creative criteria. Rank the qualities that make this request "
+            "distinctive first: medium, technique, mood, scientific or expressive character, "
+            "and composition should outrank generic subject recognition unless the person says "
+            "otherwise. Do not list SVG safety or simple recognizability as a creative success "
+            "criterion. Describe a practical paper strategy and a subjective completion intent. "
+            "Every mark in the SVG will become permanent ink. Do not include disposable axes, "
+            "baselines, boxes, or construction guides unless they are visibly part of the "
+            "requested finished style. The first layer must strongly express the highest-ranked "
+            "criteria, be useful on its own, and leave room for later observed adjustments. The "
+            "SVG root width and height must exactly match the drawable canvas in mm, its viewBox "
+            "must start at 0 0 with those dimensions, and every mark must stay inside it. Use "
+            "only svg, g, path, line, polyline, polygon, circle, ellipse, and rect elements, "
+            "direct coordinates, fill=none, and black strokes. Do not include transforms or text."
         )
         parsed = self._request_structured(
             prompt=prompt,
@@ -448,25 +526,157 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     "summary": {"type": "string"},
                     "paper_strategy": {"type": "string"},
                     "completion_intent": {"type": "string"},
+                    "creative_criteria": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 3,
+                        "maxItems": 5,
+                    },
                     "svg": {"type": "string"},
                 },
-                "required": ["summary", "paper_strategy", "completion_intent", "svg"],
+                "required": [
+                    "summary",
+                    "paper_strategy",
+                    "completion_intent",
+                    "creative_criteria",
+                    "svg",
+                ],
                 "additionalProperties": False,
             },
         )
-        values = [
-            parsed.get("summary"),
-            parsed.get("paper_strategy"),
-            parsed.get("completion_intent"),
-            parsed.get("svg"),
-        ]
-        if not all(isinstance(value, str) and value.strip() for value in values):
+        summary = parsed.get("summary")
+        paper_strategy = parsed.get("paper_strategy")
+        completion_intent = parsed.get("completion_intent")
+        candidate_svg = parsed.get("svg")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in [summary, paper_strategy, completion_intent, candidate_svg]
+        ):
             raise ServiceUnavailableError("Drawing advisor returned an incomplete initial plan.")
+        creative_criteria = _parse_creative_criteria(parsed.get("creative_criteria"))
+        safe_candidate = validate_and_normalize_advisor_svg(
+            candidate_svg,
+            drawable_width_mm=drawable_width_mm,
+            drawable_height_mm=drawable_height_mm,
+        )
+        candidate_png = render_advisor_svg_png(
+            safe_candidate,
+            drawable_width_mm=drawable_width_mm,
+            drawable_height_mm=drawable_height_mm,
+        )
+        review = self._review_initial_candidate(
+            intent=intent,
+            plan_summary=summary.strip(),
+            creative_criteria=creative_criteria,
+            candidate_png=candidate_png,
+            drawable_width_mm=drawable_width_mm,
+            drawable_height_mm=drawable_height_mm,
+        )
+        final_svg = safe_candidate
+        if review.decision == "revise":
+            if not review.svg_text:
+                raise ServiceUnavailableError(
+                    "Creative review requested a revision without a replacement SVG."
+                )
+            final_svg = validate_and_normalize_advisor_svg(
+                review.svg_text,
+                drawable_width_mm=drawable_width_mm,
+                drawable_height_mm=drawable_height_mm,
+            )
         return InitialDrawingPlanDraft(
-            summary=values[0].strip(),
-            paper_strategy=values[1].strip(),
-            completion_intent=values[2].strip(),
-            svg_text=values[3].strip(),
+            summary=summary.strip(),
+            paper_strategy=paper_strategy.strip(),
+            completion_intent=completion_intent.strip(),
+            creative_criteria=creative_criteria,
+            quality_review=CandidateQualityReviewDraft(
+                summary=review.summary,
+                decision=review.decision,
+                revision_applied=review.decision == "revise",
+                criterion_assessments=review.criterion_assessments,
+            ),
+            svg_text=final_svg,
+        )
+
+    def _review_initial_candidate(
+        self,
+        *,
+        intent: str,
+        plan_summary: str,
+        creative_criteria: list[str],
+        candidate_png: bytes,
+        drawable_width_mm: float,
+        drawable_height_mm: float,
+    ) -> _CandidateReviewResponse:
+        criteria_text = "\n".join(
+            f"{index}. {criterion}"
+            for index, criterion in enumerate(creative_criteria, start=1)
+        )
+        prompt = (
+            f"Drawing intent: {intent}\nPlan: {plan_summary}\n"
+            f"Drawable SVG canvas: {drawable_width_mm} mm wide by "
+            f"{drawable_height_mm} mm high.\n"
+            f"Ranked creative criteria:\n{criteria_text}\n\n"
+            "The image is an exact black-on-white raster of the normalized first-pass SVG that "
+            "would be plotted. Review the visible candidate, not the plan's claims. Return exactly "
+            "one finding for each criterion using its rank. Treat the criteria in order: a merely "
+            "recognizable subject does not compensate for missing the requested medium, technique, "
+            "mood, scientific character, or other higher-ranked quality. Remember that every line "
+            "is permanent ink and that later passes can add but cannot erase. Accept only if this "
+            "is a sound irreversible foundation. Otherwise choose revise and return one complete "
+            "replacement first-pass SVG, not an additive patch. The replacement must address the "
+            "findings and self-check against every criterion before returning. Its root dimensions "
+            "and viewBox must match the canvas exactly; use only svg, g, path, line, polyline, "
+            "polygon, circle, ellipse, and rect with direct coordinates, fill=none, black strokes, "
+            "no transforms, and no text. For accept, return null for svg."
+        )
+        parsed = self._request_structured(
+            prompt=prompt,
+            schema_name="initial_candidate_review",
+            schema={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "decision": {"type": "string", "enum": ["accept", "revise"]},
+                    "criterion_assessments": {
+                        "type": "array",
+                        "items": _criterion_assessment_schema(),
+                        "minItems": 3,
+                        "maxItems": 5,
+                    },
+                    "svg": {"type": ["string", "null"]},
+                },
+                "required": ["summary", "decision", "criterion_assessments", "svg"],
+                "additionalProperties": False,
+            },
+            image=(candidate_png, "image/png"),
+        )
+        summary = parsed.get("summary")
+        decision = parsed.get("decision")
+        svg_text = parsed.get("svg")
+        if (
+            not isinstance(summary, str)
+            or not summary.strip()
+            or decision not in {"accept", "revise"}
+        ):
+            raise ServiceUnavailableError("Drawing advisor returned an incomplete creative review.")
+        if decision == "accept" and svg_text is not None:
+            raise ServiceUnavailableError(
+                "An accepted creative review must not include a replacement SVG."
+            )
+        if decision == "revise" and not (
+            isinstance(svg_text, str) and svg_text.strip()
+        ):
+            raise ServiceUnavailableError(
+                "Creative review requested a revision without a replacement SVG."
+            )
+        return _CandidateReviewResponse(
+            summary=summary.strip(),
+            decision=decision,
+            criterion_assessments=_parse_criterion_assessments(
+                parsed.get("criterion_assessments"),
+                creative_criteria,
+            ),
+            svg_text=svg_text.strip() if isinstance(svg_text, str) else None,
         )
 
     def assess_iteration(
@@ -474,6 +684,7 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
         *,
         intent: str,
         plan_summary: str,
+        creative_criteria: list[str],
         observed_image: bytes,
         observed_media_type: str,
         iteration_number: int,
@@ -484,17 +695,28 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
     ) -> DrawingAssessmentDraft:
         history = "\n".join(f"- {item}" for item in prior_interpretations[-8:]) or "- None"
         queued = "\n".join(f"- {item}" for item in guidance) or "- None"
+        criteria = creative_criteria or [f"Fulfill the drawing intent: {intent}"]
+        criteria_text = "\n".join(
+            f"{index}. {criterion}" for index, criterion in enumerate(criteria, start=1)
+        )
         prompt = (
             f"Drawing intent: {intent}\nPlan: {plan_summary}\n"
             f"Observed pass: {iteration_number}\n"
             f"Drawable SVG canvas: {drawable_width_mm} mm wide by "
             f"{drawable_height_mm} mm high.\n"
+            f"Ranked creative criteria:\n{criteria_text}\n"
             f"Earlier assessments:\n{history}\nQueued guidance:\n{queued}\n\n"
-            "Assess the registered photograph. Decide continue, complete, or pause. Continue "
-            "only when another additive black-line layer materially improves the work. Complete "
-            "when the intent reads and another pass risks overworking it. Pause when a person "
-            "must change paper or correct a physical condition. For continue, return a safe "
-            "incremental SVG on the exact canvas. Otherwise return null for svg."
+            "Assess the registered photograph against every criterion in rank order and return "
+            "exactly one finding for each rank. Judge the visible drawing rather than reinforcing "
+            "earlier assessments. A recognizable subject does not compensate for missing a "
+            "higher-ranked stylistic, technical, scientific, or expressive objective. Decide "
+            "continue, complete, or pause. Continue only when a specific additive black-line layer "
+            "can materially close a named criterion gap. Complete when the highest-ranked criteria "
+            "are satisfied and another pass risks overworking the page. If the foundation is wrong "
+            "and cannot be repaired additively, pause and request a new-sheet or replanning action; "
+            "do not add detail that merely reinforces the wrong direction. Also pause when a person "
+            "must correct a physical condition. For continue, return a safe incremental SVG on the "
+            "exact canvas. Otherwise return null for svg."
         )
         parsed = self._request_structured(
             prompt=prompt,
@@ -505,6 +727,12 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     "assessment": {"type": "string"},
                     "decision": {"type": "string", "enum": ["continue", "complete", "pause"]},
                     "reason": {"type": "string"},
+                    "criterion_assessments": {
+                        "type": "array",
+                        "items": _criterion_assessment_schema(),
+                        "minItems": 1,
+                        "maxItems": 5,
+                    },
                     "svg": {"type": ["string", "null"]},
                     "requested_human_action": {"type": ["string", "null"]},
                 },
@@ -512,6 +740,7 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
                     "assessment",
                     "decision",
                     "reason",
+                    "criterion_assessments",
                     "svg",
                     "requested_human_action",
                 ],
@@ -538,6 +767,10 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
             reason=reason.strip(),
             svg_text=svg_text.strip() if isinstance(svg_text, str) else None,
             requested_human_action=action.strip() if isinstance(action, str) else None,
+            criterion_assessments=_parse_criterion_assessments(
+                parsed.get("criterion_assessments"),
+                criteria,
+            ),
         )
 
     def _request_structured(
@@ -605,6 +838,84 @@ class OpenAIDrawingAdvisor(DrawingAdvisor):
             f"{OPENAI_REQUEST_TIMEOUT_SECONDS} seconds. Retry the session, or choose a "
             "faster model in Controls."
         )
+
+
+def _criterion_assessment_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "rank": {"type": "integer"},
+            "outcome": {
+                "type": "string",
+                "enum": ["meets", "partially_meets", "misses"],
+            },
+            "assessment": {"type": "string"},
+        },
+        "required": ["rank", "outcome", "assessment"],
+        "additionalProperties": False,
+    }
+
+
+def _parse_creative_criteria(value) -> list[str]:
+    if not isinstance(value, list) or not 3 <= len(value) <= 5:
+        raise ServiceUnavailableError(
+            "Drawing advisor must return three to five ranked creative criteria."
+        )
+    criteria = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ServiceUnavailableError(
+                "Drawing advisor returned an invalid creative criterion."
+            )
+        criteria.append(item.strip())
+    if len({criterion.casefold() for criterion in criteria}) != len(criteria):
+        raise ServiceUnavailableError(
+            "Drawing advisor returned duplicate creative criteria."
+        )
+    return criteria
+
+
+def _parse_criterion_assessments(
+    value,
+    criteria: list[str],
+) -> list[CreativeCriterionAssessmentDraft]:
+    if not isinstance(value, list) or len(value) != len(criteria):
+        raise ServiceUnavailableError(
+            "Drawing advisor must assess every ranked creative criterion exactly once."
+        )
+    by_rank = {}
+    for item in value:
+        if not isinstance(item, dict):
+            raise ServiceUnavailableError(
+                "Drawing advisor returned an invalid creative criterion assessment."
+            )
+        rank = item.get("rank")
+        outcome = item.get("outcome")
+        assessment = item.get("assessment")
+        if (
+            not isinstance(rank, int)
+            or isinstance(rank, bool)
+            or rank < 1
+            or rank > len(criteria)
+            or rank in by_rank
+            or outcome not in {"meets", "partially_meets", "misses"}
+            or not isinstance(assessment, str)
+            or not assessment.strip()
+        ):
+            raise ServiceUnavailableError(
+                "Drawing advisor returned an invalid creative criterion assessment."
+            )
+        by_rank[rank] = CreativeCriterionAssessmentDraft(
+            rank=rank,
+            criterion=criteria[rank - 1],
+            outcome=outcome,
+            assessment=assessment.strip(),
+        )
+    if set(by_rank) != set(range(1, len(criteria) + 1)):
+        raise ServiceUnavailableError(
+            "Drawing advisor must assess every ranked creative criterion exactly once."
+        )
+    return [by_rank[rank] for rank in range(1, len(criteria) + 1)]
 
 
 def _extract_output_text(payload: dict) -> str:

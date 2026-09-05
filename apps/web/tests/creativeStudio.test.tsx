@@ -77,6 +77,11 @@ function buildSession(
             summary: "Build an airy cluster from varied stems and a loose center.",
             paper_strategy: "Keep the composition centered with generous breathing room.",
             completion_intent: "Stop when the field feels lively without filling every gap.",
+            creative_criteria: [
+              "Favor irregular, whimsical flower gestures over repeated symbols.",
+              "Keep the cluster airy and sketchbook-like.",
+              "Make the field of flowers readable.",
+            ],
           },
     current_proposal:
       status === "planning"
@@ -86,6 +91,31 @@ function buildSession(
             created_at: now,
             advisor_driver: "mock",
             advisor_model: "mock-advisor-v1",
+            quality_review: {
+              summary: "The generic first candidate was revised to make the flowers less regular.",
+              decision: "revise",
+              revision_applied: true,
+              criterion_assessments: [
+                {
+                  rank: 1,
+                  criterion: "Favor irregular, whimsical flower gestures over repeated symbols.",
+                  outcome: "partially_meets",
+                  assessment: "The original candidate repeated its flower shapes too evenly.",
+                },
+                {
+                  rank: 2,
+                  criterion: "Keep the cluster airy and sketchbook-like.",
+                  outcome: "meets",
+                  assessment: "The loose spacing leaves breathing room.",
+                },
+                {
+                  rank: 3,
+                  criterion: "Make the field of flowers readable.",
+                  outcome: "meets",
+                  assessment: "The subject reads clearly.",
+                },
+              ],
+            },
           },
     current_run_id: hasRun ? "run-1" : null,
     assessing_run_id: null,
@@ -385,7 +415,7 @@ it("starts with creative intent and creates a prompt-only planning session", asy
   await waitFor(() => expect(createButton).toBeEnabled());
   fireEvent.click(createButton);
 
-  expect(await screen.findByRole("heading", { name: /finding the first useful marks/i })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: /designing and reviewing the first pass/i })).toBeInTheDocument();
   const createRequest = requests.find(
     (request) => request.url === "/api/drawing-sessions" && request.method === "POST",
   );
@@ -418,19 +448,56 @@ it("shows the plan, explains open-ended approval, and lets a message replace the
   expect(screen.getByRole("img", { name: /proposed first drawing pass/i })).toBeInTheDocument();
   expect(screen.getByText(/authorizes an attended sequence/i)).toBeInTheDocument();
   expect(screen.getByText(/more than one permanent layer/i)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /what matters most/i })).toBeInTheDocument();
+  expect(
+    screen.getAllByText(/favor irregular, whimsical flower gestures/i),
+  ).toHaveLength(2);
+  expect(screen.getByText(/revised once before preview/i)).toBeInTheDocument();
+  expect(screen.getByText(/generic first candidate was revised/i)).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText(/revise the plan/i), {
     target: { value: "Leave more room on the right" },
   });
   fireEvent.click(screen.getByRole("button", { name: /revise plan/i }));
 
-  expect(await screen.findByRole("heading", { name: /finding the first useful marks/i })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: /designing and reviewing the first pass/i })).toBeInTheDocument();
   expect(screen.queryByRole("img", { name: /proposed first drawing pass/i })).not.toBeInTheDocument();
   expect(
     harness.requests.some(
       (request) => request.url.endsWith("/messages") && request.body?.includes("room on the right"),
     ),
   ).toBe(true);
+});
+
+it("shows criterion findings for later agent decisions", async () => {
+  window.history.replaceState({}, "", "/sessions/session-1");
+  const session = buildSession("running");
+  session.events.push({
+    id: "event-review",
+    type: "agent_decision",
+    created_at: new Date().toISOString(),
+    message: "Another pass will address the missing sketchbook character.",
+    asset_id: null,
+    run_id: "run-1",
+    details: {
+      assessment: "The subject reads, but the linework is still too regular.",
+      criterion_assessments: [
+        {
+          rank: 1,
+          criterion: "Favor irregular, whimsical flower gestures over repeated symbols.",
+          outcome: "misses",
+          assessment: "The observed marks repeat at nearly identical intervals.",
+        },
+      ],
+    },
+  });
+  installStudioMock(session, buildRun("completed", buildCapture()));
+
+  render(<App />);
+
+  const review = await screen.findByText(/review against creative criteria/i);
+  fireEvent.click(review);
+  expect(screen.getByText(/observed marks repeat at nearly identical intervals/i)).toBeInTheDocument();
 });
 
 it("requires a paper and pen preflight before first motion", async () => {
